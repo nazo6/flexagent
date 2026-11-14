@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { DOCK_LAUNCHERS, type DockToolId } from "#lib/dock/registry.ts";
+  import { DOCK_LAUNCHERS, type DockLauncherId } from "#lib/dock/registry.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { cn } from "#lib/utils.ts";
   import PanelRightCloseIcon from "@lucide/svelte/icons/panel-right-close";
 
   interface Props {
-    active: DockToolId | null;
-    onselect: (id: DockToolId) => void;
+    active: DockLauncherId | null;
+    onselect: (id: DockLauncherId) => void;
     oncollapse: () => void;
   }
 

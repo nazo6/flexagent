@@ -208,4 +208,80 @@ describe("WorkspaceDockStore", () => {
     store.setContext(context("s2"));
     expect(store.tabs).toHaveLength(1);
   });
+
+  it("opens file tabs once and switches their mode", () => {
+    const { store } = newStore();
+    store.setContext(context("s1"));
+
+    store.openFile("/repo/src/main.ts", "view");
+    expect(store.activeTool).toBe("file");
+    expect(store.activeTab?.resource).toBe("/repo/src/main.ts");
+    expect(store.activeTab?.mode).toBe("view");
+    expect(store.activeTab?.scope).toBe("uncommitted");
+
+    store.openFile("/repo/src/main.ts", "diff", "branch_base");
+    expect(store.tabs).toHaveLength(1);
+    expect(store.activeTab?.mode).toBe("diff");
+    expect(store.activeTab?.scope).toBe("branch_base");
+
+    store.openFile("/repo/src/other.ts", "view");
+    expect(store.tabs).toHaveLength(2);
+    expect(store.activeTab?.resource).toBe("/repo/src/other.ts");
+
+    const first = store.tabs[0];
+    expect(first).toBeDefined();
+    store.setTabMode(first?.id ?? "", "diff");
+    expect(store.tabs[0]?.mode).toBe("diff");
+  });
+
+  it("persists file tabs with their mode", () => {
+    const { store, storage } = newStore();
+    store.setContext(context("s1"));
+    store.openFile("/repo/src/main.ts", "diff", "branch_base");
+
+    const restored = new WorkspaceDockStore(storage);
+    restored.setContext(context("s2"));
+
+    expect(restored.tabs).toHaveLength(1);
+    expect(restored.tabs[0]?.tool).toBe("file");
+    expect(restored.tabs[0]?.resource).toBe("/repo/src/main.ts");
+    expect(restored.tabs[0]?.mode).toBe("diff");
+    expect(restored.tabs[0]?.scope).toBe("branch_base");
+  });
+
+  it("drops file tabs without a resource when restoring", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        width: 42,
+        workspaces: {
+          [workspaceDockKey("node-1", "/repo")]: {
+            tabs: [{ tool: "file", resource: null, mode: "view" }],
+            activeIndex: 0,
+            collapsed: false,
+            updatedAt: 1,
+          },
+        },
+      }),
+    );
+
+    const store = new WorkspaceDockStore(storage);
+    store.setContext(context("s1"));
+    expect(store.tabs).toHaveLength(0);
+  });
+
+  it("caps file tabs while keeping singleton tools", () => {
+    const { store } = newStore();
+    store.setContext(context("s1"));
+    store.openTool("terminal");
+    for (let index = 0; index < 10; index += 1) {
+      store.openFile(`/repo/src/file-${index}.ts`, "view");
+    }
+
+    expect(store.tabs.length).toBeLessThanOrEqual(8);
+    expect(store.tabs.some((tab) => tab.tool === "terminal")).toBe(true);
+    expect(store.tabs.some((tab) => tab.resource === "/repo/src/file-9.ts")).toBe(true);
+  });
 });

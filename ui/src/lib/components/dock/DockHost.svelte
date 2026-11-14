@@ -1,6 +1,8 @@
 <script lang="ts">
   import ChangesTool from "#lib/components/dock/ChangesTool.svelte";
   import DockTabBar from "#lib/components/dock/DockTabBar.svelte";
+  import FileTool from "#lib/components/dock/FileTool.svelte";
+  import FilesTool from "#lib/components/dock/FilesTool.svelte";
   import TerminalTool from "#lib/components/dock/TerminalTool.svelte";
   import { dockTool } from "#lib/dock/registry.ts";
   import { dock, type DockContext } from "#lib/stores/dock.svelte.ts";
@@ -54,6 +56,10 @@
             <TerminalTool {ctx} active={isActive} />
           {:else if tab.tool === "changes"}
             <ChangesTool {ctx} {items} />
+          {:else if tab.tool === "files"}
+            <FilesTool {ctx} />
+          {:else if tab.tool === "file"}
+            <FileTool {ctx} {tab} />
           {/if}
         {/if}
       </div>

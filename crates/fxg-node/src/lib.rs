@@ -34,6 +34,7 @@ pub mod sync;
 pub mod worktree;
 
 pub mod fs_browse;
+pub mod workspace;
 
 #[cfg(test)]
 mod testutil;

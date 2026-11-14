@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { dockTool } from "#lib/dock/registry.ts";
+  import { dockTabLabel, dockTool } from "#lib/dock/registry.ts";
   import type { DockTab } from "#lib/stores/dock.svelte.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { cn } from "#lib/utils.ts";
@@ -72,11 +72,12 @@
           aria-controls={`dock-panel-${index}`}
           tabindex={isActive ? 0 : -1}
           class="flex h-full items-center gap-1.5 pr-1 pl-2 text-[12px] font-medium outline-none"
+          title={tab.resource ?? definition.label()}
           onclick={() => onactivate(tab.id)}
           onkeydown={(event) => handleKeydown(event, index)}
         >
           <Icon class="size-3.5 shrink-0" />
-          <span class="max-w-40 truncate">{definition.label()}</span>
+          <span class="max-w-40 truncate">{dockTabLabel(tab)}</span>
         </button>
         <button
           type="button"

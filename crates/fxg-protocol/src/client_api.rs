@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::common::{
-    AuditLogEntry, ClientSource, CommandResult, ConfigOptionInfo, ElicitationAction,
+    AuditLogEntry, ClientSource, CommandResult, ConfigOptionInfo, DiffScope, ElicitationAction,
     ElicitationContent, ElicitationRequestEntry, ErrorInfo, IncidentEntry, ModeInfo, NodeSummary,
     PermissionRequestEntry, ProjectSummary, PromptInput, ResolvedBy, SearchHit,
     SessionControlAction, SessionSummary, StreamDeltaPayload, SystemStatus,
@@ -1294,6 +1294,189 @@ pub struct FsBrowseResponse {
     pub parent_path: Option<String>,
     /// Child entries
     pub entries: Vec<FsEntry>,
+}
+
+/// Query of `GET /api/v1/nodes/:id/workspace/fs/list` and
+/// `GET /api/v1/nodes/:id/workspace/fs/file`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct WorkspaceFsQuery {
+    /// Directory or file path inside a registered workspace
+    pub path: String,
+}
+
+/// Kind of a file system entry inside a workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+#[specta(collect)]
+pub enum WorkspaceEntryKind {
+    /// Regular file
+    File,
+    /// Directory
+    Directory,
+    /// Symbolic link (the link itself, not the target)
+    Symlink,
+    /// Other entry (socket, FIFO, device)
+    Other,
+}
+
+/// One entry of a workspace directory listing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct WorkspaceFsEntry {
+    /// Entry name (basename)
+    pub name: String,
+    /// Absolute path of the entry
+    pub path: String,
+    /// Entry kind
+    pub kind: WorkspaceEntryKind,
+    /// Whether the entry is hidden (dot-prefixed, or the Windows Hidden attribute)
+    pub is_hidden: bool,
+    /// Size in bytes (0 for directories when unavailable)
+    pub size: u64,
+    /// Last modification time (Unix epoch ms)
+    pub modified_at: Option<i64>,
+}
+
+/// `GET /api/v1/nodes/:id/workspace/fs/list` response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct WorkspaceFsListResponse {
+    /// Access root of the workspace (the Git toplevel when the workspace is in a repository)
+    pub root_path: String,
+    /// Absolute path of the listed directory
+    pub path: String,
+    /// Parent directory inside the access root (`None` at the root)
+    pub parent_path: Option<String>,
+    /// Child entries, directories first
+    pub entries: Vec<WorkspaceFsEntry>,
+    /// Whether the listing stopped at the entry limit
+    pub truncated: bool,
+}
+
+/// Content of a workspace file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[specta(collect)]
+pub enum WorkspaceFileContent {
+    /// UTF-8 text
+    Text {
+        /// File text
+        text: String,
+        /// Whether the text was truncated at the read limit
+        truncated: bool,
+        /// SHA-256 hex digest of the file bytes (used by optimistic writes)
+        content_hash: String,
+    },
+    /// Binary file (NUL bytes or invalid UTF-8)
+    Binary,
+    /// File larger than the read limit
+    TooLarge {
+        /// Size in bytes
+        size: u64,
+    },
+}
+
+/// `GET /api/v1/nodes/:id/workspace/fs/file` response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct WorkspaceFileView {
+    /// Absolute file path
+    pub path: String,
+    /// File size in bytes
+    pub size: u64,
+    /// Last modification time (Unix epoch ms)
+    pub modified_at: Option<i64>,
+    /// Text, binary or too large
+    pub content: WorkspaceFileContent,
+}
+
+/// Status of a changed file in a workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[specta(collect)]
+pub enum WorkspaceGitFileStatus {
+    /// Modified
+    Modified,
+    /// Added to the index / worktree
+    Added,
+    /// Deleted
+    Deleted,
+    /// Renamed
+    Renamed,
+    /// Copied
+    Copied,
+    /// Type changed (file / symlink)
+    TypeChanged,
+    /// Untracked
+    Untracked,
+    /// Unmerged / conflicted
+    Conflicted,
+    /// Unrecognized porcelain status (raw `XY` code kept as-is)
+    Unknown {
+        /// Raw porcelain `XY` code
+        raw: String,
+    },
+}
+
+/// One changed file of a workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct WorkspaceGitEntry {
+    /// Path relative to the access root
+    pub path: String,
+    /// Previous path for renames / copies (relative)
+    pub old_path: Option<String>,
+    /// Absolute path of the current file
+    pub absolute_path: String,
+    /// Display status
+    pub status: WorkspaceGitFileStatus,
+    /// Whether the index has changes for this path
+    pub staged: bool,
+    /// Whether the worktree has changes for this path
+    pub unstaged: bool,
+}
+
+/// Query of `GET /api/v1/nodes/:id/workspace/git/status`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct WorkspaceGitStatusQuery {
+    /// Directory inside a registered workspace
+    pub path: String,
+}
+
+/// `GET /api/v1/nodes/:id/workspace/git/status` response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct WorkspaceGitStatusResponse {
+    /// Access root of the workspace
+    pub root_path: String,
+    /// Whether the workspace is inside a Git work tree
+    pub is_repository: bool,
+    /// Current branch (`None` when detached or not a repository)
+    pub branch: Option<String>,
+    /// Commits ahead of the upstream
+    pub ahead: u32,
+    /// Commits behind the upstream
+    pub behind: u32,
+    /// Changed entries, capped at the status limit
+    pub entries: Vec<WorkspaceGitEntry>,
+    /// Whether the entry list stopped at the limit
+    pub truncated: bool,
+}
+
+/// Query of `GET /api/v1/nodes/:id/workspace/git/diff`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct WorkspaceGitDiffQuery {
+    /// Directory inside a registered workspace
+    pub path: String,
+    /// Diff scope (defaults to uncommitted)
+    pub scope: Option<DiffScope>,
+    /// Base branch for `BranchBase`
+    pub base: Option<String>,
+    /// Absolute file path inside the workspace (omit for the whole workspace)
+    pub file: Option<String>,
 }
 
 #[cfg(test)]

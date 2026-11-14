@@ -1,6 +1,9 @@
 <script lang="ts">
   import DiffText from "#lib/components/diff/DiffText.svelte";
+  import { joinPath } from "#lib/dock/paths.ts";
   import { m } from "#lib/paraglide/messages.js";
+  import { dock } from "#lib/stores/dock.svelte.ts";
+  import { sync } from "#lib/stores/app.svelte.ts";
   import type { TimelineItem } from "#lib/sync/reducer.ts";
   import { summarizeToolOutput } from "#lib/tool-output.ts";
   import { cn } from "#lib/utils.ts";
@@ -23,6 +26,12 @@
   let { tools }: Props = $props();
 
   let expandedDetails = $state<Record<string, boolean>>({});
+  const canOpenInDock = $derived(sync.connection.role === "local_node" && dock.context !== null);
+
+  function openDiffInDock(tool: ToolItem): void {
+    if (tool.diff === null || dock.context === null) return;
+    dock.openFile(joinPath(dock.context.localPath, tool.diff.path), "diff");
+  }
 
   function toggleDetail(toolCallId: string, event: MouseEvent) {
     event.stopPropagation();
@@ -256,7 +265,18 @@
 
             {#if tool.diff !== null}
               <div class="flex flex-col gap-1">
-                <span class="text-muted-foreground text-[11px]">Diff:</span>
+                <div class="flex items-center gap-2">
+                  <span class="text-muted-foreground text-[11px]">Diff:</span>
+                  {#if canOpenInDock}
+                    <button
+                      type="button"
+                      class="text-signal text-[11px] font-medium hover:underline"
+                      onclick={() => openDiffInDock(tool)}
+                    >
+                      {m.chat_tool_open_in_dock()}
+                    </button>
+                  {/if}
+                </div>
                 <DiffText diff={tool.diff.unified_diff} maxHeight="12rem" />
               </div>
             {/if}

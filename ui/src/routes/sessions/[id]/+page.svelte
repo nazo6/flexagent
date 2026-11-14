@@ -16,7 +16,7 @@
   import { commandErrorMessage } from "#lib/api/client.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { forkScopeOf } from "#lib/fork-scope.ts";
-  import type { DockToolId } from "#lib/dock/registry.ts";
+  import type { DockLauncherId } from "#lib/dock/registry.ts";
   import { dock } from "#lib/stores/dock.svelte.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import {
@@ -51,8 +51,10 @@
       : { sessionId: session.session_id, nodeId: session.node_id, localPath: session.local_path },
   );
   const isDockOpen = $derived(dock.isOpen && dockContext !== null);
-  /** Highlight a tool only while the dock is actually visible. */
-  const visibleTool = $derived(dock.isOpen ? dock.activeTool : null);
+  /** Highlight a launcher only while the dock is visible and a file tab is not active. */
+  const visibleLauncher = $derived(
+    dock.isOpen && dock.activeTool !== "file" ? dock.activeTool : null,
+  );
 
   const timeline = $derived(sync.timelineFor(sessionId));
   const currentStatus = $derived(
@@ -276,13 +278,13 @@
     showScrollBottom = false;
   }
 
-  function handleSelectTool(tool: DockToolId): void {
+  function handleSelectTool(tool: DockLauncherId): void {
     dock.openTool(tool);
     toolsSheetOpen = false;
   }
 
   /** Mobile header: open the tool, or close the dock when it is already active. */
-  function handleToggleTool(tool: DockToolId): void {
+  function handleToggleTool(tool: DockLauncherId): void {
     dock.toggleTool(tool);
   }
 
@@ -377,7 +379,7 @@
     canNewSessionHere={sessionNode !== null && !sessionNode.is_ephemeral}
     onNewSessionHere={handleNewSessionHere}
     onForceStop={() => (killDialogOpen = true)}
-    activeTool={visibleTool}
+    activeTool={visibleLauncher}
     onToggleTool={handleToggleTool}
     onDeleted={() => void goto("/")}
   />
@@ -557,7 +559,7 @@
     {#if !layoutState.rightRailCollapsed && session !== null}
       <div class="hidden h-full lg:flex">
         <DockRail
-          active={visibleTool}
+          active={visibleLauncher}
           onselect={(id) => dock.toggleTool(id)}
           oncollapse={() => layoutState.setRightRailCollapsed(true)}
         />
@@ -591,5 +593,5 @@
     {/if}
   </div>
 
-  <DockToolsSheet bind:open={toolsSheetOpen} active={visibleTool} onselect={handleSelectTool} />
+  <DockToolsSheet bind:open={toolsSheetOpen} active={visibleLauncher} onselect={handleSelectTool} />
 </div>

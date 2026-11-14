@@ -243,6 +243,19 @@ pub async fn workspace_diff(
     scope: DiffScope,
     base_branch: Option<&str>,
 ) -> Result<WorkspaceDiffResponse, NodeError> {
+    workspace_diff_file(cwd, scope, base_branch, None).await
+}
+
+/// Retrieves the Git diff of the workspace, optionally limited to one file.
+///
+/// Untracked files are returned as a synthetic new-file diff because
+/// `git diff HEAD` does not include them.
+pub async fn workspace_diff_file(
+    cwd: &Path,
+    scope: DiffScope,
+    base_branch: Option<&str>,
+    file: Option<&str>,
+) -> Result<WorkspaceDiffResponse, NodeError> {
     let head = head_commit(cwd).await?.unwrap_or_default();
     let base = match scope {
         DiffScope::Uncommitted => None,
@@ -252,20 +265,31 @@ pub async fn workspace_diff(
         }),
     };
 
-    let args: Vec<String> = match &base {
-        Some(base) => vec![
-            "diff".to_owned(),
-            "--no-color".to_owned(),
-            "--no-ext-diff".to_owned(),
-            format!("{base}...HEAD"),
-        ],
-        None => vec![
-            "diff".to_owned(),
-            "--no-color".to_owned(),
-            "--no-ext-diff".to_owned(),
-            "HEAD".to_owned(),
-        ],
-    };
+    if let Some(file) = file
+        && is_untracked(cwd, file).await?
+    {
+        return Ok(WorkspaceDiffResponse {
+            scope,
+            base_branch: base,
+            head_commit: head,
+            files: vec![untracked_file_diff(cwd, file).await?],
+        });
+    }
+
+    let mut args: Vec<String> = vec![
+        "diff".to_owned(),
+        "--no-color".to_owned(),
+        "--no-ext-diff".to_owned(),
+    ];
+    args.push(match &base {
+        Some(base) => format!("{base}...HEAD"),
+        None => "HEAD".to_owned(),
+    });
+    if let Some(file) = file {
+        args.push("--".to_owned());
+        args.push(file.to_owned());
+    }
+
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let output = capture(cwd, &arg_refs, &[]).await?;
     if !output.success {
@@ -282,6 +306,70 @@ pub async fn workspace_diff(
         head_commit: head,
         files: parse_unified_diff(&String::from_utf8_lossy(&output.stdout)),
     })
+}
+
+/// Maximum untracked file size included in a synthetic diff (2 MiB).
+const UNTRACKED_DIFF_LIMIT: u64 = 2 * 1024 * 1024;
+
+async fn is_untracked(cwd: &Path, file: &str) -> Result<bool, NodeError> {
+    let Some(status) = try_git(cwd, &["status", "--porcelain", "--", file]).await? else {
+        return Ok(false);
+    };
+    Ok(status.lines().any(|line| line.starts_with("??")))
+}
+
+async fn untracked_file_diff(cwd: &Path, file: &str) -> Result<FileDiff, NodeError> {
+    let path = cwd.join(file);
+    let metadata = tokio::fs::metadata(&path)
+        .await
+        .map_err(|err| NodeError::io(&path, err))?;
+    if metadata.len() > UNTRACKED_DIFF_LIMIT {
+        return Ok(empty_file_diff(file));
+    }
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|err| NodeError::io(&path, err))?;
+    if bytes.contains(&0) {
+        return Ok(empty_file_diff(file));
+    }
+    let Ok(text) = String::from_utf8(bytes) else {
+        return Ok(empty_file_diff(file));
+    };
+
+    let additions = u32::try_from(text.lines().count()).unwrap_or(u32::MAX);
+    let mut unified_diff = String::new();
+    unified_diff.push_str("--- /dev/null\n");
+    unified_diff.push_str(&format!("+++ b/{file}\n"));
+    if additions == 0 {
+        unified_diff.push_str("@@ -0,0 +0,0 @@\n");
+    } else {
+        unified_diff.push_str(&format!("@@ -0,0 +1,{additions} @@\n"));
+        for line in text.lines() {
+            unified_diff.push('+');
+            unified_diff.push_str(line);
+            unified_diff.push('\n');
+        }
+    }
+
+    Ok(FileDiff {
+        path: file.to_owned(),
+        old_text: Some(String::new()),
+        new_text: Some(text),
+        unified_diff,
+        additions,
+        deletions: 0,
+    })
+}
+
+fn empty_file_diff(file: &str) -> FileDiff {
+    FileDiff {
+        path: file.to_owned(),
+        old_text: None,
+        new_text: None,
+        unified_diff: String::new(),
+        additions: 0,
+        deletions: 0,
+    }
 }
 
 /// Resolves the default branch (`origin/HEAD`). Falls back to `main` if unknown.
@@ -545,5 +633,25 @@ new file mode 100644\n\
             .expect("readme diff");
         // Two lines are added: a blank line and "changed"
         assert_eq!(readme.additions, 2);
+    }
+
+    #[tokio::test]
+    async fn workspace_diff_file_returns_untracked_content() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_test_repo(dir.path()).await;
+        std::fs::write(dir.path().join("new.txt"), "one\ntwo\n").expect("write");
+
+        let diff = workspace_diff_file(dir.path(), DiffScope::Uncommitted, None, Some("new.txt"))
+            .await
+            .expect("diff");
+
+        assert_eq!(diff.files.len(), 1);
+        let file = &diff.files[0];
+        assert_eq!(file.path, "new.txt");
+        assert_eq!(file.old_text.as_deref(), Some(""));
+        assert_eq!(file.new_text.as_deref(), Some("one\ntwo\n"));
+        assert_eq!(file.additions, 2);
+        assert_eq!(file.deletions, 0);
+        assert!(file.unified_diff.contains("+++ b/new.txt"));
     }
 }

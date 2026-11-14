@@ -13,7 +13,7 @@
   import { sessionNeedsAttention } from "#lib/session-status.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { layoutState } from "#lib/stores/layout.svelte.ts";
-  import { DOCK_LAUNCHERS, type DockToolId } from "#lib/dock/registry.ts";
+  import { DOCK_LAUNCHERS, type DockLauncherId } from "#lib/dock/registry.ts";
   import { cn } from "#lib/utils.ts";
   import MenuIcon from "@lucide/svelte/icons/menu";
   import PanelLeftOpenIcon from "@lucide/svelte/icons/panel-left-open";
@@ -30,9 +30,9 @@
     canNewSessionHere: boolean;
     onNewSessionHere: () => void;
     onForceStop: () => void;
-    /** Active dock tool (null while the dock is closed). */
-    activeTool: DockToolId | null;
-    onToggleTool: (id: DockToolId) => void;
+    /** Active launcher tool (null while the dock is closed or a file tab is active). */
+    activeTool: DockLauncherId | null;
+    onToggleTool: (id: DockLauncherId) => void;
     onDeleted: () => void;
   }
 

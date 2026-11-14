@@ -1605,4 +1605,136 @@ mod tests {
         daemon.shutdown();
         daemon.wait().await;
     }
+
+    #[tokio::test]
+    async fn workspace_file_api_stays_inside_registered_workspace() {
+        use crate::NodeError;
+        use crate::workspace;
+        use fxg_protocol::client_api::{WorkspaceFileContent, WorkspaceGitFileStatus};
+        use fxg_protocol::common::DiffScope;
+
+        let (daemon, dir) = start_test_daemon().await;
+        let workdir = dir.path().join("workspace");
+        std::fs::create_dir_all(&workdir).expect("mkdir");
+        let path = fxg_pty::canonicalize(&workdir).expect("canonical workspace");
+        let path_str = path.to_string_lossy().into_owned();
+        daemon
+            .state()
+            .resolve_and_register_project(&workdir)
+            .await
+            .expect("register project");
+
+        crate::git::run_git(&path, &["init"])
+            .await
+            .expect("git init");
+        crate::git::run_git(&path, &["config", "user.email", "test@example.com"])
+            .await
+            .expect("git email");
+        crate::git::run_git(&path, &["config", "user.name", "Test"])
+            .await
+            .expect("git name");
+        std::fs::write(path.join("hello.txt"), "hello\n").expect("write hello");
+        crate::git::run_git(&path, &["add", "hello.txt"])
+            .await
+            .expect("git add");
+        crate::git::run_git(&path, &["commit", "-m", "initial"])
+            .await
+            .expect("git commit");
+        std::fs::write(path.join("hello.txt"), "hello\nworld\n").expect("modify hello");
+        std::fs::write(path.join("new.txt"), "new\n").expect("write new");
+
+        let listing = workspace::list_workspace(daemon.state(), &path_str)
+            .await
+            .expect("list");
+        assert_eq!(listing.root_path, path_str);
+        assert!(
+            listing
+                .entries
+                .iter()
+                .any(|entry| entry.name == "hello.txt")
+        );
+        assert!(listing.entries.iter().any(|entry| entry.name == "new.txt"));
+        assert!(!listing.entries.iter().any(|entry| entry.name == ".git"));
+
+        let hello = path.join("hello.txt").to_string_lossy().into_owned();
+        let view = workspace::read_workspace_file(daemon.state(), &hello)
+            .await
+            .expect("read");
+        match view.content {
+            WorkspaceFileContent::Text { text, .. } => assert_eq!(text, "hello\nworld\n"),
+            _ => panic!("expected text file"),
+        }
+
+        let status = workspace::workspace_git_status(daemon.state(), &path_str)
+            .await
+            .expect("status");
+        assert!(status.is_repository);
+        assert!(status.entries.iter().any(|entry| {
+            entry.path == "hello.txt" && entry.status == WorkspaceGitFileStatus::Modified
+        }));
+        assert!(status.entries.iter().any(|entry| {
+            entry.path == "new.txt" && entry.status == WorkspaceGitFileStatus::Untracked
+        }));
+
+        let diff = workspace::workspace_git_diff(
+            daemon.state(),
+            &path_str,
+            DiffScope::Uncommitted,
+            None,
+            Some(&hello),
+        )
+        .await
+        .expect("diff");
+        assert_eq!(diff.files.len(), 1);
+        assert_eq!(diff.files[0].path, "hello.txt");
+
+        let new_file = path.join("new.txt").to_string_lossy().into_owned();
+        let untracked = workspace::workspace_git_diff(
+            daemon.state(),
+            &path_str,
+            DiffScope::Uncommitted,
+            None,
+            Some(&new_file),
+        )
+        .await
+        .expect("untracked diff");
+        assert_eq!(untracked.files.len(), 1);
+        assert_eq!(untracked.files[0].new_text.as_deref(), Some("new\n"));
+
+        let outside = dir.path().join("outside.txt");
+        std::fs::write(&outside, "no").expect("write outside");
+        let error = workspace::list_workspace(daemon.state(), &outside.to_string_lossy())
+            .await
+            .expect_err("outside path must be rejected");
+        assert!(matches!(error, NodeError::Forbidden(_)));
+
+        let sub = path.join("sub");
+        std::fs::create_dir_all(&sub).expect("mkdir sub");
+        std::fs::write(sub.join("nested.txt"), "nested").expect("write nested");
+        let sub_listing = workspace::list_workspace(daemon.state(), &sub.to_string_lossy())
+            .await
+            .expect("subdirectory listing");
+        assert!(
+            sub_listing
+                .entries
+                .iter()
+                .any(|entry| entry.name == "nested.txt")
+        );
+        assert_eq!(sub_listing.root_path, path_str);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+
+            let link = path.join("escape.txt");
+            symlink(&outside, &link).expect("symlink");
+            let error = workspace::read_workspace_file(daemon.state(), &link.to_string_lossy())
+                .await
+                .expect_err("symlink escape must be rejected");
+            assert!(matches!(error, NodeError::Forbidden(_)));
+        }
+
+        daemon.shutdown();
+        daemon.wait().await;
+    }
 }

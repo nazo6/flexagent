@@ -329,6 +329,28 @@ Phase 1 では **ローカル接続（ループバック）からのみ** ファ
   再アクティブ時に fit / resize、ドックを閉じたときだけ detach する。
 - `docs/07` §3.2 / §4 と changelog に Phase 0 の確定仕様を反映した。
 
-Phase 1 以降（Files / git status / 単一ファイル diff / エディタ）は未着手。
+### Phase 1 (2026-11-14 実装済み)
+
+- `fxg-protocol`: workspace fs / git status / git diff の型と `NodeRpc` の
+  request / response を追加。`GET /api/v1/nodes/:id/workspace/{fs,git}/*` を
+  ハブ / ノードの共通ルーターに追加した。
+- `fxg-node`: `workspace` モジュールを追加。登録済み workspace から access root
+  （worktree toplevel）を解決し、`.git` とシンボリックリンク脱出を拒否する。
+  ディレクトリ一覧、UTF-8 テキスト（2 MiB 上限）、バイナリ / 超過の列挙、
+  `git status --porcelain=v2 -z`、単一ファイル diff、未追跡ファイルの
+  合成 diff を実装した。ハブ経由の workspace RPC は `FORBIDDEN` にする。
+- `ui`: Files ツリー、git status バッジ、変更のみ一覧、File タブ
+  （Shiki の View / 単一ファイル Diff）、Changes の Session / Worktree / Branch
+  一覧を追加した。ハブ接続時は Files を無効化し、Changes は従来のインライン
+  Diff にフォールバックする。
+- テスト: status パーサー、`.git` 拒否、ディレクトリ一覧、未追跡 diff、
+  workspace 境界（登録外パス / サブディレクトリ / シンボリックリンク脱出）を
+  Rust で検証した。
+
+**Phase 1 の既知の制約**: 編集は未対応。マークダウン / 画像のプレビューは未対応。
+`.gitignore` の完全な解釈はせず、UI が既定の重いディレクトリを隠す。ワークスペース
+監視による自動更新は未対応（手動更新 / タブ表示時 / ターン完了時）。
+
+Phase 2 以降（エディタ・保存・競合検出）は未着手。
 実装が進んだ時点で、確定した仕様を `docs/07` / `docs/03` / `docs/01` に昇格し、
 この Proposal のステータスを更新する。

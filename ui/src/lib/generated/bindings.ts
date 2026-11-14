@@ -2812,6 +2812,160 @@ export type WorkspaceDiffResponse = {
 	files: FileDiff[],
 };
 
+/**  Kind of a file system entry inside a workspace. */
+export type WorkspaceEntryKind =
+/**  Regular file */
+"file" |
+/**  Directory */
+"directory" |
+/**  Symbolic link (the link itself, not the target) */
+"symlink" |
+/**  Other entry (socket, FIFO, device) */
+"other";
+
+/**  Content of a workspace file. */
+export type WorkspaceFileContent =
+/**  UTF-8 text */
+{ kind: "text";
+/**  File text */
+text: string;
+/**  Whether the text was truncated at the read limit */
+truncated: boolean;
+/**  SHA-256 hex digest of the file bytes (used by optimistic writes) */
+content_hash: string } |
+/**  Binary file (NUL bytes or invalid UTF-8) */
+{ kind: "binary" } |
+/**  File larger than the read limit */
+{ kind: "too_large";
+/**  Size in bytes */
+size: number };
+
+/**  `GET /api/v1/nodes/:id/workspace/fs/file` response. */
+export type WorkspaceFileView = {
+	/**  Absolute file path */
+	path: string,
+	/**  File size in bytes */
+	size: number,
+	/**  Last modification time (Unix epoch ms) */
+	modified_at: number | null,
+	/**  Text, binary or too large */
+	content: WorkspaceFileContent,
+};
+
+/**  One entry of a workspace directory listing. */
+export type WorkspaceFsEntry = {
+	/**  Entry name (basename) */
+	name: string,
+	/**  Absolute path of the entry */
+	path: string,
+	/**  Entry kind */
+	kind: WorkspaceEntryKind,
+	/**  Whether the entry is hidden (dot-prefixed, or the Windows Hidden attribute) */
+	is_hidden: boolean,
+	/**  Size in bytes (0 for directories when unavailable) */
+	size: number,
+	/**  Last modification time (Unix epoch ms) */
+	modified_at: number | null,
+};
+
+/**  `GET /api/v1/nodes/:id/workspace/fs/list` response. */
+export type WorkspaceFsListResponse = {
+	/**  Access root of the workspace (the Git toplevel when the workspace is in a repository) */
+	root_path: string,
+	/**  Absolute path of the listed directory */
+	path: string,
+	/**  Parent directory inside the access root (`None` at the root) */
+	parent_path: string | null,
+	/**  Child entries, directories first */
+	entries: WorkspaceFsEntry[],
+	/**  Whether the listing stopped at the entry limit */
+	truncated: boolean,
+};
+
+/**
+ *  Query of `GET /api/v1/nodes/:id/workspace/fs/list` and
+ *  `GET /api/v1/nodes/:id/workspace/fs/file`.
+ */
+export type WorkspaceFsQuery = {
+	/**  Directory or file path inside a registered workspace */
+	path: string,
+};
+
+/**  Query of `GET /api/v1/nodes/:id/workspace/git/diff`. */
+export type WorkspaceGitDiffQuery = {
+	/**  Directory inside a registered workspace */
+	path: string,
+	/**  Diff scope (defaults to uncommitted) */
+	scope: DiffScope | null,
+	/**  Base branch for `BranchBase` */
+	base: string | null,
+	/**  Absolute file path inside the workspace (omit for the whole workspace) */
+	file: string | null,
+};
+
+/**  One changed file of a workspace. */
+export type WorkspaceGitEntry = {
+	/**  Path relative to the access root */
+	path: string,
+	/**  Previous path for renames / copies (relative) */
+	old_path: string | null,
+	/**  Absolute path of the current file */
+	absolute_path: string,
+	/**  Display status */
+	status: WorkspaceGitFileStatus,
+	/**  Whether the index has changes for this path */
+	staged: boolean,
+	/**  Whether the worktree has changes for this path */
+	unstaged: boolean,
+};
+
+/**  Status of a changed file in a workspace. */
+export type WorkspaceGitFileStatus =
+/**  Modified */
+{ kind: "modified" } |
+/**  Added to the index / worktree */
+{ kind: "added" } |
+/**  Deleted */
+{ kind: "deleted" } |
+/**  Renamed */
+{ kind: "renamed" } |
+/**  Copied */
+{ kind: "copied" } |
+/**  Type changed (file / symlink) */
+{ kind: "type_changed" } |
+/**  Untracked */
+{ kind: "untracked" } |
+/**  Unmerged / conflicted */
+{ kind: "conflicted" } |
+/**  Unrecognized porcelain status (raw `XY` code kept as-is) */
+{ kind: "unknown";
+/**  Raw porcelain `XY` code */
+raw: string };
+
+/**  Query of `GET /api/v1/nodes/:id/workspace/git/status`. */
+export type WorkspaceGitStatusQuery = {
+	/**  Directory inside a registered workspace */
+	path: string,
+};
+
+/**  `GET /api/v1/nodes/:id/workspace/git/status` response. */
+export type WorkspaceGitStatusResponse = {
+	/**  Access root of the workspace */
+	root_path: string,
+	/**  Whether the workspace is inside a Git work tree */
+	is_repository: boolean,
+	/**  Current branch (`None` when detached or not a repository) */
+	branch: string | null,
+	/**  Commits ahead of the upstream */
+	ahead: number,
+	/**  Commits behind the upstream */
+	behind: number,
+	/**  Changed entries, capped at the status limit */
+	entries: WorkspaceGitEntry[],
+	/**  Whether the entry list stopped at the limit */
+	truncated: boolean,
+};
+
 /**  Worktree operation action (`ManageWorktree` command). */
 export type WorktreeAction =
 /**  Create a new worktree (`git worktree add -b <branch> <path> <base>`) */

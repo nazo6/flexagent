@@ -1,4 +1,10 @@
-import { DOCK_TOOLS, isDockToolId, dockTool, type DockToolId } from "#lib/dock/registry.ts";
+import {
+  DOCK_TOOLS,
+  dockTool,
+  isDockToolId,
+  type DockLauncherId,
+  type DockToolId,
+} from "#lib/dock/registry.ts";
 
 /** Session context handed to the dock. The workspace, not the session, owns the tabs. */
 export interface DockContext {
@@ -7,11 +13,21 @@ export interface DockContext {
   localPath: string;
 }
 
-/** One open tool instance. `resource` is a file path once file tabs exist. */
+/** How a file tab is displayed. */
+export type DockFileMode = "view" | "diff";
+
+/** Diff scope remembered by a file tab. */
+export type DockDiffScope = "uncommitted" | "branch_base";
+
+/** One open tool instance. `resource` is an absolute file path for file tabs. */
 export interface DockTab {
   id: string;
   tool: DockToolId;
   resource: string | null;
+  /** File tabs only. */
+  mode: DockFileMode | null;
+  /** File tabs only: scope used when showing the diff. */
+  scope: DockDiffScope | null;
 }
 
 export interface DockWorkspace {
@@ -39,6 +55,8 @@ const DEFAULT_WIDTH = 42;
 interface PersistedTab {
   tool: DockToolId;
   resource: string | null;
+  mode: DockFileMode | null;
+  scope: DockDiffScope | null;
 }
 
 interface PersistedWorkspace {
@@ -97,11 +115,19 @@ function restoreWorkspace(value: unknown): DockWorkspace | null {
     if (!isRecord(raw)) continue;
     const tool = raw.tool;
     if (!isDockToolId(tool)) continue;
-    const resource = typeof raw.resource === "string" ? raw.resource : null;
+    const resource =
+      tool === "file" && typeof raw.resource === "string" && raw.resource.length > 0
+        ? raw.resource
+        : null;
+    if (tool === "file" && resource === null) continue;
+    const mode: DockFileMode | null =
+      tool === "file" ? (raw.mode === "diff" ? "diff" : "view") : null;
+    const scope: DockDiffScope | null =
+      tool === "file" ? (raw.scope === "branch_base" ? "branch_base" : "uncommitted") : null;
     const id = tabKey(tool, resource);
     if (tabs.some((tab) => tab.id === id)) continue;
     if (isSingleton(tool) && tabs.some((tab) => tab.tool === tool)) continue;
-    tabs.push({ id, tool, resource });
+    tabs.push({ id, tool, resource, mode, scope });
     if (tabs.length >= MAX_TABS) break;
   }
 
@@ -185,7 +211,12 @@ function serialize(workspaces: Record<string, DockWorkspace>, width: number): st
       entries.map(([key, workspace]) => [
         key,
         {
-          tabs: workspace.tabs.map((tab) => ({ tool: tab.tool, resource: tab.resource })),
+          tabs: workspace.tabs.map((tab) => ({
+            tool: tab.tool,
+            resource: tab.resource,
+            mode: tab.mode,
+            scope: tab.scope,
+          })),
           activeIndex: Math.max(
             0,
             workspace.tabs.findIndex((tab) => tab.id === workspace.activeTabId),
@@ -267,8 +298,8 @@ export class WorkspaceDockStore {
     }
   }
 
-  /** Opens a tool or focuses its existing tab. */
-  openTool(toolId: DockToolId): void {
+  /** Opens a launcher tool or focuses its existing tab. */
+  openTool(toolId: DockLauncherId): void {
     if (this.currentKey === null) return;
     const definition = dockTool(toolId);
     this.update((workspace) => {
@@ -279,10 +310,51 @@ export class WorkspaceDockStore {
         return { ...workspace, activeTabId: existing.id, collapsed: false };
       }
 
-      const tab: DockTab = { id: tabKey(toolId, null), tool: toolId, resource: null };
+      const tab: DockTab = {
+        id: tabKey(toolId, null),
+        tool: toolId,
+        resource: null,
+        mode: null,
+        scope: null,
+      };
       const tabs = trimTabs([...workspace.tabs, tab], tab.id, workspace.activeTabId);
       return { ...workspace, tabs, activeTabId: tab.id, collapsed: false };
     });
+  }
+
+  /** Opens a file tab (or focuses it and switches its display mode / diff scope). */
+  openFile(path: string, mode: DockFileMode = "view", scope: DockDiffScope = "uncommitted"): void {
+    if (this.currentKey === null) return;
+    const id = tabKey("file", path);
+    this.update((workspace) => {
+      const existing = workspace.tabs.find((tab) => tab.id === id);
+      if (existing !== undefined) {
+        return {
+          ...workspace,
+          tabs: workspace.tabs.map((tab) => (tab.id === id ? { ...tab, mode, scope } : tab)),
+          activeTabId: id,
+          collapsed: false,
+        };
+      }
+
+      const tab: DockTab = { id, tool: "file", resource: path, mode, scope };
+      const tabs = trimTabs([...workspace.tabs, tab], tab.id, workspace.activeTabId);
+      return { ...workspace, tabs, activeTabId: tab.id, collapsed: false };
+    });
+  }
+
+  /** Switches one file tab between view and diff. */
+  setTabMode(id: string, mode: DockFileMode): void {
+    const workspace = this.workspace;
+    if (workspace === null) return;
+    const tab = workspace.tabs.find((candidate) => candidate.id === id);
+    if (tab === undefined || tab.tool !== "file" || tab.mode === mode) return;
+    this.update((current) => ({
+      ...current,
+      tabs: current.tabs.map((candidate) =>
+        candidate.id === id ? { ...candidate, mode } : candidate,
+      ),
+    }));
   }
 
   activateTab(id: string): void {
@@ -309,7 +381,7 @@ export class WorkspaceDockStore {
   }
 
   /** Rail behavior: focus the tool, or collapse the dock when it is already active. */
-  toggleTool(toolId: DockToolId): void {
+  toggleTool(toolId: DockLauncherId): void {
     if (this.isOpen && this.activeTool === toolId) {
       this.collapse();
       return;

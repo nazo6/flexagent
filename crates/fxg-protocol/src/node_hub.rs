@@ -14,7 +14,8 @@ use serde::{Deserialize, Serialize};
 use crate::client_api::HubLinkStatus;
 use crate::client_api::{
     AgentCapabilitiesPreview, AgentsResponse, FsBrowseResponse, ProjectLinkResponse,
-    ProjectPreview, ProjectScanResponse, ProjectUnlinkResponse, TerminalsResponse, WorktreeInfo,
+    ProjectPreview, ProjectScanResponse, ProjectUnlinkResponse, TerminalsResponse,
+    WorkspaceFileView, WorkspaceFsListResponse, WorkspaceGitStatusResponse, WorktreeInfo,
 };
 use crate::common::{
     AgentAction, ClientSource, DataSafety, DiffScope, ElicitationContent, ErrorInfo,
@@ -33,7 +34,7 @@ use crate::{CommandId, NodeId, ProjectId, SecretId, SessionId};
 /// The node and the hub must come from the same `fxg` release. A node
 /// with an older protocol is rejected at `NodeHello`; backward compatibility
 /// shims are intentionally not provided.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 /// Synchronization state of a session held by the node (reported in `NodeHello`).
 ///
 /// The hub compares it with `last_node_seq` in its own DB and returns
@@ -230,6 +231,46 @@ pub enum NodeRpcRequest {
         /// Target session ID
         session_id: SessionId,
     },
+    /// List a directory inside a registered workspace.
+    WorkspaceFsList {
+        /// Directory path
+        path: String,
+    },
+    /// Read a file inside a registered workspace.
+    WorkspaceFsFile {
+        /// File path
+        path: String,
+    },
+    /// Read the Git status of a registered workspace.
+    WorkspaceGitStatus {
+        /// Directory inside the workspace
+        path: String,
+    },
+    /// Fetch the diff of a registered workspace, optionally for one file.
+    WorkspaceGitDiff {
+        /// Directory inside the workspace
+        path: String,
+        /// Diff scope
+        scope: DiffScope,
+        /// Base branch for `BranchBase`
+        base_branch: Option<String>,
+        /// Absolute file path (omit for the whole workspace)
+        file: Option<String>,
+    },
+}
+
+impl NodeRpcRequest {
+    /// Whether the operation exposes workspace files and is therefore limited
+    /// to a direct (non-hub) client connection.
+    pub fn requires_local_workspace_access(&self) -> bool {
+        matches!(
+            self,
+            Self::WorkspaceFsList { .. }
+                | Self::WorkspaceFsFile { .. }
+                | Self::WorkspaceGitStatus { .. }
+                | Self::WorkspaceGitDiff { .. }
+        )
+    }
 }
 
 impl NodeRpcRequest {
@@ -272,6 +313,26 @@ pub enum NodeRpcResponse {
     BrowseFs {
         /// Browse result
         response: FsBrowseResponse,
+    },
+    /// Workspace directory listing (`WorkspaceFsList`).
+    WorkspaceFsList {
+        /// Listing result
+        response: WorkspaceFsListResponse,
+    },
+    /// Workspace file content (`WorkspaceFsFile`).
+    WorkspaceFile {
+        /// File content
+        file: WorkspaceFileView,
+    },
+    /// Workspace Git status (`WorkspaceGitStatus`).
+    WorkspaceGitStatus {
+        /// Status result
+        response: WorkspaceGitStatusResponse,
+    },
+    /// Workspace Git diff (`WorkspaceGitDiff`).
+    WorkspaceGitDiff {
+        /// Diff result
+        diff: WorkspaceDiffResponse,
     },
     /// Project scan payload (`ProjectScan`).
     ProjectScan {

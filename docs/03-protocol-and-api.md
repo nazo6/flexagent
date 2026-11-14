@@ -242,7 +242,11 @@ prune します。`sessions` は最大 1000 件で、超過時は
 | `POST /api/v1/nodes/:node_id/projects/link`                        | 任意ディレクトリを論理プロジェクトへ手動紐付け。                   |
 | `POST /api/v1/nodes/:node_id/projects/unlink`                      | バインディングを削除。                                             |
 | `GET /api/v1/nodes`                                                | ノード一覧、オンライン状態、一時ノード属性、利用可能エージェント。 |
-| `GET /api/v1/nodes/:node_id/fs/browse`                             | ノードのファイルシステム閲覧。                                     |
+| `GET /api/v1/nodes/:node_id/fs/browse`                             | ノードのファイルシステム閲覧（フォルダピッカー用）。               |
+| `GET /api/v1/nodes/:node_id/workspace/fs/list`                     | 登録済み workspace 内のディレクトリ一覧。                          |
+| `GET /api/v1/nodes/:node_id/workspace/fs/file`                     | workspace 内のファイル内容（テキスト / バイナリ / 大きすぎる）。   |
+| `GET /api/v1/nodes/:node_id/workspace/git/status`                  | workspace の `git status`（branch / ahead / behind / 変更一覧）。  |
+| `GET /api/v1/nodes/:node_id/workspace/git/diff`                    | workspace または 1 ファイルの diff（scope / base / file）。        |
 | `GET /api/v1/nodes/:node_id/settings`                              | ノード設定スナップショット（トークン値は返さない）。               |
 | `PATCH /api/v1/nodes/:node_id/settings/node` / `.../agents`        | ノード所有設定の更新。                                             |
 | `PUT/DELETE /api/v1/nodes/:node_id/settings/pairing`               | ハブ接続先の保存 / 解除。                                          |
@@ -250,6 +254,13 @@ prune します。`sessions` は最大 1000 件で、超過時は
 | `GET /api/v1/nodes/:node_id/secrets` / `PUT/DELETE .../:secret_id` | ノード所有の秘密メタデータ。値は返さない。                         |
 | `GET /api/v1/hub/secrets` / `PUT/DELETE .../:secret_id`            | ハブ所有の秘密メタデータ。                                         |
 | `GET /api/v1/nodes/tokens` / `POST` / `DELETE .../:node_id`        | ノード個別トークンの一覧 / 発行 / 失効（ハブのみ）。               |
+
+`workspace/*` は **直接ノードへ接続したクライアント専用**です。ハブ経由の
+リクエストはノードが `FORBIDDEN` で拒否します。パスは登録済み workspace
+（`project_node_bindings` / `project_path_links` / セッションの作業ディレクトリ）から
+解決した access root（Git の worktree toplevel、非 Git ならそのディレクトリ）の
+配下だけを許可し、`.git` とシンボリックリンク経由の脱出を拒否します。
+読み取りは UTF-8 / 2 MiB までで、バイナリと超過は正常系の列挙として返します。
 
 #### エージェント
 

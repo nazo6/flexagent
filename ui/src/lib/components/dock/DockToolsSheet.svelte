@@ -1,13 +1,13 @@
 <script lang="ts">
   import * as Sheet from "#lib/components/ui/sheet/index.ts";
-  import { DOCK_LAUNCHERS, type DockToolId } from "#lib/dock/registry.ts";
+  import { DOCK_LAUNCHERS, type DockLauncherId } from "#lib/dock/registry.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { cn } from "#lib/utils.ts";
 
   interface Props {
     open?: boolean;
-    active: DockToolId | null;
-    onselect: (id: DockToolId) => void;
+    active: DockLauncherId | null;
+    onselect: (id: DockLauncherId) => void;
   }
 
   let { open = $bindable(false), active, onselect }: Props = $props();

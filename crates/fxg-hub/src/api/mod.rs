@@ -79,6 +79,9 @@ use handlers::system::{
     readyz, resolve_incident, system_info,
 };
 use handlers::terminals::list_terminals;
+use handlers::workspace::{
+    workspace_fs_file, workspace_fs_list, workspace_git_diff, workspace_git_status,
+};
 
 /// Returns a header value as `&str` (`None` for a missing or non-UTF-8 value).
 // `Result::ok` is disallowed by the error-handling policy, so the explicit
@@ -210,6 +213,22 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route("/api/v1/auth/rotate-token", post(rotate_auth_token::<B>))
         .route("/api/v1/nodes", get(list_nodes::<B>))
         .route("/api/v1/nodes/{node_id}/fs/browse", get(browse_fs::<B>))
+        .route(
+            "/api/v1/nodes/{node_id}/workspace/fs/list",
+            get(workspace_fs_list::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/workspace/fs/file",
+            get(workspace_fs_file::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/workspace/git/status",
+            get(workspace_git_status::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/workspace/git/diff",
+            get(workspace_git_diff::<B>),
+        )
         .route(
             "/api/v1/settings/hub",
             get(settings_server::<B>).patch(update_hub_settings::<B>),
