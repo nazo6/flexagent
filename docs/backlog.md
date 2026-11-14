@@ -46,3 +46,17 @@
 - [ ] 無操作 TTL とリングバッファ上限を `node_settings` で変更可能にする（現状は定数）
 - [ ] 終了済みターミナルの直近 1 世代（exit code + scrollback）を表示する
 - [ ] UI から明示的にシェルを起動し直す「New shell」操作（プロトコルは `open { new: true }` に対応済み）
+
+## 6. Workspace Files の編集（Phase 2, TODO）
+
+出典: [`docs/proposals/2026-11-14-workspace-dock.md`](./proposals/2026-11-14-workspace-dock.md) §6
+
+現状は **読み取り専用** でマージする。編集は以下をまとめて実装する。
+
+- [ ] 保存 API（`fs/write`）と監査ログ。既存ファイルのみを対象に、一時ファイル + rename で原子的に更新する
+- [ ] 楽観ロック。読み込み時の `content_hash` と一致したときだけ保存し、不一致は `CONFLICT` を返す
+- [ ] 競合 UI（上書き / 再読込）と、外部変更を検知したときのバナー
+- [ ] Monaco エディタ、`Cmd/Ctrl+S`、未保存ドット、閉じる前の確認
+- [ ] 保存後の Changes / Git status / ファイルプレビュー更新
+- [ ] モバイルは閲覧のみとし、編集はデスクトップに限定する
+- [ ] 編集 API もローカル接続限定を維持し、ハブ経由では `FORBIDDEN` にする

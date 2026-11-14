@@ -74,7 +74,7 @@ Settings 画面の中間パス（`/settings`, `/settings/hub`, `/settings/nodes`
      - ドックのヘッダーはアクティブツール名と閉じるボタンだけを持ち、外側の可変タブは持たない。ドックを閉じるのはヘッダー / オーバーレイの閉じるボタンで、ツールを閉じる概念はない。
      - モバイルではセッションヘッダーの Files / Changes / Terminal アイコンから 1 タップで開く。会話の上に背景を暗くしたオーバーレイとして表示し、背景タップまたは右上の閉じるボタンで畳む。会話は背後に残すが `inert` にして操作対象から外す。
      - **Files**: workspace の Git toplevel（非 Git なら workspace パス）を起点にした遅延読み込みのツリーと、ファイルプレビューの 2 ペイン。`git status` の変更バッジ、隠しファイル / 重いディレクトリの表示切替、変更のみの一覧を持つ。デスクトップではツリーを隠してプレビューを全幅にでき、分割比は境界のドラッグで変更できる（workspace ごとに保持）。モバイルではツリー ↔ プレビューを戻るボタンで切り替える。**直接ノードへ接続している場合のみ**利用でき、ハブ経由では理由を表示する。
-     - **File preview（Files 内）**: プレビュー上部にファイルタブ（可変・中クリックで閉じる）を持つ。`View` は Shiki の読み取り専用表示（Markdown は Preview / Source を切替、PNG / JPEG / GIF / WebP / BMP / AVIF / ICO は画像プレビュー）、`Diff` は単一ファイルの diff（PC は `monaco-editor`、モバイルは `shiki`）。Git status バッジを表示し、バイナリ・大きすぎるファイル・削除済みファイルを区別する。
+     - **File preview（Files 内）**: プレビュー上部にファイルタブ（可変・中クリックで閉じる）を持つ。`View` は Shiki の読み取り専用表示（Markdown は Preview / Source を切替、PNG / JPEG / GIF / WebP / BMP / AVIF / ICO は画像プレビュー）、`Diff` は単一ファイルの diff（PC は `monaco-editor`、モバイルは `shiki`）。Git status バッジを表示し、バイナリ・大きすぎるファイル・削除済みファイルを区別する。**Phase 1 は読み取り専用**で、編集・保存は未対応（[`docs/backlog.md`](../backlog.md) §6）。
      - **Changes**: `Session`（セッション内の tool diff）/ `Worktree`（`git status`）/ `Branch`（base との累積 diff）の 3 スコープ。行をクリックすると Files ツールのプレビューにファイルを開く（Diff モード）。Session の編集差分はノードがオフラインでも閲覧できる。ハブ経由では従来のインライン Diff にフォールバックする。
      - **Terminal**: workspace の統合 Web PTY（§4）。タブごとに独立したシェルを持ち、`+` で追加、× / 中クリックで閉じる。ドックが開いている間は非アクティブのタブもマウントを維持し、PTY の attach を保つ。
 3. **統一コンポーザー**:

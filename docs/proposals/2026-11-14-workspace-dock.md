@@ -1,7 +1,7 @@
 # 2026-11-14 右ペインの Workspace Dock 化
 
 - **日付**: 2026-11-14
-- **ステータス**: `In Progress`
+- **ステータス**: `Partially Implemented`（Phase 0 / 1 と Terminal タブを実装。ファイル編集は Phase 2 として TODO）
 - **対象パッケージ**: `fxg-protocol`, `fxg-node`, `fxg-hub`, `ui`
 - **対象スクリプト / 設定**: `mise run check` / `mise run fmt` / `mise run types` / `pnpm --dir ui test`
 - **関連ドキュメント**:
@@ -368,5 +368,7 @@ Phase 1 では **ローカル接続（ループバック）からのみ** ファ
 監視による自動更新は未対応（手動更新 / タブ表示時 / ターン完了時）。
 
 Phase 2 以降（エディタ・保存・競合検出）は未着手。
+今回のマージ範囲は **読み取り専用の Files / Changes と Terminal タブ** までとし、
+編集の残タスクは [`docs/backlog.md`](../backlog.md) §6 に切り出した。
 実装が進んだ時点で、確定した仕様を `docs/07` / `docs/03` / `docs/01` に昇格し、
 この Proposal のステータスを更新する。
