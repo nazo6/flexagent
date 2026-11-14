@@ -104,6 +104,8 @@ struct PtyRoute {
     node_id: NodeId,
     /// Canonical workspace path
     path: String,
+    /// Terminal tab identity inside the workspace (`None` = legacy single terminal)
+    terminal_id: Option<String>,
     /// Number of columns at the last known size
     cols: u16,
     /// Number of rows at the last known size
@@ -480,7 +482,11 @@ impl NodeHub {
         let existing = {
             let ptys = self.inner.ptys.lock().await;
             ptys.iter()
-                .find(|(_, route)| route.node_id == params.node_id && route.path == params.path)
+                .find(|(_, route)| {
+                    route.node_id == params.node_id
+                        && route.path == params.path
+                        && route.terminal_id == params.terminal_id
+                })
                 .map(|(pty_id, route)| (pty_id.clone(), route.cols, route.rows))
         };
         if let Some((pty_id, cols, rows)) = existing {
@@ -529,6 +535,7 @@ impl NodeHub {
                     pty_id: params.pty_id,
                     path: params.path.clone(),
                     session_id: params.session_id,
+                    terminal_id: params.terminal_id.clone(),
                     cols: params.cols,
                     rows: params.rows,
                     new: params.new,
@@ -564,6 +571,7 @@ impl NodeHub {
                     PtyRoute {
                         node_id: params.node_id,
                         path: reply.path.clone(),
+                        terminal_id: params.terminal_id,
                         cols: reply.cols,
                         rows: reply.rows,
                         tx,

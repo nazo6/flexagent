@@ -14,12 +14,21 @@
     sessionId,
     nodeId,
     path,
+    terminalId,
     fill = false,
+    active = true,
+    onregister,
   }: {
     sessionId: string;
     nodeId: string;
     path: string;
+    /** Stable tab identity inside the workspace; identifies this shell on the node. */
+    terminalId: string;
     fill?: boolean;
+    /** Whether the terminal is the visible dock tab. Hidden terminals stay attached. */
+    active?: boolean;
+    /** Receives a hook that kills the shell before the tab is removed. */
+    onregister?: (kill: () => void) => void;
   } = $props();
 
   type Status = "disconnected" | "connecting" | "connected" | "exited" | "blocked" | "failed";
@@ -35,7 +44,7 @@
   let connectedWorkspace: string | null = null;
 
   function workspaceKey(): string {
-    return `${nodeId}\u0000${path}`;
+    return `${nodeId}\u0000${path}\u0000${terminalId}`;
   }
 
   /** Mobile virtual key bar (tapping sends an escape sequence). */
@@ -76,13 +85,9 @@
       case "opened":
         status = "connected";
         statusMessage = null;
-        adapter?.focus();
-        // The retained terminal may have been created at another size (other tab,
-        // reattach after a reload).
-        {
-          const dims = adapter?.fit();
-          if (dims) send({ op: "resize", cols: dims.cols, rows: dims.rows });
-        }
+        // A hidden terminal has no layout to fit against, so it is sized when
+        // its tab becomes active (see the effect below).
+        if (active) syncViewport();
         break;
       case "output":
         adapter?.write(decodeBase64ToBytes(message.data_b64));
@@ -117,13 +122,16 @@
 
     ws.addEventListener("open", () => {
       if (socket !== ws || disposed) return;
-      const dims = adapter?.fit() ?? { cols: 80, rows: 24 };
+      // Hidden terminals have no measured size; the resize after activation
+      // brings the PTY to the real dimensions.
+      const dims = active ? (adapter?.fit() ?? { cols: 80, rows: 24 }) : { cols: 80, rows: 24 };
       if (
         !send({
           op: "open",
           node_id: nodeId,
           path,
           session_id: sessionId,
+          terminal_id: terminalId,
           cols: dims.cols,
           rows: dims.rows,
           new: false,
@@ -160,6 +168,14 @@
     });
   }
 
+  /** Fits the visible terminal and tells the node about the new size. */
+  function syncViewport(): void {
+    if (!active) return;
+    const dims = adapter?.fit() ?? { cols: 80, rows: 24 };
+    send({ op: "resize", cols: dims.cols, rows: dims.rows });
+    adapter?.focus();
+  }
+
   function reconnect(): void {
     // The server replays the retained output on attach, so start from a clean
     // screen to avoid duplicating what is already rendered.
@@ -186,6 +202,20 @@
     reconnect();
   });
 
+  // Refit when the terminal becomes the visible dock tab. When it is hidden,
+  // drop focus so keystrokes do not reach an unattended PTY.
+  $effect(() => {
+    if (active) {
+      const frame = requestAnimationFrame(() => syncViewport());
+      return () => cancelAnimationFrame(frame);
+    }
+    const focused = document.activeElement;
+    if (container !== null && focused instanceof HTMLElement && container.contains(focused)) {
+      focused.blur();
+    }
+    return;
+  });
+
   onMount(() => {
     if (container !== null) {
       adapter = new GhosttyWebAdapter();
@@ -196,6 +226,10 @@
       send({ op: "resize", cols, rows });
     });
     connect();
+    onregister?.(() => {
+      send({ op: "kill" });
+      socket?.close();
+    });
 
     return () => {
       disposed = true;

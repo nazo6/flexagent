@@ -49,6 +49,7 @@ fn audit_source(client: &ClientInfo) -> AuditSource {
         client_ip: client.ip.clone(),
         auth_subject: client.auth_subject.clone(),
         user_agent: client.user_agent.clone(),
+        via_hub: false,
     }
 }
 
@@ -1006,6 +1007,7 @@ impl ClientApiBackend for DaemonState {
         let mut request = fxg_pty::PtySpawnRequest::new(params.pty_id.clone());
         request.session_id = params.session_id.as_ref().map(ToString::to_string);
         request.workspace = Some(path.clone());
+        request.terminal_id = params.terminal_id.clone();
         request.cwd = Some(path.clone());
         request.cols = params.cols;
         request.rows = params.rows;

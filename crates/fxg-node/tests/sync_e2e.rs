@@ -1539,11 +1539,35 @@ async fn hub_relays_workspace_terminal_and_replays_output() {
         &Paths::portable(server_home.path(), Role::Hub).auth_token_path(),
     )
     .expect("Web access token");
+
+    // Workspace file access is local-only: the hub relay must be rejected.
+    let workspace_path = repo.path().to_string_lossy().into_owned();
+    let mut workspace_url = reqwest::Url::parse(&format!(
+        "http://127.0.0.1:{port}/api/v1/nodes/node-1/workspace/fs/list"
+    ))
+    .expect("workspace fs url");
+    workspace_url
+        .query_pairs_mut()
+        .append_pair("path", &workspace_path);
+    let forbidden = reqwest::Client::new()
+        .get(workspace_url)
+        .bearer_auth(&client_token)
+        .send()
+        .await
+        .expect("workspace fs request")
+        .status();
+    assert_eq!(
+        forbidden,
+        reqwest::StatusCode::FORBIDDEN,
+        "workspace files must not be exposed through the hub"
+    );
+
     let url = format!("ws://127.0.0.1:{port}/api/v1/pty/ws");
     let open = serde_json::to_string(&PtyClientMessage::Open {
         node_id: NodeId::from("node-1"),
         path: repo.path().to_string_lossy().into_owned(),
         session_id: None,
+        terminal_id: Some("tab-1".to_owned()),
         cols: 80,
         rows: 24,
         new: false,

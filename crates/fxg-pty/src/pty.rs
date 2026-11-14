@@ -7,8 +7,9 @@
 //! - **Cross-platform PTY**: `portable-pty` selects ConPTY on Windows and Unix
 //!   PTY on macOS/Linux automatically.
 //! - **Workspace terminals**: a PTY opened with a `workspace` key is unique per
-//!   workspace path. Opening it again reuses the running shell instead of
-//!   starting another one.
+//!   workspace path and terminal ID. Opening it again reuses the running shell
+//!   instead of starting another one; distinct terminal IDs in the same
+//!   workspace are separate shells.
 //! - **Detached lifetime**: closing a client socket only detaches. A terminal
 //!   with no clients is killed after [`DEFAULT_IDLE_TIMEOUT`] (or the timeout
 //!   given to [`PtySessionManager::with_idle_timeout`]).
@@ -103,6 +104,12 @@ pub struct PtySpawnRequest {
     /// Agent-owned terminals (ACP `terminal/*`) leave this `None`, so they never
     /// share a workspace with the user's web terminal.
     pub workspace: Option<PathBuf>,
+    /// Client-side terminal tab identity inside the workspace.
+    ///
+    /// `None` is the legacy single terminal. Two requests with the same
+    /// workspace and terminal ID reuse one shell; different IDs create
+    /// separate shells.
+    pub terminal_id: Option<String>,
     /// Working directory (defaults to the workspace or the current directory)
     pub cwd: Option<PathBuf>,
     /// Shell / command to launch (defaults to the OS default shell).
@@ -126,6 +133,7 @@ impl PtySpawnRequest {
             pty_id: pty_id.into(),
             session_id: None,
             workspace: None,
+            terminal_id: None,
             cwd: None,
             shell_cmd: None,
             args: Vec::new(),
@@ -170,8 +178,16 @@ struct PtySession {
 #[derive(Default)]
 struct State {
     sessions: HashMap<String, PtySession>,
-    /// Workspace path -> PTY ID (web terminals only)
-    workspaces: HashMap<PathBuf, String>,
+    /// Workspace + terminal ID -> PTY ID (web terminals only)
+    workspaces: HashMap<WorkspaceTerminalKey, String>,
+}
+
+/// Identity of a web terminal inside a workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct WorkspaceTerminalKey {
+    workspace: PathBuf,
+    /// Client-side tab identity (`None` is the legacy single terminal)
+    terminal_id: Option<String>,
 }
 
 struct Inner {
@@ -437,7 +453,8 @@ impl PtySessionManager {
     /// Opens the workspace terminal, reusing the running shell when it exists.
     ///
     /// The caller is counted as an attached client. When `new` is true, a
-    /// running terminal of the same workspace is killed and replaced.
+    /// running terminal of the same workspace and terminal ID is killed and
+    /// replaced.
     pub fn open(&self, request: PtySpawnRequest, new: bool) -> Result<PtyOpenOutcome, PtyError> {
         let Some(workspace) = request.workspace.clone() else {
             let info = self.spawn(request)?;
@@ -446,9 +463,13 @@ impl PtySessionManager {
                 attached: false,
             });
         };
+        let key = WorkspaceTerminalKey {
+            workspace,
+            terminal_id: request.terminal_id.clone(),
+        };
 
         let mut state = self.lock_state();
-        if let Some(existing_id) = state.workspaces.get(&workspace).cloned() {
+        if let Some(existing_id) = state.workspaces.get(&key).cloned() {
             if let Some(session) = state.sessions.get_mut(&existing_id) {
                 if !new {
                     session.info.attached = session.info.attached.saturating_add(1);
@@ -464,7 +485,7 @@ impl PtySessionManager {
                     tracing::warn!(pty_id = %existing_id, "failed to replace terminal: {err}");
                 }
             }
-            state.workspaces.remove(&workspace);
+            state.workspaces.remove(&key);
         }
 
         let info = self.spawn_new_locked(&mut state, request, 1)?;
@@ -740,9 +761,15 @@ impl PtySessionManager {
         // a command that exits extremely quickly cannot race with "remove before
         // register". Waiting for the reader's EOF before sending Exit guarantees
         // that subscribers do not miss the final output.
-        let workspace_key = request.workspace.clone();
-        if let Some(path) = &workspace_key {
-            state.workspaces.insert(path.clone(), info.pty_id.clone());
+        let workspace_key = request
+            .workspace
+            .clone()
+            .map(|workspace| WorkspaceTerminalKey {
+                workspace,
+                terminal_id: request.terminal_id.clone(),
+            });
+        if let Some(key) = &workspace_key {
+            state.workspaces.insert(key.clone(), info.pty_id.clone());
         }
         state.sessions.insert(
             info.pty_id.clone(),
@@ -780,13 +807,13 @@ impl PtySessionManager {
                     .state
                     .lock()
                     .expect("pty sessions mutex poisoned");
-                if let Some(path) = &exit_workspace
+                if let Some(key) = &exit_workspace
                     && state
                         .workspaces
-                        .get(path)
+                        .get(key)
                         .is_some_and(|id| id == &exit_pty_id)
                 {
-                    state.workspaces.remove(path);
+                    state.workspaces.remove(key);
                 }
                 state.sessions.remove(&exit_pty_id)
             };
@@ -953,6 +980,39 @@ mod tests {
         assert_eq!(manager.list().len(), 1);
 
         manager.kill(&opened.info.pty_id).expect("kill");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn distinct_terminal_ids_open_separate_shells() {
+        let manager = PtySessionManager::new();
+        let workspace = std::env::temp_dir();
+        let mut first = PtySpawnRequest::new("pty-tab-1");
+        first.shell_cmd = Some("sh".to_owned());
+        first.workspace = Some(workspace.clone());
+        first.terminal_id = Some("tab-1".to_owned());
+        let first = manager.open(first, false).expect("open first");
+
+        let mut second = PtySpawnRequest::new("pty-tab-2");
+        second.shell_cmd = Some("sh".to_owned());
+        second.workspace = Some(workspace.clone());
+        second.terminal_id = Some("tab-2".to_owned());
+        let second = manager.open(second, false).expect("open second");
+        assert!(!second.attached);
+        assert_ne!(first.info.pty_id, second.info.pty_id);
+        assert_eq!(manager.list().len(), 2);
+
+        let mut reopen = PtySpawnRequest::new("pty-tab-3");
+        reopen.shell_cmd = Some("sh".to_owned());
+        reopen.workspace = Some(workspace);
+        reopen.terminal_id = Some("tab-2".to_owned());
+        let reopened = manager.open(reopen, false).expect("reopen second");
+        assert!(reopened.attached);
+        assert_eq!(reopened.info.pty_id, second.info.pty_id);
+        assert_eq!(reopened.info.attached, 2);
+
+        manager.kill(&first.info.pty_id).expect("kill first");
+        manager.kill(&second.info.pty_id).expect("kill second");
     }
 
     #[cfg(unix)]

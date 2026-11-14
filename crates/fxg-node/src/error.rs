@@ -38,6 +38,12 @@ pub enum NodeError {
     /// Invalid worktree / branch state
     #[error("invalid worktree state: {0}")]
     InvalidWorktree(String),
+    /// The operation is not allowed (for example workspace file access over the hub)
+    #[error("forbidden: {0}")]
+    Forbidden(String),
+    /// The requested object does not exist
+    #[error("not found: {0}")]
+    NotFound(String),
     /// Invalid state or unmet precondition for the operation (e.g. missing configuration)
     #[error("invalid state: {0}")]
     InvalidState(String),
@@ -144,7 +150,9 @@ impl NodeError {
                 IncidentSource::Api
             }
             Self::Hub(_) | Self::Timeout(_) => IncidentSource::Sync,
-            Self::InvalidState(_)
+            Self::Forbidden(_)
+            | Self::NotFound(_)
+            | Self::InvalidState(_)
             | Self::InvalidSession(_)
             | Self::ResumeRequired { .. }
             | Self::ForkUnsupported(_)
@@ -167,6 +175,8 @@ impl NodeError {
             Self::Busy(_)
             | Self::CommandDuplicate(_)
             | Self::AlreadyResolved(_)
+            | Self::Forbidden(_)
+            | Self::NotFound(_)
             | Self::InvalidSession(_)
             | Self::InvalidState(_)
             | Self::ResumeRequired { .. }
@@ -199,7 +209,11 @@ impl NodeError {
     pub fn is_incident(&self) -> bool {
         !matches!(
             self,
-            Self::Busy(_) | Self::CommandDuplicate(_) | Self::AlreadyResolved(_)
+            Self::Busy(_)
+                | Self::CommandDuplicate(_)
+                | Self::AlreadyResolved(_)
+                | Self::Forbidden(_)
+                | Self::NotFound(_)
         )
     }
 
@@ -231,6 +245,8 @@ impl NodeError {
             Self::Git { .. } => ErrorCode::GitFailed,
             Self::NotARepository(_) => ErrorCode::InvalidState,
             Self::InvalidWorktree(_) => ErrorCode::WorktreeConflict,
+            Self::Forbidden(_) => ErrorCode::Forbidden,
+            Self::NotFound(_) => ErrorCode::NotFound,
             Self::InvalidState(_) | Self::InvalidSession(_) | Self::NonPersistableEvent(_) => {
                 ErrorCode::InvalidState
             }
@@ -303,7 +319,7 @@ impl NodeError {
             Self::Busy(_) => {
                 info = info.with_data_safety(DataSafety::NotSent);
             }
-            Self::InvalidWorktree(_) | Self::NotARepository(_) => {
+            Self::InvalidWorktree(_) | Self::NotARepository(_) | Self::Forbidden(_) => {
                 info = info.with_data_safety(DataSafety::Unchanged);
             }
             Self::Io { .. } | Self::Git { .. } => {

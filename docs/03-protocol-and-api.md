@@ -156,8 +156,9 @@ JSON Lines）は、トランスポートだけが異なり、同じ `NodeToHubMs
   `ResyncRequest` 由来の再送は `EventBatchPush.resync = true` とし、Web Push を
   抑止する。
 - **Web ターミナル**: `PtySpawn` / `PtyOpened` / `PtyOpenFailed`、`PtyAttach` /
-  `PtyDetach`、`PtyInput` / `PtyResize` / `PtyKill`。`PtySpawn` は冪等で、
-  既存の workspace ターミナルがあれば `PtyOpened.attached = true` を返す。
+  `PtyDetach`、`PtyInput` / `PtyResize` / `PtyKill`。`PtySpawn` は workspace と
+  `terminal_id` の組に対して冪等で、既存のターミナルがあれば
+  `PtyOpened.attached = true` を返す。
 - **セッションコマンド**: `StartSession`、`SendPrompt`、`RespondPermission`、
   `RespondElicitation`、`ControlSession`。結果は `CommandResult`。
 - **汎用 Node RPC**: `NodeRpc` / `NodeRpcResult`。Git、Worktree、プロジェクト、
@@ -231,25 +232,36 @@ prune します。`sessions` は最大 1000 件で、超過時は
 
 #### プロジェクト / Worktree / ノード
 
-| Method / Path                                                      | 内容                                                               |
-| :----------------------------------------------------------------- | :----------------------------------------------------------------- |
-| `GET /api/v1/projects`                                             | 論理プロジェクトとノード / Worktree バインディング。               |
-| `GET/POST/DELETE /api/v1/projects/:project_id/worktrees`           | 一覧 / 作成 / 削除。DELETE は body `{ node_id, path, force }`。    |
-| `POST /api/v1/projects/:project_id/worktrees/prune`                | `git worktree prune`。body `{ node_id }`。                         |
-| `POST /api/v1/nodes/:node_id/projects/inspect`                     | パスのプロジェクト同一性を読み取り専用で解決。                     |
-| `POST /api/v1/nodes/:node_id/projects/add`                         | パスを検出してバインディングを登録。                               |
-| `POST /api/v1/nodes/:node_id/projects/scan`                        | ディレクトリ配下を一括スキャン。                                   |
-| `POST /api/v1/nodes/:node_id/projects/link`                        | 任意ディレクトリを論理プロジェクトへ手動紐付け。                   |
-| `POST /api/v1/nodes/:node_id/projects/unlink`                      | バインディングを削除。                                             |
-| `GET /api/v1/nodes`                                                | ノード一覧、オンライン状態、一時ノード属性、利用可能エージェント。 |
-| `GET /api/v1/nodes/:node_id/fs/browse`                             | ノードのファイルシステム閲覧。                                     |
-| `GET /api/v1/nodes/:node_id/settings`                              | ノード設定スナップショット（トークン値は返さない）。               |
-| `PATCH /api/v1/nodes/:node_id/settings/node` / `.../agents`        | ノード所有設定の更新。                                             |
-| `PUT/DELETE /api/v1/nodes/:node_id/settings/pairing`               | ハブ接続先の保存 / 解除。                                          |
-| `POST /api/v1/nodes/:node_id/settings/pairing/test`                | 保存せずに WebSocket ハンドシェイクを試す。                        |
-| `GET /api/v1/nodes/:node_id/secrets` / `PUT/DELETE .../:secret_id` | ノード所有の秘密メタデータ。値は返さない。                         |
-| `GET /api/v1/hub/secrets` / `PUT/DELETE .../:secret_id`            | ハブ所有の秘密メタデータ。                                         |
-| `GET /api/v1/nodes/tokens` / `POST` / `DELETE .../:node_id`        | ノード個別トークンの一覧 / 発行 / 失効（ハブのみ）。               |
+| Method / Path                                                      | 内容                                                                    |
+| :----------------------------------------------------------------- | :---------------------------------------------------------------------- |
+| `GET /api/v1/projects`                                             | 論理プロジェクトとノード / Worktree バインディング。                    |
+| `GET/POST/DELETE /api/v1/projects/:project_id/worktrees`           | 一覧 / 作成 / 削除。DELETE は body `{ node_id, path, force }`。         |
+| `POST /api/v1/projects/:project_id/worktrees/prune`                | `git worktree prune`。body `{ node_id }`。                              |
+| `POST /api/v1/nodes/:node_id/projects/inspect`                     | パスのプロジェクト同一性を読み取り専用で解決。                          |
+| `POST /api/v1/nodes/:node_id/projects/add`                         | パスを検出してバインディングを登録。                                    |
+| `POST /api/v1/nodes/:node_id/projects/scan`                        | ディレクトリ配下を一括スキャン。                                        |
+| `POST /api/v1/nodes/:node_id/projects/link`                        | 任意ディレクトリを論理プロジェクトへ手動紐付け。                        |
+| `POST /api/v1/nodes/:node_id/projects/unlink`                      | バインディングを削除。                                                  |
+| `GET /api/v1/nodes`                                                | ノード一覧、オンライン状態、一時ノード属性、利用可能エージェント。      |
+| `GET /api/v1/nodes/:node_id/fs/browse`                             | ノードのファイルシステム閲覧（フォルダピッカー用）。                    |
+| `GET /api/v1/nodes/:node_id/workspace/fs/list`                     | 登録済み workspace 内のディレクトリ一覧。                               |
+| `GET /api/v1/nodes/:node_id/workspace/fs/file`                     | workspace 内のファイル内容（テキスト / 画像 / バイナリ / 大きすぎる）。 |
+| `GET /api/v1/nodes/:node_id/workspace/git/status`                  | workspace の `git status`（branch / ahead / behind / 変更一覧）。       |
+| `GET /api/v1/nodes/:node_id/workspace/git/diff`                    | workspace または 1 ファイルの diff（scope / base / file）。             |
+| `GET /api/v1/nodes/:node_id/settings`                              | ノード設定スナップショット（トークン値は返さない）。                    |
+| `PATCH /api/v1/nodes/:node_id/settings/node` / `.../agents`        | ノード所有設定の更新。                                                  |
+| `PUT/DELETE /api/v1/nodes/:node_id/settings/pairing`               | ハブ接続先の保存 / 解除。                                               |
+| `POST /api/v1/nodes/:node_id/settings/pairing/test`                | 保存せずに WebSocket ハンドシェイクを試す。                             |
+| `GET /api/v1/nodes/:node_id/secrets` / `PUT/DELETE .../:secret_id` | ノード所有の秘密メタデータ。値は返さない。                              |
+| `GET /api/v1/hub/secrets` / `PUT/DELETE .../:secret_id`            | ハブ所有の秘密メタデータ。                                              |
+| `GET /api/v1/nodes/tokens` / `POST` / `DELETE .../:node_id`        | ノード個別トークンの一覧 / 発行 / 失効（ハブのみ）。                    |
+
+`workspace/*` は **直接ノードへ接続したクライアント専用**です。ハブ経由の
+リクエストはノードが `FORBIDDEN` で拒否します。パスは登録済み workspace
+（`project_node_bindings` / `project_path_links` / セッションの作業ディレクトリ）から
+解決した access root（Git の worktree toplevel、非 Git ならそのディレクトリ）の
+配下だけを許可し、`.git` とシンボリックリンク経由の脱出を拒否します。
+読み取りは UTF-8 / 2 MiB までで、バイナリと超過は正常系の列挙として返します。
 
 #### エージェント
 
@@ -316,16 +328,20 @@ prune します。`sessions` は最大 1000 件で、超過時は
 
 ### 3.3 Client PTY WebSocket (`/api/v1/pty/ws`)
 
-`ghostty-web` などのターミナルを、workspace（`(node_id, path)`）の PTY に接続します。
+`ghostty-web` などのターミナルを、workspace（`(node_id, path)`）と
+クライアント側の terminal ID の組で識別する PTY に接続します。
 
 - クライアント: `open` / `attach` / `input` / `resize` / `kill`。
 - サーバー: `opened` / `output` / `exit` / `error`。
-- `open` は冪等です。同じ workspace に既存のシェルがあれば attach し、`opened`
-  の `attached = true` で返します。パスはノードに登録済みのプロジェクト binding
-  （または既存セッションの `local_path`）と**完全一致**する必要があり、
-  サブディレクトリは開けません。
+- `open` は冪等です。同じ workspace + `terminal_id` に既存のシェルがあれば
+  attach し、`opened` の `attached = true` で返します。`terminal_id` が違えば
+  同じ workspace でも別のシェルになります（`terminal_id` 省略時は従来の
+  単一ターミナル）。パスはノードに登録済みのプロジェクト binding（または
+  既存セッションの `local_path`）と**完全一致**する必要があり、サブディレクトリは
+  開けません。
 - socket を閉じても PTY は kill されません（detach）。無操作 TTL（既定 30 分）の
-  経過、明示 `kill`、プロセス終了、キルスイッチでのみ終了します。
+  経過、明示 `kill`、プロセス終了、キルスイッチでのみ終了します。UI がタブを
+  閉じたときは `kill` を送ります。
 - `output` はシーケンス番号を持ち、attach 直後に保持済み出力（リングバッファ）が
   先に届きます。購読が遅れて取りこぼした分はこの snapshot で補われます。
 - ノード設定 `allow_remote_pty = false` のとき、ハブ経由の `open` は

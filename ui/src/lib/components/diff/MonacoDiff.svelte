@@ -1,58 +1,12 @@
 <script lang="ts">
   import type { FileDiff } from "#lib/generated/bindings.ts";
+  import { languageForPath } from "#lib/code-languages.ts";
   import { m } from "#lib/paraglide/messages.js";
 
   let { file }: { file: FileDiff } = $props();
 
   let container = $state<HTMLDivElement | null>(null);
   let loading = $state(true);
-
-  const LANGUAGES: Record<string, string> = {
-    ts: "typescript",
-    tsx: "typescript",
-    mts: "typescript",
-    cts: "typescript",
-    js: "javascript",
-    jsx: "javascript",
-    mjs: "javascript",
-    cjs: "javascript",
-    json: "json",
-    md: "markdown",
-    css: "css",
-    scss: "scss",
-    less: "less",
-    html: "html",
-    svelte: "html",
-    vue: "html",
-    rs: "rust",
-    py: "python",
-    toml: "ini",
-    ini: "ini",
-    yml: "yaml",
-    yaml: "yaml",
-    sh: "shell",
-    bash: "shell",
-    zsh: "shell",
-    ps1: "powershell",
-    sql: "sql",
-    go: "go",
-    c: "c",
-    h: "c",
-    cc: "cpp",
-    cpp: "cpp",
-    hpp: "cpp",
-    java: "java",
-    kt: "kotlin",
-    swift: "swift",
-    rb: "ruby",
-    php: "php",
-    xml: "xml",
-  };
-
-  function languageFor(path: string): string {
-    const extension = path.split(".").pop()?.toLowerCase() ?? "";
-    return LANGUAGES[extension] ?? "plaintext";
-  }
 
   $effect(() => {
     const element = container;
@@ -74,7 +28,7 @@
       };
       if (disposed) return;
 
-      const language = languageFor(file.path);
+      const language = languageForPath(file.path);
       models = [
         monaco.editor.createModel(file.old_text ?? "", language),
         monaco.editor.createModel(file.new_text ?? "", language),

@@ -13,10 +13,11 @@
   import { sessionNeedsAttention } from "#lib/session-status.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { layoutState } from "#lib/stores/layout.svelte.ts";
+  import { DOCK_LAUNCHERS, type DockLauncherId } from "#lib/dock/registry.ts";
+  import { cn } from "#lib/utils.ts";
   import MenuIcon from "@lucide/svelte/icons/menu";
   import PanelLeftOpenIcon from "@lucide/svelte/icons/panel-left-open";
   import PanelRightOpenIcon from "@lucide/svelte/icons/panel-right-open";
-  import WrenchIcon from "@lucide/svelte/icons/wrench";
 
   interface Props {
     session: SessionSummary | null;
@@ -29,7 +30,9 @@
     canNewSessionHere: boolean;
     onNewSessionHere: () => void;
     onForceStop: () => void;
-    onOpenTools: () => void;
+    /** Active launcher tool (null while the dock is closed or a file tab is active). */
+    activeTool: DockLauncherId | null;
+    onToggleTool: (id: DockLauncherId) => void;
     onDeleted: () => void;
   }
 
@@ -44,7 +47,8 @@
     canNewSessionHere,
     onNewSessionHere,
     onForceStop,
-    onOpenTools,
+    activeTool,
+    onToggleTool,
     onDeleted,
   }: Props = $props();
 
@@ -116,15 +120,30 @@
         class={layoutState.sidebarCollapsed ? "size-7 px-0" : "size-7 px-0 lg:hidden"}
       />
       {#if session}
-        <button
-          type="button"
-          class="hover:bg-accent text-muted-foreground hover:text-foreground flex size-7 items-center justify-center rounded-md border lg:hidden"
-          onclick={onOpenTools}
-          title={m.session_tools_title()}
+        <div
+          class="border-border flex items-center rounded-md border p-0.5 lg:hidden"
+          role="group"
           aria-label={m.session_tools_title()}
         >
-          <WrenchIcon class="size-4" />
-        </button>
+          {#each DOCK_LAUNCHERS as tool (tool.id)}
+            {@const Icon = tool.icon}
+            <button
+              type="button"
+              class={cn(
+                "flex size-6 items-center justify-center rounded-sm transition-colors",
+                activeTool === tool.id
+                  ? "bg-signal-soft text-signal"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
+              title={tool.label()}
+              aria-label={tool.label()}
+              aria-pressed={activeTool === tool.id}
+              onclick={() => onToggleTool(tool.id)}
+            >
+              <Icon class="size-3.5" />
+            </button>
+          {/each}
+        </div>
       {/if}
 
       {#if layoutState.rightRailCollapsed}

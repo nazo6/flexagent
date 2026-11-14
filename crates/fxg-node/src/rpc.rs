@@ -57,6 +57,12 @@ async fn execute_inner(
     request: NodeRpcRequest,
     source: &AuditSource,
 ) -> Result<NodeRpcResponse, NodeError> {
+    if source.via_hub && request.requires_local_workspace_access() {
+        return Err(NodeError::Forbidden(
+            "workspace file access is only available over the local connection".to_owned(),
+        ));
+    }
+
     match request {
         NodeRpcRequest::GetGitDiff {
             session_id,
@@ -120,6 +126,34 @@ async fn execute_inner(
         NodeRpcRequest::BrowseFs { path } => {
             let response = crate::fs_browse::browse_fs(path.as_deref())?;
             Ok(NodeRpcResponse::BrowseFs { response })
+        }
+        NodeRpcRequest::WorkspaceFsList { path } => {
+            let response = crate::workspace::list_workspace(state, &path).await?;
+            Ok(NodeRpcResponse::WorkspaceFsList { response })
+        }
+        NodeRpcRequest::WorkspaceFsFile { path } => {
+            let file = crate::workspace::read_workspace_file(state, &path).await?;
+            Ok(NodeRpcResponse::WorkspaceFile { file })
+        }
+        NodeRpcRequest::WorkspaceGitStatus { path } => {
+            let response = crate::workspace::workspace_git_status(state, &path).await?;
+            Ok(NodeRpcResponse::WorkspaceGitStatus { response })
+        }
+        NodeRpcRequest::WorkspaceGitDiff {
+            path,
+            scope,
+            base_branch,
+            file,
+        } => {
+            let diff = crate::workspace::workspace_git_diff(
+                state,
+                &path,
+                scope,
+                base_branch.as_deref(),
+                file.as_deref(),
+            )
+            .await?;
+            Ok(NodeRpcResponse::WorkspaceGitDiff { diff })
         }
         NodeRpcRequest::ProjectScan { dir } => {
             let scanned_dirs = state.project_scan(dir.as_deref().map(Path::new)).await?;

@@ -73,6 +73,9 @@ import type {
   UpsertSecretRequest,
   WorktreeInfo,
   WorktreesResponse,
+  WorkspaceFileView,
+  WorkspaceFsListResponse,
+  WorkspaceGitStatusResponse,
 } from "#lib/generated/bindings.ts";
 import { errorCodeMessage } from "./error-messages";
 import { ApiError } from "./errors";
@@ -277,6 +280,53 @@ export class ApiClient {
       "GET",
       `/api/v1/nodes/${encodeURIComponent(nodeId)}/fs/browse`,
       { query: { path } },
+    );
+  }
+
+  /** `GET /api/v1/nodes/:id/workspace/fs/list` */
+  workspaceFsList(nodeId: string, path: string): Promise<WorkspaceFsListResponse> {
+    return this.#request<WorkspaceFsListResponse>(
+      "GET",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/workspace/fs/list`,
+      { query: { path } },
+    );
+  }
+
+  /** `GET /api/v1/nodes/:id/workspace/fs/file` */
+  workspaceFsFile(nodeId: string, path: string): Promise<WorkspaceFileView> {
+    return this.#request<WorkspaceFileView>(
+      "GET",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/workspace/fs/file`,
+      { query: { path } },
+    );
+  }
+
+  /** `GET /api/v1/nodes/:id/workspace/git/status` */
+  workspaceGitStatus(nodeId: string, path: string): Promise<WorkspaceGitStatusResponse> {
+    return this.#request<WorkspaceGitStatusResponse>(
+      "GET",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/workspace/git/status`,
+      { query: { path } },
+    );
+  }
+
+  /** `GET /api/v1/nodes/:id/workspace/git/diff` */
+  workspaceGitDiff(
+    nodeId: string,
+    path: string,
+    options: { scope?: DiffScope; base?: string; file?: string } = {},
+  ): Promise<WorkspaceDiffResponse> {
+    return this.#request<WorkspaceDiffResponse>(
+      "GET",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/workspace/git/diff`,
+      {
+        query: {
+          path,
+          scope: options.scope ?? "uncommitted",
+          base: options.base,
+          file: options.file,
+        },
+      },
     );
   }
 

@@ -14,7 +14,8 @@ use serde::{Deserialize, Serialize};
 use crate::client_api::HubLinkStatus;
 use crate::client_api::{
     AgentCapabilitiesPreview, AgentsResponse, FsBrowseResponse, ProjectLinkResponse,
-    ProjectPreview, ProjectScanResponse, ProjectUnlinkResponse, TerminalsResponse, WorktreeInfo,
+    ProjectPreview, ProjectScanResponse, ProjectUnlinkResponse, TerminalsResponse,
+    WorkspaceFileView, WorkspaceFsListResponse, WorkspaceGitStatusResponse, WorktreeInfo,
 };
 use crate::common::{
     AgentAction, ClientSource, DataSafety, DiffScope, ElicitationContent, ErrorInfo,
@@ -33,7 +34,7 @@ use crate::{CommandId, NodeId, ProjectId, SecretId, SessionId};
 /// The node and the hub must come from the same `fxg` release. A node
 /// with an older protocol is rejected at `NodeHello`; backward compatibility
 /// shims are intentionally not provided.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 /// Synchronization state of a session held by the node (reported in `NodeHello`).
 ///
 /// The hub compares it with `last_node_seq` in its own DB and returns
@@ -230,6 +231,46 @@ pub enum NodeRpcRequest {
         /// Target session ID
         session_id: SessionId,
     },
+    /// List a directory inside a registered workspace.
+    WorkspaceFsList {
+        /// Directory path
+        path: String,
+    },
+    /// Read a file inside a registered workspace.
+    WorkspaceFsFile {
+        /// File path
+        path: String,
+    },
+    /// Read the Git status of a registered workspace.
+    WorkspaceGitStatus {
+        /// Directory inside the workspace
+        path: String,
+    },
+    /// Fetch the diff of a registered workspace, optionally for one file.
+    WorkspaceGitDiff {
+        /// Directory inside the workspace
+        path: String,
+        /// Diff scope
+        scope: DiffScope,
+        /// Base branch for `BranchBase`
+        base_branch: Option<String>,
+        /// Absolute file path (omit for the whole workspace)
+        file: Option<String>,
+    },
+}
+
+impl NodeRpcRequest {
+    /// Whether the operation exposes workspace files and is therefore limited
+    /// to a direct (non-hub) client connection.
+    pub fn requires_local_workspace_access(&self) -> bool {
+        matches!(
+            self,
+            Self::WorkspaceFsList { .. }
+                | Self::WorkspaceFsFile { .. }
+                | Self::WorkspaceGitStatus { .. }
+                | Self::WorkspaceGitDiff { .. }
+        )
+    }
 }
 
 impl NodeRpcRequest {
@@ -272,6 +313,26 @@ pub enum NodeRpcResponse {
     BrowseFs {
         /// Browse result
         response: FsBrowseResponse,
+    },
+    /// Workspace directory listing (`WorkspaceFsList`).
+    WorkspaceFsList {
+        /// Listing result
+        response: WorkspaceFsListResponse,
+    },
+    /// Workspace file content (`WorkspaceFsFile`).
+    WorkspaceFile {
+        /// File content
+        file: WorkspaceFileView,
+    },
+    /// Workspace Git status (`WorkspaceGitStatus`).
+    WorkspaceGitStatus {
+        /// Status result
+        response: WorkspaceGitStatusResponse,
+    },
+    /// Workspace Git diff (`WorkspaceGitDiff`).
+    WorkspaceGitDiff {
+        /// Diff result
+        diff: WorkspaceDiffResponse,
     },
     /// Project scan payload (`ProjectScan`).
     ProjectScan {
@@ -462,7 +523,8 @@ pub enum NodeToHubMsg {
     PtyOpened {
         /// Correlation ID of the spawn request
         request_id: CommandId,
-        /// Actual PTY ID (an existing terminal is reused for the same workspace)
+        /// Actual PTY ID (an existing terminal is reused for the same workspace
+        /// and terminal ID)
         pty_id: String,
         /// Canonical workspace path
         path: String,
@@ -622,17 +684,20 @@ pub enum HubToNodeMsg {
     },
     /// Request to open the workspace web terminal (PTY).
     ///
-    /// Opening the same workspace again attaches to the running terminal. The
-    /// node answers with [`NodeToHubMsg::PtyOpened`].
+    /// Opening the same workspace and terminal ID again attaches to the running
+    /// terminal. The node answers with [`NodeToHubMsg::PtyOpened`].
     PtySpawn {
         /// Correlation ID for the reply
         request_id: CommandId,
-        /// Proposed PTY ID (reused when the workspace already has a terminal)
+        /// Proposed PTY ID (reused when the workspace terminal already exists)
         pty_id: String,
         /// Workspace directory
         path: String,
         /// Session that opened the terminal (origin)
         session_id: Option<SessionId>,
+        /// Terminal tab identity inside the workspace (`None` = legacy single terminal)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        terminal_id: Option<String>,
         /// Number of columns
         cols: u16,
         /// Number of rows
@@ -830,6 +895,7 @@ mod tests {
             pty_id: "p1".into(),
             path: "/home/u/repo".into(),
             session_id: Some("s1".into()),
+            terminal_id: Some("tab-1".into()),
             cols: 80,
             rows: 24,
             new: false,
@@ -838,6 +904,7 @@ mod tests {
         assert_eq!(json["op"], "pty_spawn");
         assert_eq!(json["request_id"], "c1");
         assert_eq!(json["path"], "/home/u/repo");
+        assert_eq!(json["terminal_id"], "tab-1");
         assert_eq!(serde_json::from_value::<HubToNodeMsg>(json).unwrap(), spawn);
 
         let opened = NodeToHubMsg::PtyOpened {

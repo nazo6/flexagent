@@ -1362,6 +1362,7 @@ mod tests {
             node_id: daemon.state().node_id().into(),
             path: path.clone(),
             session_id: None,
+            terminal_id: Some("tab-1".to_owned()),
             cols: 80,
             rows: 24,
             new: false,
@@ -1393,6 +1394,64 @@ mod tests {
         assert_eq!(daemon.state().pty().list()[0].attached, 1);
         daemon.state().pty_detach(&first.pty_id).await;
         assert_eq!(daemon.state().pty().list()[0].attached, 0);
+
+        daemon.shutdown();
+        daemon.wait().await;
+    }
+
+    #[tokio::test]
+    async fn different_terminal_ids_open_separate_shells() {
+        use fxg_hub::api::ClientApiBackend as _;
+
+        let (daemon, dir) = start_test_daemon().await;
+        let workdir = dir.path().join("workspace");
+        std::fs::create_dir_all(&workdir).expect("mkdir");
+        daemon
+            .state()
+            .resolve_and_register_project(&workdir)
+            .await
+            .expect("register project");
+        let params = fxg_hub::api::PtyOpenParams {
+            pty_id: "pty-a".to_owned(),
+            node_id: daemon.state().node_id().into(),
+            path: workdir.to_string_lossy().into_owned(),
+            session_id: None,
+            terminal_id: Some("tab-1".to_owned()),
+            cols: 80,
+            rows: 24,
+            new: false,
+            remote: false,
+        };
+
+        let first = daemon
+            .state()
+            .pty_open(params.clone())
+            .await
+            .expect("open first");
+        let second = daemon
+            .state()
+            .pty_open(fxg_hub::api::PtyOpenParams {
+                pty_id: "pty-b".to_owned(),
+                terminal_id: Some("tab-2".to_owned()),
+                ..params.clone()
+            })
+            .await
+            .expect("open second");
+        assert!(!first.attached);
+        assert!(!second.attached);
+        assert_ne!(first.pty_id, second.pty_id);
+        assert_eq!(daemon.state().pty().list().len(), 2);
+
+        let reopened = daemon
+            .state()
+            .pty_open(fxg_hub::api::PtyOpenParams {
+                pty_id: "pty-c".to_owned(),
+                ..params
+            })
+            .await
+            .expect("reopen first");
+        assert!(reopened.attached);
+        assert_eq!(reopened.pty_id, first.pty_id);
 
         daemon.shutdown();
         daemon.wait().await;
@@ -1436,6 +1495,7 @@ mod tests {
             node_id: daemon.state().node_id().into(),
             path: workdir.to_string_lossy().into_owned(),
             session_id: None,
+            terminal_id: Some("tab-1".to_owned()),
             cols: 80,
             rows: 24,
             new: false,
@@ -1601,6 +1661,156 @@ mod tests {
             sessions[0].status,
             fxg_protocol::common::SessionStatus::Stopped
         );
+
+        daemon.shutdown();
+        daemon.wait().await;
+    }
+
+    #[tokio::test]
+    async fn workspace_file_api_stays_inside_registered_workspace() {
+        use crate::NodeError;
+        use crate::workspace;
+        use fxg_protocol::client_api::{WorkspaceFileContent, WorkspaceGitFileStatus};
+        use fxg_protocol::common::DiffScope;
+
+        let (daemon, dir) = start_test_daemon().await;
+        let workdir = dir.path().join("workspace");
+        std::fs::create_dir_all(&workdir).expect("mkdir");
+        let path = fxg_pty::canonicalize(&workdir).expect("canonical workspace");
+        let path_str = path.to_string_lossy().into_owned();
+        daemon
+            .state()
+            .resolve_and_register_project(&workdir)
+            .await
+            .expect("register project");
+
+        crate::git::run_git(&path, &["init"])
+            .await
+            .expect("git init");
+        crate::git::run_git(&path, &["config", "user.email", "test@example.com"])
+            .await
+            .expect("git email");
+        crate::git::run_git(&path, &["config", "user.name", "Test"])
+            .await
+            .expect("git name");
+        std::fs::write(path.join("hello.txt"), "hello\n").expect("write hello");
+        crate::git::run_git(&path, &["add", "hello.txt"])
+            .await
+            .expect("git add");
+        crate::git::run_git(&path, &["commit", "-m", "initial"])
+            .await
+            .expect("git commit");
+        std::fs::write(path.join("hello.txt"), "hello\nworld\n").expect("modify hello");
+        std::fs::write(path.join("new.txt"), "new\n").expect("write new");
+
+        let listing = workspace::list_workspace(daemon.state(), &path_str)
+            .await
+            .expect("list");
+        assert_eq!(listing.root_path, path_str);
+        assert!(
+            listing
+                .entries
+                .iter()
+                .any(|entry| entry.name == "hello.txt")
+        );
+        assert!(listing.entries.iter().any(|entry| entry.name == "new.txt"));
+        assert!(!listing.entries.iter().any(|entry| entry.name == ".git"));
+
+        let hello = path.join("hello.txt").to_string_lossy().into_owned();
+        let view = workspace::read_workspace_file(daemon.state(), &hello)
+            .await
+            .expect("read");
+        match view.content {
+            WorkspaceFileContent::Text { text, .. } => assert_eq!(text, "hello\nworld\n"),
+            _ => panic!("expected text file"),
+        }
+
+        // A registered image extension is returned as a data-ready image, not binary.
+        let png = path.join("pixel.png");
+        std::fs::write(
+            &png,
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89",
+        )
+        .expect("write png");
+        let image = workspace::read_workspace_file(daemon.state(), &png.to_string_lossy())
+            .await
+            .expect("read image");
+        match image.content {
+            WorkspaceFileContent::Image { mime, data_b64 } => {
+                assert_eq!(mime, "image/png");
+                assert!(!data_b64.is_empty());
+            }
+            _ => panic!("expected image file"),
+        }
+
+        let status = workspace::workspace_git_status(daemon.state(), &path_str)
+            .await
+            .expect("status");
+        assert!(status.is_repository);
+        assert!(status.entries.iter().any(|entry| {
+            entry.path == "hello.txt" && entry.status == WorkspaceGitFileStatus::Modified
+        }));
+        assert!(status.entries.iter().any(|entry| {
+            entry.path == "new.txt" && entry.status == WorkspaceGitFileStatus::Untracked
+        }));
+
+        let diff = workspace::workspace_git_diff(
+            daemon.state(),
+            &path_str,
+            DiffScope::Uncommitted,
+            None,
+            Some(&hello),
+        )
+        .await
+        .expect("diff");
+        assert_eq!(diff.files.len(), 1);
+        assert_eq!(diff.files[0].path, "hello.txt");
+
+        let new_file = path.join("new.txt").to_string_lossy().into_owned();
+        let untracked = workspace::workspace_git_diff(
+            daemon.state(),
+            &path_str,
+            DiffScope::Uncommitted,
+            None,
+            Some(&new_file),
+        )
+        .await
+        .expect("untracked diff");
+        assert_eq!(untracked.files.len(), 1);
+        assert_eq!(untracked.files[0].new_text.as_deref(), Some("new\n"));
+
+        let outside = dir.path().join("outside.txt");
+        std::fs::write(&outside, "no").expect("write outside");
+        let error = workspace::list_workspace(daemon.state(), &outside.to_string_lossy())
+            .await
+            .expect_err("outside path must be rejected");
+        assert!(matches!(error, NodeError::Forbidden(_)));
+
+        let sub = path.join("sub");
+        std::fs::create_dir_all(&sub).expect("mkdir sub");
+        std::fs::write(sub.join("nested.txt"), "nested").expect("write nested");
+        let sub_listing = workspace::list_workspace(daemon.state(), &sub.to_string_lossy())
+            .await
+            .expect("subdirectory listing");
+        assert!(
+            sub_listing
+                .entries
+                .iter()
+                .any(|entry| entry.name == "nested.txt")
+        );
+        assert_eq!(sub_listing.root_path, path_str);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+
+            let link = path.join("escape.txt");
+            symlink(&outside, &link).expect("symlink");
+            let error = workspace::read_workspace_file(daemon.state(), &link.to_string_lossy())
+                .await
+                .expect_err("symlink escape must be rejected");
+            assert!(matches!(error, NodeError::Forbidden(_)));
+        }
 
         daemon.shutdown();
         daemon.wait().await;

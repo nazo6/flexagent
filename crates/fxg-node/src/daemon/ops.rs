@@ -34,6 +34,8 @@ pub struct AuditSource {
     pub auth_subject: String,
     /// User-Agent
     pub user_agent: Option<String>,
+    /// Whether the operation was relayed by the hub instead of a direct client.
+    pub via_hub: bool,
 }
 
 impl AuditSource {
@@ -43,6 +45,7 @@ impl AuditSource {
             client_ip: "local".to_owned(),
             auth_subject: "local".to_owned(),
             user_agent: None,
+            via_hub: false,
         }
     }
 
@@ -52,6 +55,7 @@ impl AuditSource {
             client_ip: "server".to_owned(),
             auth_subject: format!("node:{node_id}"),
             user_agent: None,
+            via_hub: true,
         }
     }
 }
