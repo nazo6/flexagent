@@ -25,7 +25,7 @@ ACP だけでは、アイコンや起動オプションなどのエージェン�
 ACP に存在しない機能（独自 API によるモデル名取得など）を扱えない。将来の
 拡張を `agent_id` 分岐なしで追加できるよう、実装を次の3層に分ける。
 現在は `AgentCatalog`、Tier 2 (`ExtendedAcpDriver` + `AgentExtension`)、
-Tier 3 (`impl AgentDriver`) の基盤と `opencode` の Tier 2 移行まで実装済みである。
+Tier 3 (`impl AgentDriver`) の基盤を持ち、`opencode` は Tier 2 で実装している。
 
 | 層                   | 実行時の実装                           | ACP の再利用 | エージェントごとに追加するコード            |
 | :------------------- | :------------------------------------- | :----------- | :------------------------------------------ |
@@ -77,9 +77,8 @@ Tier 3 (`impl AgentDriver`) の基盤と `opencode` の Tier 2 移行まで実�
   capability の集合）は、`AgentExtension` が純データ
   (`AcpExtensionOptions`) として返す。`AcpDriver` は通知の受信・順序・
   子セッションのコンテキスト管理・正規化だけを行い、opencode 固有の
-  解釈は `OpenCodeExtension` に閉じる。D4 の「`AcpDriver` を変更しない」
-  は「エージェント別の分岐を入れない」の意味であり、汎用の ACP seam は
-  コアに置く。
+  解釈は `OpenCodeExtension` に閉じる。`AcpDriver` にはエージェント別の分岐を
+  入れず、汎用の ACP seam だけをコアに置く。
 - ビルトイン provider は拡張を `with_extension(<extension ID>, <instance>)`
   で明示する。extension ID はエージェント ID から暗黙導出しない。カスタム定義は
   この ID を `CustomAgentConfig.extension` に保存し、一覧
@@ -173,7 +172,7 @@ ACPでは、エディタやオーケストレータ側が **`acp::Client` トレ
   - エージェントの「質問」ツールを `UnifiedEventPayload::ElicitationRequest`
     として記録し、Web / Android / CLI へブロードキャストする。回答は
     `accept` (form content) / `decline` / `cancel` の 3 択。
-  - Phase 1 は form モードのみ広告する
+  - form モードのみを広告する
     (`clientCapabilities.elicitation.form`)。`accept` の content は送信前に
     クライアントが `requested_schema` に対して軽量検証し、ターンキャンセル時は
     未解決の elicitation を `cancel` で解決する (仕様 MUST)。

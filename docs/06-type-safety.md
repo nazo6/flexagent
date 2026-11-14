@@ -32,12 +32,12 @@ FlexAgent は Node ⇔ Hub ⇔ Client の3経路で同じイベントと REST �
 
 許される `String` は次のいずれかである。
 
-| 種類          | 例                                     | 扱い                                |
-| :------------ | :------------------------------------- | :---------------------------------- |
-| 自由入力の ID | `session_id`, `agent_id`, `project_id` | newtype 化を検討（Phase 4）         |
-| 表示名・説明  | `title`, `name`, `message`             | `String` のまま                     |
-| 外部識別子    | `mode_id`, `providerID`                | エージェント定義の値なので `String` |
-| 列挙値        | `status`, `kind`, `role`               | enum（未知値は `Unknown`）          |
+| 種類          | 例                                     | 扱い                                                                                   |
+| :------------ | :------------------------------------- | :------------------------------------------------------------------------------------- |
+| 自由入力の ID | `session_id`, `agent_id`, `project_id` | 主要 ID (`SessionId`, `NodeId`, `EventId`, `ProjectId`, `CommandId`) は newtype 化済み |
+| 表示名・説明  | `title`, `name`, `message`             | `String` のまま                                                                        |
+| 外部識別子    | `mode_id`, `providerID`                | エージェント定義の値なので `String`                                                    |
+| 列挙値        | `status`, `kind`, `role`               | enum（未知値は `Unknown`）                                                             |
 
 ### 2.2 未知値を既定値に丸めない
 

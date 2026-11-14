@@ -37,8 +37,7 @@
     `agent_settings` / `custom_agents` / `project_path_links` は `node.db`、
     `hub_settings` / `provisioners` は `hub.db`)。ノード ⇔ ハブ間で設定を
     同期・マージしない。
-  - `node.toml` / `hub.toml` は待受アドレス・許可リスト・ログ・セキュリティ境界のみ。
-    `.fxg.toml` と旧 JSON 設定ファイルは廃止。
+  - `node.toml` / `hub.toml` は待受アドレス・許可リスト・ログ・セキュリティ境界のみを扱う。
   - 設定・データ・実行時状態・ログ・キャッシュは OS 標準ルート
     (`dirs`) 配下に置き、`node` / `hub` のロール別に分ける
     (詳細は [`docs/05-cli-and-config.md`](docs/05-cli-and-config.md) §2.1)。
@@ -144,8 +143,6 @@
   - `docs/` 配下全体（ステート docs・`proposals/`・`changelog/`）は**日本語のまま維持**する。
   - 多バイト境界のテストなど意図的に日本語を残す行には
     `// allow-japanese: <理由>` を付ける。
-  - 英語化は**挙動変更・リファクタと混ぜず、クレート単位の独立したコミット**で行う
-    (レビュー可能な差分サイズを保つ)。
   - UI の多言語化は **`paraglide-js`** を前提とする。Rust 側の API エラーは
     `ErrorCode` を i18n キーとして扱い、`message` は英語のフォールバックとして残す
     (サーバーにロケール交渉を持ち込まない)。
@@ -160,13 +157,12 @@
   - ドメイン値 (`kind` / `status` / `role` / `mode` / `client_source` など) を
     `String` で持たず、外部境界で enum に変換する。未知値は
     `Unknown(String)` で保持し、既定値に丸めない。
-  - `serde_json::Value` は境界専用。`RawJson` (Phase 2) または
+  - `serde_json::Value` は境界専用。`RawJson` または
     理由付きの file-level `#![allow(clippy::disallowed_types)]` を置いた
     ファイルでのみ使う。
   - `kind.starts_with(...)` / `status == "..."` のような文字列判定を書かない。
     enum のメソッド (`is_always()` など) を使う。
-  - `mise run lint:errors` を通す。既存違反の allow は理由付きで記録し、
-    移行フェーズで削除する。
+  - `mise run lint:errors` を通す。残存する allow は型化完了時に削除する。
   - 詳細: [`docs/06-type-safety.md`](docs/06-type-safety.md)
 - **変更履歴 (Changelog) と設計提案 (Proposal) の記録**:
   - 複数クレートに跨がる設計変更や複数フェーズの実装計画は `docs/proposals/YYYY-MM-DD-title.md`
