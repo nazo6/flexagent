@@ -593,9 +593,15 @@ Web PTY（対話シェル起動）は最も権限が強いため、以下の防�
 
 - **リモートPTY制御設定 (`allow_remote_pty`)**:
   - ノード所有設定 (`node.db` の `node_settings.allow_remote_pty`、既定 `false`) により、
-    リモート（ハブ経由）からの `PtySpawn` を制御します。`false` の場合は無効です。
+    リモート（ハブ経由）からの `PtySpawn`（workspace の terminal open）を制御します。
+    `false` の場合は無効です。
     変更は Web UI の「設定 > ノード > 一般」または Client API から行います。
   - 無効時は、スマホ等のWebUIからは「エージェントへの指示とツールの承認/却下」のみが行え、自由なシェルの直接実行は遮断されます（ローカル端末直結時のみPTY利用可能）。
+  - 経路によらず、PTY の cwd はそのノードに登録済みのプロジェクトパス
+    (`project_node_bindings` / `project_path_links`) または既存セッションの
+    `local_path` に完全一致するものだけを許可します（任意ディレクトリでのシェル起動を防ぐ）。
+  - ターミナルは `(node_id, local_path)` 単位で 1 本に集約され、socket 切断では
+    停止しません。無操作 TTL の経過・明示 kill・プロセス終了・キルスイッチで終了します。
 
 ### 7.5 緊急キルスイッチ（Panic Button）と監査ログ
 

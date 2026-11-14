@@ -28,7 +28,10 @@ pub mod pty;
 
 pub use error::PtyError;
 pub use proc::{ProcessTreeGuard, TreeShutdownOutcome, canonicalize, resolve_command};
-pub use pty::{PtyEvent, PtySessionInfo, PtySessionManager, PtySpawnRequest};
+pub use pty::{
+    DEFAULT_IDLE_TIMEOUT, PtyEvent, PtyOpenOutcome, PtyReplay, PtySessionInfo, PtySessionManager,
+    PtySpawnRequest,
+};
 
 #[cfg(windows)]
 pub use proc::WinJobGuard;

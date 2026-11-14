@@ -11,13 +11,26 @@
   interface Props {
     panel: SessionPanelId;
     sessionId: string;
+    /** Node that owns the session workspace */
+    nodeId: string;
+    /** Workspace directory of the session */
+    localPath: string;
     items: TimelineItem[];
     mobile?: boolean;
     onclose: () => void;
     class?: string;
   }
 
-  let { panel, sessionId, items, mobile = false, onclose, class: className = "" }: Props = $props();
+  let {
+    panel,
+    sessionId,
+    nodeId,
+    localPath,
+    items,
+    mobile = false,
+    onclose,
+    class: className = "",
+  }: Props = $props();
 
   const definition = $derived(sessionPanel(panel));
   const Icon = $derived(definition.icon);
@@ -64,7 +77,7 @@
     </div>
   {:else}
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden p-2">
-      <TerminalView {sessionId} fill />
+      <TerminalView {sessionId} {nodeId} path={localPath} fill />
     </div>
   {/if}
 </section>

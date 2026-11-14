@@ -28,7 +28,7 @@ use tokio::sync::broadcast;
 
 use crate::api::{
     ApiError, ClientApiBackend, ClientCommand, ClientEvent, ClientInfo, PtyChannelError,
-    PtyChannelEvent, PtySpawnParams, SystemExtras, auth,
+    PtyChannelEvent, PtyOpenOutcome, PtyOpenParams, SystemExtras, auth,
 };
 use fxg_protocol::settings::{
     HubSettingsSnapshot, SecretsResponse, UpdateHubSettingsRequest, UpsertSecretRequest,
@@ -850,55 +850,12 @@ impl ClientApiBackend for HubState {
         crate::push::register_subscription(&self.inner.db, &request, &client).await
     }
 
-    async fn pty_spawn(&self, params: PtySpawnParams) -> Result<(), PtyChannelError> {
-        let session = self
-            .inner
-            .db
-            .get_session(&params.session_id)
-            .await
-            .map_err(PtyChannelError::internal)?
-            .ok_or_else(|| {
-                PtyChannelError::not_found(format!("session not found: {}", params.session_id))
-            })?;
-        if !self.inner.hub.is_online(&session.node_id).await {
-            return Err(PtyChannelError::offline(format!(
-                "node is offline: {}",
-                session.node_id
-            )));
-        }
-        self.inner
-            .hub
-            .insert_pty(&params.pty_id, &session.node_id)
-            .await;
-        let result = self
-            .inner
-            .hub
-            .send(
-                &session.node_id,
-                HubToNodeMsg::PtySpawn {
-                    pty_id: params.pty_id.clone(),
-                    session_id: params.session_id.clone().into(),
-                    cols: params.cols,
-                    rows: params.rows,
-                    shell_cmd: params.shell_cmd.clone(),
-                },
-            )
-            .await;
-        if let Err(err) = result {
-            self.inner.hub.remove_pty(&params.pty_id).await;
-            return Err(PtyChannelError::new(err.code.as_str(), err.message));
-        }
-        Ok(())
+    async fn pty_open(&self, params: PtyOpenParams) -> Result<PtyOpenOutcome, PtyChannelError> {
+        self.inner.hub.pty_open(params).await
     }
 
-    async fn pty_attach(&self, pty_id: &str) -> Result<(), PtyChannelError> {
-        if self.inner.hub.pty_subscribe(pty_id).await.is_some() {
-            Ok(())
-        } else {
-            Err(PtyChannelError::not_found(format!(
-                "pty session not found: {pty_id}"
-            )))
-        }
+    async fn pty_attach(&self, pty_id: &str) -> Result<PtyOpenOutcome, PtyChannelError> {
+        self.inner.hub.pty_attach(pty_id).await
     }
 
     async fn pty_subscribe(
@@ -953,20 +910,8 @@ impl ClientApiBackend for HubState {
             .await
     }
 
-    async fn pty_disconnect(&self, pty_id: &str) {
-        fxg_protocol::discard_with!(
-            self.inner
-                .hub
-                .pty_send(
-                    pty_id,
-                    HubToNodeMsg::PtyKill {
-                        pty_id: pty_id.to_owned(),
-                    },
-                )
-                .await,
-            "notify the node that a pty websocket disconnected"
-        );
-        self.inner.hub.remove_pty(pty_id).await;
+    async fn pty_detach(&self, pty_id: &str) {
+        self.inner.hub.pty_detach(pty_id).await;
     }
 }
 

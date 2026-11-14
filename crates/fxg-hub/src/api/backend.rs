@@ -31,7 +31,9 @@ use fxg_protocol::settings::{
 use fxg_protocol::{CommandId, NodeId, SecretId, SessionId};
 use tokio::sync::broadcast;
 
-use super::{ApiError, PtyChannelError, PtyChannelEvent, PtySpawnParams, header_str};
+use super::{
+    ApiError, PtyChannelError, PtyChannelEvent, PtyOpenOutcome, PtyOpenParams, header_str,
+};
 
 /// Information about the connected client (for audit logs).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -692,13 +694,15 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     // PTY WS (`/api/v1/pty/ws`)
     // ------------------------------------------------------------------
 
-    /// Spawns a PTY (`params.pty_id` is assigned by the caller).
-    async fn pty_spawn(&self, params: PtySpawnParams) -> Result<(), PtyChannelError>;
+    /// Opens the workspace terminal (idempotent per workspace).
+    ///
+    /// A running terminal of the same workspace is reused unless `new` is set.
+    async fn pty_open(&self, params: PtyOpenParams) -> Result<PtyOpenOutcome, PtyChannelError>;
 
-    /// Checks whether a PTY exists (whether it can be attached).
-    async fn pty_attach(&self, pty_id: &str) -> Result<(), PtyChannelError>;
+    /// Attaches an additional client to an existing PTY.
+    async fn pty_attach(&self, pty_id: &str) -> Result<PtyOpenOutcome, PtyChannelError>;
 
-    /// Subscribes to PTY output.
+    /// Subscribes to PTY output (retained output is delivered first).
     async fn pty_subscribe(
         &self,
         pty_id: &str,
@@ -713,6 +717,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     /// Kills the PTY.
     async fn pty_kill(&self, pty_id: &str) -> Result<(), PtyChannelError>;
 
-    /// Kills PTYs spawned by this socket when the PTY WS disconnects (attached ones excluded).
-    async fn pty_disconnect(&self, pty_id: &str);
+    /// Detaches a client from the PTY (the terminal stays alive until its idle
+    /// timeout expires).
+    async fn pty_detach(&self, pty_id: &str);
 }

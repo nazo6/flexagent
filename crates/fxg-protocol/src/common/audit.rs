@@ -99,6 +99,8 @@ crate::open_string_enum! {
         ElicitationResolved => "elicitation_resolved",
         /// Web PTY spawned
         PtySpawn => "pty_spawn",
+        /// Web PTY terminated by a client
+        PtyKill => "pty_kill",
         /// Emergency kill switch
         KillSwitch => "kill_switch",
         /// Worktree managed

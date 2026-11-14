@@ -10,3 +10,4 @@ pub(super) mod sessions;
 pub(super) mod settings;
 pub(super) mod stream;
 pub(super) mod system;
+pub(super) mod terminals;

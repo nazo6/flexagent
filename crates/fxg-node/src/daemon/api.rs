@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use fxg_hub::api::{
     ApiError, ClientApiBackend, ClientCommand, ClientEvent, ClientInfo, PtyChannelError,
-    PtyChannelEvent, PtySpawnParams, SystemExtras,
+    PtyChannelEvent, SystemExtras,
 };
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
@@ -983,73 +983,84 @@ impl ClientApiBackend for DaemonState {
         Ok(KillSwitchResponse { notified_nodes: 1 })
     }
 
-    async fn pty_spawn(&self, params: PtySpawnParams) -> Result<(), PtyChannelError> {
-        let session = self
-            .db()
-            .get_session(&params.session_id)
+    async fn pty_open(
+        &self,
+        params: fxg_hub::api::PtyOpenParams,
+    ) -> Result<fxg_hub::api::PtyOpenOutcome, PtyChannelError> {
+        if params.node_id.as_str() != self.node_id() {
+            return Err(PtyChannelError::not_found(format!(
+                "requested node {} but this node is {}",
+                params.node_id.as_str(),
+                self.node_id()
+            )));
+        }
+        if params.remote && !self.node_settings().allow_remote_pty {
+            return Err(PtyChannelError::disabled(
+                "Remote PTY is disabled on this node by security policy",
+            ));
+        }
+        let path = self
+            .validate_terminal_path(&params.path)
             .await
-            .map_err(PtyChannelError::internal)?
-            .ok_or_else(|| {
-                PtyChannelError::not_found(format!("session not found: {}", params.session_id))
-            })?;
+            .map_err(|err| PtyChannelError::forbidden(err.to_string()))?;
         let mut request = fxg_pty::PtySpawnRequest::new(params.pty_id.clone());
-        request.session_id = Some(params.session_id.clone());
-        request.cwd = Some(PathBuf::from(&session.local_path));
-        request.shell_cmd = params.shell_cmd.clone();
+        request.session_id = params.session_id.as_ref().map(ToString::to_string);
+        request.workspace = Some(path.clone());
+        request.cwd = Some(path.clone());
         request.cols = params.cols;
         request.rows = params.rows;
-        self.pty()
-            .spawn(request)
+        let opened = self
+            .pty()
+            .open(request, params.new)
             .map_err(PtyChannelError::internal)?;
+        let source = if params.remote {
+            AuditSource::remote(self.node_id())
+        } else {
+            AuditSource::local()
+        };
         self.record_audit(
             fxg_db::audit::actions::PTY_SPAWN,
-            &AuditSource::local(),
-            Some(&params.session_id),
-            serde_json::json!({ "pty_id": params.pty_id }),
+            &source,
+            params.session_id.as_ref().map(|id| id.as_str()),
+            serde_json::json!({
+                "pty_id": opened.info.pty_id,
+                "path": path.to_string_lossy(),
+                "attached": opened.attached,
+            }),
         )
         .await;
-        Ok(())
+        Ok(fxg_hub::api::PtyOpenOutcome {
+            pty_id: opened.info.pty_id,
+            path: opened.info.path.to_string_lossy().into_owned(),
+            attached: opened.attached,
+            cols: opened.info.cols,
+            rows: opened.info.rows,
+        })
     }
 
-    async fn pty_attach(&self, pty_id: &str) -> Result<(), PtyChannelError> {
-        if self.pty().contains(pty_id) {
-            Ok(())
-        } else {
-            Err(PtyChannelError::not_found(format!(
-                "pty session not found: {pty_id}"
-            )))
-        }
+    async fn pty_attach(
+        &self,
+        pty_id: &str,
+    ) -> Result<fxg_hub::api::PtyOpenOutcome, PtyChannelError> {
+        let info = self.pty().attach(pty_id).map_err(map_pty_error)?;
+        Ok(fxg_hub::api::PtyOpenOutcome {
+            pty_id: info.pty_id,
+            path: info.path.to_string_lossy().into_owned(),
+            attached: true,
+            cols: info.cols,
+            rows: info.rows,
+        })
     }
 
     async fn pty_subscribe(
         &self,
         pty_id: &str,
     ) -> Result<broadcast::Receiver<PtyChannelEvent>, PtyChannelError> {
-        let mut events = self.pty().subscribe(pty_id).map_err(map_pty_error)?;
-        let (tx, rx) = broadcast::channel(PTY_CHANNEL_CAPACITY);
-        fxg_protocol::spawn_guarded!("pty subscriber forwarder", async move {
-            loop {
-                match events.recv().await {
-                    Ok(fxg_pty::PtyEvent::Output { data, .. }) => {
-                        if tx.send(PtyChannelEvent::Output { data }).is_err() {
-                            break;
-                        }
-                    }
-                    Ok(fxg_pty::PtyEvent::Exit { exit_code, .. }) => {
-                        fxg_protocol::discard_with!(
-                            tx.send(PtyChannelEvent::Exit { exit_code }),
-                            "broadcast a pty event"
-                        );
-                        break;
-                    }
-                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        tracing::debug!(skipped, "pty subscriber lagged");
-                    }
-                    Err(broadcast::error::RecvError::Closed) => break,
-                }
-            }
-        });
-        Ok(rx)
+        let (events, replay) = self
+            .pty()
+            .subscribe_with_replay(pty_id)
+            .map_err(map_pty_error)?;
+        Ok(channel_subscription(events, replay))
     }
 
     async fn pty_write(&self, pty_id: &str, data: &[u8]) -> Result<(), PtyChannelError> {
@@ -1064,11 +1075,19 @@ impl ClientApiBackend for DaemonState {
     }
 
     async fn pty_kill(&self, pty_id: &str) -> Result<(), PtyChannelError> {
-        self.pty().kill(pty_id).map_err(map_pty_error)
+        self.pty().kill(pty_id).map_err(map_pty_error)?;
+        self.record_audit(
+            fxg_db::audit::actions::PTY_KILL,
+            &AuditSource::local(),
+            None,
+            serde_json::json!({ "pty_id": pty_id }),
+        )
+        .await;
+        Ok(())
     }
 
-    async fn pty_disconnect(&self, pty_id: &str) {
-        fxg_protocol::discard_with!(self.pty().kill(pty_id), "kill the pty terminal");
+    async fn pty_detach(&self, pty_id: &str) {
+        self.pty().detach(pty_id);
     }
 }
 
@@ -1109,4 +1128,51 @@ fn map_pty_error(err: fxg_pty::PtyError) -> PtyChannelError {
         }
         other => PtyChannelError::internal(other),
     }
+}
+
+/// Wraps live PTY events so the retained output is delivered before the stream.
+///
+/// The receiver was created before the snapshot was read, so chunks with
+/// `seq < replay.next_seq` are already included in the replay and are dropped.
+fn channel_subscription(
+    mut events: broadcast::Receiver<fxg_pty::PtyEvent>,
+    replay: fxg_pty::PtyReplay,
+) -> broadcast::Receiver<PtyChannelEvent> {
+    let (tx, rx) = broadcast::channel(PTY_CHANNEL_CAPACITY);
+    if !replay.data.is_empty() {
+        fxg_protocol::discard_with!(
+            tx.send(PtyChannelEvent::Output {
+                data: replay.data,
+                seq: replay.next_seq.saturating_sub(1),
+            }),
+            "deliver retained pty output"
+        );
+    }
+    let next_seq = replay.next_seq;
+    fxg_protocol::spawn_guarded!("pty subscriber forwarder", async move {
+        loop {
+            match events.recv().await {
+                Ok(fxg_pty::PtyEvent::Output { data, seq, .. }) => {
+                    if seq < next_seq {
+                        continue;
+                    }
+                    if tx.send(PtyChannelEvent::Output { data, seq }).is_err() {
+                        break;
+                    }
+                }
+                Ok(fxg_pty::PtyEvent::Exit { exit_code, .. }) => {
+                    fxg_protocol::discard_with!(
+                        tx.send(PtyChannelEvent::Exit { exit_code }),
+                        "broadcast a pty event"
+                    );
+                    break;
+                }
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    tracing::debug!(skipped, "pty subscriber lagged");
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+    rx
 }

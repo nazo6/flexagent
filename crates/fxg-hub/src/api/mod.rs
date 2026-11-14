@@ -43,7 +43,10 @@ pub use backend::{ClientApiBackend, ClientCommand, ClientEvent, ClientInfo, Syst
 pub use counters::{CounterKind, DiagnosticsCounters};
 pub use diagnostics::{incident_retention, log_tail};
 pub use error::ApiError;
-pub use pty::{PtyChannelError, PtyChannelEvent, PtySpawnParams};
+pub use pty::{
+    PTY_CHANNEL_CAPACITY, PtyChannelError, PtyChannelEvent, PtyOpenOutcome, PtyOpenParams,
+    subscribe_with_replay,
+};
 pub use ws::REPLAY_BATCH_SIZE;
 
 use handlers::admin::{
@@ -75,6 +78,7 @@ use handlers::system::{
     auth_login, auth_logout, diagnostics, diagnostics_bundle, diagnostics_incidents, healthz, meta,
     readyz, resolve_incident, system_info,
 };
+use handlers::terminals::list_terminals;
 
 /// Returns a header value as `&str` (`None` for a missing or non-UTF-8 value).
 // `Result::ok` is disallowed by the error-handling policy, so the explicit
@@ -296,6 +300,7 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route("/api/v1/search", get(search::<B>))
         .route("/api/v1/push/subscribe", post(push_subscribe::<B>))
         .route("/api/v1/audit/logs", get(audit_logs::<B>))
+        .route("/api/v1/terminals", get(list_terminals::<B>))
         .route("/api/v1/client/ws", get(client_ws::<B>))
         .route("/api/v1/pty/ws", get(pty_ws::<B>))
         .layer(middleware::from_fn_with_state(

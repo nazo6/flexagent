@@ -27,12 +27,15 @@ use futures_util::{SinkExt, StreamExt};
 use fxg_db::Db;
 use fxg_protocol::common::{CommandResult, ErrorCode};
 use fxg_protocol::node_hub::{HubToNodeMsg, NodeToHubMsg, ResyncTarget};
-use fxg_protocol::util::uuid_v7;
+use fxg_protocol::util::{PtyOutputLog, uuid_v7};
 use fxg_protocol::{CommandId, NodeId};
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc, oneshot};
 
 use crate::api::auth::{hash_token, token_matches};
-use crate::api::{ApiError, ClientEvent, PtyChannelError, PtyChannelEvent, send_ws_json};
+use crate::api::{
+    ApiError, ClientEvent, PtyChannelError, PtyChannelEvent, PtyOpenOutcome, PtyOpenParams,
+    send_ws_json,
+};
 use crate::state::HubState;
 
 /// Timeout for the handshake (`NodeHello`) after a node connects.
@@ -56,6 +59,8 @@ enum PendingResponse {
     Command(CommandResult),
     /// Generic node RPC result (`NodeRpcResult`)
     Rpc(fxg_protocol::node_hub::NodeRpcOutcome),
+    /// Workspace terminal open result (`PtyOpened` / `PtyOpenFailed`)
+    PtyOpen(Result<PtyOpenedReply, PtyChannelError>),
     /// Failure such as a node disconnect
     Failed {
         /// Structured error code
@@ -63,6 +68,17 @@ enum PendingResponse {
         /// Human-readable message
         message: String,
     },
+}
+
+/// Node reply to a workspace terminal open request.
+struct PtyOpenedReply {
+    pty_id: String,
+    path: String,
+    cols: u16,
+    rows: u16,
+    attached: bool,
+    /// Retained output that seeds the hub replay log
+    snapshot: Vec<u8>,
 }
 
 /// Entry for a pending relay.
@@ -86,8 +102,18 @@ struct NodeConnection {
 struct PtyRoute {
     /// Owning node ID
     node_id: NodeId,
+    /// Canonical workspace path
+    path: String,
+    /// Number of columns at the last known size
+    cols: u16,
+    /// Number of rows at the last known size
+    rows: u16,
     /// Broadcast delivered to clients
     tx: broadcast::Sender<PtyChannelEvent>,
+    /// Retained output for attach-time replay
+    log: Arc<Mutex<PtyOutputLog>>,
+    /// Number of clients currently attached through this hub
+    clients: usize,
 }
 
 struct HubInner {
@@ -96,6 +122,9 @@ struct HubInner {
     nodes: RwLock<HashMap<String, NodeConnection>>,
     pending: Mutex<HashMap<String, PendingEntry>>,
     ptys: Mutex<HashMap<String, PtyRoute>>,
+    /// Serializes workspace opens so two clients cannot spawn two shells for the
+    /// same path.
+    pty_open_gate: Mutex<()>,
 }
 
 /// Node connection registry and command relay (referenced from the hub's shared state).
@@ -114,6 +143,7 @@ impl NodeHub {
                 nodes: RwLock::new(HashMap::new()),
                 pending: Mutex::new(HashMap::new()),
                 ptys: Mutex::new(HashMap::new()),
+                pty_open_gate: Mutex::new(()),
             }),
         }
     }
@@ -430,29 +460,206 @@ impl NodeHub {
     // PTY relay
     // ------------------------------------------------------------------
 
-    /// Registers a PTY relay destination (at spawn time).
-    pub(crate) async fn insert_pty(&self, pty_id: &str, node_id: &NodeId) {
-        let (tx, _) = broadcast::channel(PTY_CHANNEL_CAPACITY);
-        self.inner.ptys.lock().await.insert(
-            pty_id.to_owned(),
-            PtyRoute {
-                node_id: node_id.to_owned(),
-                tx,
-            },
+    /// Opens (or attaches to) the workspace terminal on its node.
+    ///
+    /// Opens are serialized per hub so concurrent clients of the same workspace
+    /// reuse one shell. The requesting client is counted as attached.
+    pub(crate) async fn pty_open(
+        &self,
+        params: PtyOpenParams,
+    ) -> Result<PtyOpenOutcome, PtyChannelError> {
+        if !self.is_online(&params.node_id).await {
+            return Err(PtyChannelError::offline(format!(
+                "node is offline: {}",
+                params.node_id
+            )));
+        }
+
+        let _gate = self.inner.pty_open_gate.lock().await;
+
+        let existing = {
+            let ptys = self.inner.ptys.lock().await;
+            ptys.iter()
+                .find(|(_, route)| route.node_id == params.node_id && route.path == params.path)
+                .map(|(pty_id, route)| (pty_id.clone(), route.cols, route.rows))
+        };
+        if let Some((pty_id, cols, rows)) = existing {
+            if !params.new {
+                {
+                    let mut ptys = self.inner.ptys.lock().await;
+                    if let Some(route) = ptys.get_mut(&pty_id) {
+                        route.clients = route.clients.saturating_add(1);
+                    }
+                }
+                if let Err(err) = self
+                    .send(
+                        &params.node_id,
+                        HubToNodeMsg::PtyAttach {
+                            pty_id: pty_id.clone(),
+                        },
+                    )
+                    .await
+                {
+                    let mut ptys = self.inner.ptys.lock().await;
+                    if let Some(route) = ptys.get_mut(&pty_id) {
+                        route.clients = route.clients.saturating_sub(1);
+                    }
+                    return Err(PtyChannelError::new(err.code.as_str(), err.message));
+                }
+                return Ok(PtyOpenOutcome {
+                    pty_id,
+                    path: params.path,
+                    attached: true,
+                    cols,
+                    rows,
+                });
+            }
+            // A new shell was requested: drop the old route (its clients see the
+            // stream close) and spawn below.
+            self.remove_pty(&pty_id).await;
+        }
+
+        let request_id = CommandId::from(uuid_v7());
+        let response = self
+            .request(
+                &params.node_id,
+                request_id.as_str(),
+                HubToNodeMsg::PtySpawn {
+                    request_id: request_id.clone(),
+                    pty_id: params.pty_id,
+                    path: params.path.clone(),
+                    session_id: params.session_id,
+                    cols: params.cols,
+                    rows: params.rows,
+                    new: params.new,
+                },
+                Duration::from_secs(30),
+            )
+            .await
+            .map_err(|err| PtyChannelError::new(err.code.as_str(), err.message))?;
+        let reply = match response {
+            PendingResponse::PtyOpen(Ok(reply)) => reply,
+            PendingResponse::PtyOpen(Err(err)) => return Err(err),
+            PendingResponse::Failed { code, message } => {
+                return Err(PtyChannelError::new(code.as_str(), message));
+            }
+            _ => return Err(PtyChannelError::internal("unexpected node response kind")),
+        };
+
+        {
+            let log = Arc::new(Mutex::new(PtyOutputLog::with_default_capacity()));
+            if !reply.snapshot.is_empty() {
+                log.lock().await.push(&reply.snapshot);
+            }
+            let mut ptys = self.inner.ptys.lock().await;
+            if let Some(route) = ptys.get_mut(&reply.pty_id) {
+                // The node reused a terminal we already track (the requested
+                // path spelling differed). The node counted this client at
+                // open, so only the hub-side count changes.
+                route.clients = route.clients.saturating_add(1);
+            } else {
+                let (tx, _) = broadcast::channel(PTY_CHANNEL_CAPACITY);
+                ptys.insert(
+                    reply.pty_id.clone(),
+                    PtyRoute {
+                        node_id: params.node_id,
+                        path: reply.path.clone(),
+                        cols: reply.cols,
+                        rows: reply.rows,
+                        tx,
+                        log,
+                        clients: 1,
+                    },
+                );
+            }
+        }
+
+        Ok(PtyOpenOutcome {
+            pty_id: reply.pty_id,
+            path: reply.path,
+            attached: reply.attached,
+            cols: reply.cols,
+            rows: reply.rows,
+        })
+    }
+
+    /// Attaches an additional client to a known PTY.
+    pub(crate) async fn pty_attach(&self, pty_id: &str) -> Result<PtyOpenOutcome, PtyChannelError> {
+        let outcome = {
+            let mut ptys = self.inner.ptys.lock().await;
+            let Some(route) = ptys.get_mut(pty_id) else {
+                return Err(PtyChannelError::not_found(format!(
+                    "pty session not found: {pty_id}"
+                )));
+            };
+            route.clients = route.clients.saturating_add(1);
+            (
+                route.node_id.clone(),
+                route.path.clone(),
+                route.cols,
+                route.rows,
+            )
+        };
+        let (node_id, path, cols, rows) = outcome;
+        if let Err(err) = self
+            .send(
+                &node_id,
+                HubToNodeMsg::PtyAttach {
+                    pty_id: pty_id.to_owned(),
+                },
+            )
+            .await
+        {
+            let mut ptys = self.inner.ptys.lock().await;
+            if let Some(route) = ptys.get_mut(pty_id) {
+                route.clients = route.clients.saturating_sub(1);
+            }
+            return Err(PtyChannelError::new(err.code.as_str(), err.message));
+        }
+        Ok(PtyOpenOutcome {
+            pty_id: pty_id.to_owned(),
+            path,
+            attached: true,
+            cols,
+            rows,
+        })
+    }
+
+    /// Detaches a client (the node keeps the shell until its idle timeout).
+    pub(crate) async fn pty_detach(&self, pty_id: &str) {
+        let node_id = {
+            let mut ptys = self.inner.ptys.lock().await;
+            let Some(route) = ptys.get_mut(pty_id) else {
+                return;
+            };
+            route.clients = route.clients.saturating_sub(1);
+            route.node_id.clone()
+        };
+        fxg_protocol::discard_with!(
+            self.send(
+                &node_id,
+                HubToNodeMsg::PtyDetach {
+                    pty_id: pty_id.to_owned(),
+                },
+            )
+            .await,
+            "notify the node that a pty client detached"
         );
     }
 
-    /// Subscribes to PTY output (`None` when not registered).
+    /// Subscribes to PTY output with the retained output first.
     pub(crate) async fn pty_subscribe(
         &self,
         pty_id: &str,
     ) -> Option<broadcast::Receiver<PtyChannelEvent>> {
-        self.inner
-            .ptys
-            .lock()
-            .await
-            .get(pty_id)
-            .map(|route| route.tx.subscribe())
+        let (live, data, next_seq) = {
+            let ptys = self.inner.ptys.lock().await;
+            let route = ptys.get(pty_id)?;
+            let live = route.tx.subscribe();
+            let (data, next_seq) = route.log.lock().await.snapshot();
+            (live, data, next_seq)
+        };
+        Some(crate::api::subscribe_with_replay(live, data, next_seq))
     }
 
     /// Relays a message to the node that owns the PTY.
@@ -478,6 +685,22 @@ impl NodeHub {
     /// Removes a PTY relay registration (after kill / exit).
     pub(crate) async fn remove_pty(&self, pty_id: &str) {
         self.inner.ptys.lock().await.remove(pty_id);
+    }
+
+    /// Publishes an output chunk from a node (assigning its replay sequence).
+    async fn publish_pty_output(&self, pty_id: &str, data: Vec<u8>) {
+        let route = {
+            let ptys = self.inner.ptys.lock().await;
+            ptys.get(pty_id)
+                .map(|route| (route.tx.clone(), Arc::clone(&route.log)))
+        };
+        if let Some((tx, log)) = route {
+            let seq = log.lock().await.push(&data);
+            fxg_protocol::discard_with!(
+                tx.send(PtyChannelEvent::Output { data, seq }),
+                "publish a pty output chunk to subscribers"
+            );
+        }
     }
 
     /// Publishes a PTY event from a node to its subscribers.
@@ -893,15 +1116,61 @@ async fn handle_node_message_value(state: &HubState, node_id: &NodeId, message: 
             use base64::Engine as _;
             match base64::engine::general_purpose::STANDARD.decode(data_b64.as_bytes()) {
                 Ok(data) => {
-                    state
-                        .hub()
-                        .publish_pty(&pty_id, PtyChannelEvent::Output { data })
-                        .await;
+                    state.hub().publish_pty_output(&pty_id, data).await;
                 }
                 Err(err) => {
                     tracing::warn!(pty_id, "invalid pty output base64: {err}");
                 }
             }
+        }
+        NodeToHubMsg::PtyOpened {
+            request_id,
+            pty_id,
+            path,
+            cols,
+            rows,
+            attached,
+            snapshot_b64,
+        } => {
+            use base64::Engine as _;
+            let snapshot = base64::engine::general_purpose::STANDARD
+                .decode(snapshot_b64.as_bytes())
+                .unwrap_or_else(|err| {
+                    tracing::warn!(
+                        pty_id,
+                        "invalid pty snapshot base64 (continuing without replay): {err}"
+                    );
+                    Vec::new()
+                });
+            state
+                .hub()
+                .resolve(
+                    request_id.as_str(),
+                    PendingResponse::PtyOpen(Ok(PtyOpenedReply {
+                        pty_id,
+                        path,
+                        cols,
+                        rows,
+                        attached,
+                        snapshot,
+                    })),
+                )
+                .await;
+        }
+        NodeToHubMsg::PtyOpenFailed {
+            request_id,
+            pty_id,
+            code,
+            message,
+        } => {
+            tracing::debug!(pty_id, code, "remote pty open failed: {message}");
+            state
+                .hub()
+                .resolve(
+                    request_id.as_str(),
+                    PendingResponse::PtyOpen(Err(PtyChannelError::new(code, message))),
+                )
+                .await;
         }
         NodeToHubMsg::PtyExit { pty_id, exit_code } => {
             state

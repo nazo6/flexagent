@@ -147,6 +147,10 @@ async fn run(
                 ));
             }
         }
+        // The connection is gone: hub clients can no longer be attached to the
+        // terminals opened through it. Detach them so the idle timeout can reap
+        // the shells.
+        state.detach_hub_ptys();
         if *shutdown.borrow() {
             break;
         }
@@ -710,22 +714,40 @@ pub(crate) async fn handle_server_message(
             );
         }
         HubToNodeMsg::PtySpawn {
+            request_id,
             pty_id,
+            path,
             session_id,
             cols,
             rows,
-            shell_cmd,
+            new,
         } => {
             handle_remote_pty_spawn(
-                state,
-                out,
-                pty_id,
-                session_id.to_string(),
-                cols,
-                rows,
-                shell_cmd,
+                state, out, request_id, pty_id, path, session_id, cols, rows, new,
             )
             .await;
+        }
+        HubToNodeMsg::PtyAttach { pty_id } => {
+            if let Err(err) = state.pty().attach(&pty_id) {
+                tracing::debug!(pty_id, "remote pty attach failed: {err}");
+                // Let the hub drop a stale relay route instead of leaving the
+                // client subscribed to a terminal that no longer exists.
+                fxg_protocol::discard_with!(
+                    out.send(NodeToHubMsg::PtyError {
+                        pty_id,
+                        code: "NOT_FOUND".to_owned(),
+                        message: err.to_string(),
+                    })
+                    .await,
+                    "send a pty attach failure to the hub"
+                );
+            } else {
+                state.track_hub_pty_attach(&pty_id);
+            }
+        }
+        HubToNodeMsg::PtyDetach { pty_id } => {
+            state.pty().detach(&pty_id);
+            state.track_hub_pty_detach(&pty_id);
         }
         HubToNodeMsg::PtyInput { pty_id, data_b64 } => match BASE64.decode(data_b64.as_bytes()) {
             Ok(data) => {
@@ -742,11 +764,20 @@ pub(crate) async fn handle_server_message(
                 tracing::debug!(pty_id, "remote pty resize failed: {err}");
             }
         }
-        HubToNodeMsg::PtyKill { pty_id } => {
-            if let Err(err) = state.pty().kill(&pty_id) {
-                tracing::debug!(pty_id, "remote pty kill failed: {err}");
+        HubToNodeMsg::PtyKill { pty_id } => match state.pty().kill(&pty_id) {
+            Ok(()) => {
+                state
+                    .record_audit(
+                        fxg_db::audit::actions::PTY_KILL,
+                        &AuditSource::remote(state.node_id()),
+                        None,
+                        serde_json::json!({ "pty_id": pty_id }),
+                    )
+                    .await;
+                state.forget_hub_pty(&pty_id);
             }
-        }
+            Err(err) => tracing::debug!(pty_id, "remote pty kill failed: {err}"),
+        },
         HubToNodeMsg::DrainAndShutdown { reason } => {
             drain_and_shutdown(state, out, ctx, &reason).await;
         }
@@ -772,111 +803,102 @@ pub(crate) async fn handle_server_message(
     }
 }
 
-/// Handles a remote PTY spawn request (applies the `allow_remote_pty` policy).
+/// Handles a remote workspace-terminal open request (applies the
+/// `allow_remote_pty` policy inside `DaemonState::pty_open`).
+#[allow(clippy::too_many_arguments)]
 async fn handle_remote_pty_spawn(
     state: &DaemonState,
     out: &mpsc::Sender<NodeToHubMsg>,
+    request_id: CommandId,
     pty_id: String,
-    session_id: String,
+    path: String,
+    session_id: Option<fxg_protocol::SessionId>,
     cols: u16,
     rows: u16,
-    shell_cmd: Option<String>,
+    new: bool,
 ) {
-    if !state.node_settings().allow_remote_pty {
-        tracing::warn!(
-            node_id = state.node_id(),
-            "remote pty spawn rejected by policy"
-        );
-        fxg_protocol::discard_with!(
-            out.send(NodeToHubMsg::PtyError {
-                pty_id,
-                code: "PTY_DISABLED".to_owned(),
-                message: "Remote PTY is disabled on this node by security policy".to_owned(),
-            })
-            .await,
-            "send a message to the hub"
-        );
-        return;
-    }
+    use fxg_hub::api::ClientApiBackend as _;
 
-    let session = match state.db().get_session(session_id.as_str()).await {
-        Ok(Some(session)) => session,
-        Ok(None) => {
+    let params = fxg_hub::api::PtyOpenParams {
+        pty_id: pty_id.clone(),
+        node_id: state.node_id().into(),
+        path,
+        session_id,
+        cols,
+        rows,
+        new,
+        remote: true,
+    };
+    let outcome = match state.pty_open(params).await {
+        Ok(outcome) => outcome,
+        Err(err) => {
             fxg_protocol::discard_with!(
-                out.send(NodeToHubMsg::PtyError {
+                out.send(NodeToHubMsg::PtyOpenFailed {
+                    request_id,
                     pty_id,
-                    code: "NOT_FOUND".to_owned(),
-                    message: format!("session not found: {session_id}"),
+                    code: err.code,
+                    message: err.message,
                 })
                 .await,
-                "send a message to the hub"
+                "send a pty open failure to the hub"
             );
             return;
         }
+    };
+    state.track_hub_pty_attach(&outcome.pty_id);
+
+    let (events, replay) = match state.pty().subscribe_with_replay(&outcome.pty_id) {
+        Ok(subscription) => subscription,
         Err(err) => {
+            state.pty().detach(&outcome.pty_id);
+            state.track_hub_pty_detach(&outcome.pty_id);
             fxg_protocol::discard_with!(
-                out.send(NodeToHubMsg::PtyError {
-                    pty_id,
+                out.send(NodeToHubMsg::PtyOpenFailed {
+                    request_id,
+                    pty_id: outcome.pty_id,
                     code: "INTERNAL".to_owned(),
                     message: err.to_string(),
                 })
                 .await,
-                "send a message to the hub"
+                "send a pty open failure to the hub"
             );
             return;
         }
     };
 
-    let mut request = fxg_pty::PtySpawnRequest::new(pty_id.clone());
-    request.session_id = Some(session_id.clone());
-    request.cwd = Some(std::path::PathBuf::from(&session.local_path));
-    request.shell_cmd = shell_cmd;
-    request.cols = cols;
-    request.rows = rows;
-    if let Err(err) = state.pty().spawn(request) {
-        fxg_protocol::discard_with!(
-            out.send(NodeToHubMsg::PtyError {
-                pty_id,
-                code: "INTERNAL".to_owned(),
-                message: err.to_string(),
-            })
-            .await,
-            "send a message to the hub"
-        );
+    // The retained output must reach the hub before any live chunk so it can
+    // seed the replay log.
+    if out
+        .send(NodeToHubMsg::PtyOpened {
+            request_id,
+            pty_id: outcome.pty_id.clone(),
+            path: outcome.path,
+            cols: outcome.cols,
+            rows: outcome.rows,
+            attached: outcome.attached,
+            snapshot_b64: BASE64.encode(&replay.data),
+        })
+        .await
+        .is_err()
+    {
+        state.pty().detach(&outcome.pty_id);
         return;
     }
 
-    state
-        .record_audit(
-            fxg_db::audit::actions::PTY_SPAWN,
-            &AuditSource::remote(state.node_id()),
-            Some(session_id.as_str()),
-            serde_json::json!({ "pty_id": pty_id }),
-        )
-        .await;
-
-    // Forward PTY output to the hub
-    let events = match state.pty().subscribe(&pty_id) {
-        Ok(events) => events,
-        Err(err) => {
-            fxg_protocol::discard_with!(
-                out.send(NodeToHubMsg::PtyError {
-                    pty_id,
-                    code: "INTERNAL".to_owned(),
-                    message: err.to_string(),
-                })
-                .await,
-                "send a message to the hub"
-            );
-            return;
-        }
-    };
+    // Forward PTY output to the hub (chunks already covered by the snapshot are
+    // dropped).
+    let pty_id = outcome.pty_id;
+    let next_seq = replay.next_seq;
     let out = out.clone();
+    let exit_state = state.clone();
     fxg_protocol::spawn_guarded!("pty event forwarder", async move {
         let mut events = events;
         loop {
             match events.recv().await {
-                Ok(fxg_pty::PtyEvent::Output { data, .. }) => {
+                Ok(fxg_pty::PtyEvent::Output { seq, data, .. }) => {
+                    if seq < next_seq {
+                        continue;
+                    }
                     let message = NodeToHubMsg::PtyOutput {
                         pty_id: pty_id.clone(),
                         data_b64: BASE64.encode(data),
@@ -886,6 +908,7 @@ async fn handle_remote_pty_spawn(
                     }
                 }
                 Ok(fxg_pty::PtyEvent::Exit { exit_code, .. }) => {
+                    exit_state.forget_hub_pty(&pty_id);
                     fxg_protocol::discard_with!(
                         out.send(NodeToHubMsg::PtyExit { pty_id, exit_code }).await,
                         "send a message to the hub"

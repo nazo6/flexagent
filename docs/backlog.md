@@ -34,3 +34,14 @@
 - [ ] `ToolCallContent::Terminal` の `terminal_id` を `ToolCall` に保持し、UI のツールカードからターミナル出力へリンクする
 - [ ] `session.config_options.boolean` capability 広告・`terminal/output` の `truncated` 対応・`NewSessionRequest.additional_directories`・`session/close` 送信
 - [ ] `AgentMessageChunk` / `AgentThoughtChunk` の Text 以外のコンテンツ対応
+
+## 5. Web ターミナル（workspace スコープ化の残項目）
+
+出典: [`docs/proposals/2026-11-14-terminal-workspace-scope.md`](./proposals/2026-11-14-terminal-workspace-scope.md)
+
+- [ ] プロジェクト画面から workspace のターミナルを開く導線と、リロード後の自動復元（`GET /api/v1/terminals` を UI で利用する）
+- [ ] worktree 削除時に、そのパスの workspace ターミナルを連動して kill する
+- [ ] 複数ターミナル（タブ）、共有中バッジ、read-only モード、複数クライアントの resize 調停
+- [ ] 無操作 TTL とリングバッファ上限を `node_settings` で変更可能にする（現状は定数）
+- [ ] 終了済みターミナルの直近 1 世代（exit code + scrollback）を表示する
+- [ ] UI から明示的にシェルを起動し直す「New shell」操作（プロトコルは `open { new: true }` に対応済み）

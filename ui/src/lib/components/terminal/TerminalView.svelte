@@ -10,7 +10,17 @@
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
   import TriangleAlertIcon from "@lucide/svelte/icons/triangle-alert";
 
-  let { sessionId, fill = false }: { sessionId: string; fill?: boolean } = $props();
+  let {
+    sessionId,
+    nodeId,
+    path,
+    fill = false,
+  }: {
+    sessionId: string;
+    nodeId: string;
+    path: string;
+    fill?: boolean;
+  } = $props();
 
   type Status = "disconnected" | "connecting" | "connected" | "exited" | "blocked" | "failed";
 
@@ -21,8 +31,12 @@
   let adapter: GhosttyWebAdapter | null = null;
   let socket: WebSocket | null = null;
   let disposed = false;
-  /** Session whose WS is currently connected (non-reactive, used to detect switches). */
-  let connectedSessionId: string | null = null;
+  /** Workspace key of the connected socket (`nodeId` + path). */
+  let connectedWorkspace: string | null = null;
+
+  function workspaceKey(): string {
+    return `${nodeId}\u0000${path}`;
+  }
 
   /** Mobile virtual key bar (tapping sends an escape sequence). */
   const KEY_BAR: { label: string; data: string }[] = [
@@ -59,10 +73,16 @@
       return;
     }
     switch (message.op) {
-      case "spawned":
+      case "opened":
         status = "connected";
         statusMessage = null;
         adapter?.focus();
+        // The retained terminal may have been created at another size (other tab,
+        // reattach after a reload).
+        {
+          const dims = adapter?.fit();
+          if (dims) send({ op: "resize", cols: dims.cols, rows: dims.rows });
+        }
         break;
       case "output":
         adapter?.write(decodeBase64ToBytes(message.data_b64));
@@ -100,11 +120,13 @@
       const dims = adapter?.fit() ?? { cols: 80, rows: 24 };
       if (
         !send({
-          op: "spawn",
+          op: "open",
+          node_id: nodeId,
+          path,
           session_id: sessionId,
           cols: dims.cols,
           rows: dims.rows,
-          shell_cmd: null,
+          new: false,
         })
       ) {
         status = "failed";
@@ -139,6 +161,9 @@
   }
 
   function reconnect(): void {
+    // The server replays the retained output on attach, so start from a clean
+    // screen to avoid duplicating what is already rendered.
+    adapter?.clear();
     if (socket !== null) {
       const current = socket;
       socket = null;
@@ -147,16 +172,17 @@
     connect();
   }
 
-  // When the session changes within the same page, reconnect the PTY WS to the
-  // new session (the component is reused when only `page.params.id` changes on
-  // the same route)
+  // Reconnect only when the *workspace* changes. Switching between sessions of
+  // the same directory keeps the running shell (a session is the origin of the
+  // terminal, not its owner).
   $effect(() => {
-    const id = sessionId;
-    if (id === connectedSessionId) return;
-    const initial = connectedSessionId === null;
-    connectedSessionId = id;
+    const key = workspaceKey();
+    if (key === connectedWorkspace) {
+      return;
+    }
+    const initial = connectedWorkspace === null;
+    connectedWorkspace = key;
     if (initial) return; // onMount performs the initial connection
-    adapter?.clear();
     reconnect();
   });
 

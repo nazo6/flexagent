@@ -1117,28 +1117,34 @@ pub enum HubWsMessage {
 /// Client -> Endpoint (`/api/v1/pty/ws`) message.
 ///
 /// A bidirectional stream channel that connects the terminal of the Web UI / mobile
-/// PWA directly to the ConPTY / Unix PTY on the node. When the node setting
-/// `allow_remote_pty = false` is in effect, `spawn` from remote (through the
+/// PWA directly to the ConPTY / Unix PTY on the node. Terminals are scoped to a
+/// workspace (`node_id` + `path`): opening the same workspace again attaches to
+/// the running shell instead of starting another one. When the node setting
+/// `allow_remote_pty = false` is in effect, `open` from remote (through the
 /// hub) is rejected.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[specta(collect)]
 pub enum PtyClientMessage {
-    /// Attach to an existing PTY
-    Attach {
-        /// PTY ID
-        pty_id: String,
-    },
-    /// Start a new PTY
-    Spawn {
-        /// Target session ID
-        session_id: SessionId,
+    /// Open the terminal of a workspace (idempotent: attaches when it is running).
+    Open {
+        /// Node that owns the workspace
+        node_id: NodeId,
+        /// Workspace directory (canonical path of a registered project binding)
+        path: String,
+        /// Session that opened the terminal (origin, not ownership)
+        session_id: Option<SessionId>,
         /// Number of columns
         cols: u16,
         /// Number of rows
         rows: u16,
-        /// Shell command (defaults to the default shell)
-        shell_cmd: Option<String>,
+        /// Replace a running terminal with a new shell
+        new: bool,
+    },
+    /// Attach to an existing PTY by ID
+    Attach {
+        /// PTY ID
+        pty_id: String,
     },
     /// Send keystrokes
     Input {
@@ -1161,15 +1167,25 @@ pub enum PtyClientMessage {
 #[serde(tag = "op", rename_all = "snake_case")]
 #[specta(collect)]
 pub enum PtyServerMessage {
-    /// The PTY has started (subsequent output belongs to the attached PTY ID)
-    Spawned {
-        /// ID of the started PTY
+    /// The PTY was opened (subsequent output belongs to the attached PTY ID)
+    Opened {
+        /// PTY ID
         pty_id: String,
+        /// Canonical workspace path
+        path: String,
+        /// Whether an existing terminal was reused instead of starting a new one
+        attached: bool,
+        /// Number of columns
+        cols: u16,
+        /// Number of rows
+        rows: u16,
     },
-    /// PTY output
+    /// PTY output (a sequence of retained output may precede the live stream)
     Output {
         /// Output bytes (Base64)
         data_b64: String,
+        /// Sequence number of this chunk (0-based, monotonic per PTY)
+        seq: u64,
     },
     /// The PTY process exited
     Exit {
@@ -1179,13 +1195,53 @@ pub enum PtyServerMessage {
     /// Error notification.
     ///
     /// `code` is not an `ErrorCode` but a string specific to the PTY channel
-    /// (e.g. `"FORBIDDEN"` when remote PTY is disabled).
+    /// (e.g. `"PTY_DISABLED"` when remote PTY is disabled).
     Error {
         /// Error code string
         code: String,
         /// Human-readable message
         message: String,
     },
+}
+
+/// One running terminal (`GET /api/v1/terminals`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct TerminalSummary {
+    /// PTY ID
+    pub pty_id: String,
+    /// Node that runs the terminal
+    pub node_id: NodeId,
+    /// Canonical workspace path
+    pub path: String,
+    /// Session that opened the terminal (origin; may be gone)
+    pub session_id: Option<SessionId>,
+    /// OS process ID of the shell
+    pub pid: Option<u32>,
+    /// Current columns
+    pub cols: u16,
+    /// Current rows
+    pub rows: u16,
+    /// Number of attached clients
+    pub attached_clients: u32,
+    /// Creation time (Unix epoch ms)
+    pub created_at: i64,
+}
+
+/// Running terminals (`GET /api/v1/terminals`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct TerminalsResponse {
+    /// Running terminals on the node
+    pub terminals: Vec<TerminalSummary>,
+}
+
+/// Query parameters of `GET /api/v1/terminals`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct TerminalsQuery {
+    /// Node whose running terminals are listed
+    pub node_id: NodeId,
 }
 
 /// Helper converting a `CommandResult` into `HubWsMessage::CommandResult`.
@@ -1284,17 +1340,41 @@ mod tests {
 
     #[test]
     fn pty_messages_roundtrip() {
-        let client = PtyClientMessage::Spawn {
-            session_id: "s1".into(),
+        let client = PtyClientMessage::Open {
+            node_id: "home-win".into(),
+            path: "/home/u/ghq/github.com/nazo6/flexagent".into(),
+            session_id: Some("s1".into()),
             cols: 80,
             rows: 24,
-            shell_cmd: None,
+            new: false,
         };
         let json = serde_json::to_value(&client).unwrap();
-        assert_eq!(json["op"], "spawn");
+        assert_eq!(json["op"], "open");
         assert_eq!(
             serde_json::from_value::<PtyClientMessage>(json).unwrap(),
             client
+        );
+
+        let server = PtyServerMessage::Opened {
+            pty_id: "p1".into(),
+            path: "/home/u/ghq/github.com/nazo6/flexagent".into(),
+            attached: true,
+            cols: 80,
+            rows: 24,
+        };
+        let json = serde_json::to_value(&server).unwrap();
+        assert_eq!(json["op"], "opened");
+        assert_eq!(json["attached"], true);
+
+        let output = PtyServerMessage::Output {
+            data_b64: "aGk=".into(),
+            seq: 7,
+        };
+        let json = serde_json::to_value(&output).unwrap();
+        assert_eq!(json["seq"], 7);
+        assert_eq!(
+            serde_json::from_value::<PtyServerMessage>(json).unwrap(),
+            output
         );
 
         let server = PtyServerMessage::Error {
