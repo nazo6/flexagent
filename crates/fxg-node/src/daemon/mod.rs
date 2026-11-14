@@ -1383,7 +1383,10 @@ mod tests {
         assert_eq!(daemon.state().pty().list().len(), 1);
 
         let terminals = daemon.state().pty().list();
-        assert_eq!(terminals[0].path, workdir);
+        // The node canonicalizes the workspace path (e.g. `/var` → `/private/var`
+        // on macOS, 8.3 short names on Windows).
+        let canonical = fxg_pty::canonicalize(&workdir).expect("canonical workspace");
+        assert_eq!(terminals[0].path, canonical);
         assert_eq!(terminals[0].attached, 2);
 
         daemon.state().pty_detach(&first.pty_id).await;
