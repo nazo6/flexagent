@@ -1,0 +1,36 @@
+# FlexAgent (`fxg`) CI — formatting
+#
+# Runs on every change: rustfmt (Rust), tombi (TOML) and oxfmt (Markdown / JSON /
+# YAML / HTML / TypeScript / Svelte). Markdown under `docs/` is formatted too, so
+# this workflow is intentionally not path-filtered.
+#
+# Draft pull requests are skipped; `ready_for_review` starts a full run.
+
+name: CI (fmt)
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # `cargo:sqlx-cli` is only used by the local `sqlx:*` tasks; skip its source
+  # build in CI (`.sqlx` offline data is used for compilation).
+  MISE_DISABLE_TOOLS: cargo:sqlx-cli
+
+jobs:
+  fmt:
+    name: fmt (rustfmt / tombi / oxfmt)
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+      # oxfmt is a devDependency of `ui` (formatting `.svelte` needs `ui/node_modules/svelte`).
+      - run: mise run ui:install
+      - run: mise run fmt:check

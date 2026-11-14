@@ -1,0 +1,45 @@
+# FlexAgent (`fxg`) CI — Web UI
+#
+# Path-filtered to `ui/**` (including the generated TS bindings) so that UI-only
+# pull requests do not build the Rust test matrix, and vice versa.
+#
+# Draft pull requests are skipped; `ready_for_review` starts a full run.
+
+name: CI (ui)
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "ui/**"
+      - "mise.toml"
+      - ".github/workflows/ci-ui.yml"
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "ui/**"
+      - "mise.toml"
+      - ".github/workflows/ci-ui.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # `cargo:sqlx-cli` is only used by the local `sqlx:*` tasks; skip its source
+  # build in CI.
+  MISE_DISABLE_TOOLS: cargo:sqlx-cli
+
+jobs:
+  ui:
+    name: ui (oxlint / svelte-check / vitest / build)
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+      - run: mise run ui:install
+      - run: mise run lint:ui
+      - run: mise run check:ui
+      - run: mise run test:ui
+      - run: mise run build:ui

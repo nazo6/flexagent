@@ -1,0 +1,100 @@
+# FlexAgent (`fxg`) CI — Rust workspace
+#
+# Path-filtered: only runs for Rust sources, TOML manifests, SQL query metadata
+# and the generated TS bindings (the `types` job diffs them).
+#
+# Tests run on Linux / macOS / Windows. Windows validates ProcessTreeGuard (Job
+# Object kill of the whole tree), Named Pipe IPC and ConPTY I/O (Phase 2 exit
+# criteria).
+#
+# Draft pull requests are skipped; `ready_for_review` starts a full run.
+
+name: CI (rust)
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "crates/**"
+      - "**/*.toml"
+      - "Cargo.lock"
+      - ".sqlx/**"
+      - "ui/src/lib/generated/**"
+      - ".github/workflows/ci-rust.yml"
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "crates/**"
+      - "**/*.toml"
+      - "Cargo.lock"
+      - ".sqlx/**"
+      - "ui/src/lib/generated/**"
+      - ".github/workflows/ci-rust.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  # CI does not need full debug info. Line tables keep readable backtraces while
+  # avoiding debuginfo generation and linking (slow on Windows/PDB).
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  # `cargo:sqlx-cli` is only used by the local `sqlx:*` tasks; skip its source
+  # build in CI (`.sqlx` offline data is used for compilation).
+  MISE_DISABLE_TOOLS: cargo:sqlx-cli
+
+jobs:
+  clippy:
+    name: lint (clippy -D warnings / tombi)
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+      # Only the `test` job saves the cache: all Rust jobs share one key per OS,
+      # and GitHub cache entries are immutable, so parallel savers race. The key
+      # already hashes the OS/arch and every `CARGO_*` / `RUST_*` env var.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
+          save-if: false
+      # `lint:errors` enables `-D warnings` plus the strict lints and is a
+      # superset of `lint:rust`, so a second clippy pass is redundant.
+      - run: mise run lint:errors
+      - run: mise run lint:toml
+
+  test:
+    name: test (${{ matrix.os }})
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
+          cache-on-failure: true
+      - run: mise run test:rust
+
+  types:
+    name: specta type sync
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
+          save-if: false
+      - run: mise run types
+      - name: Verify generated TS bindings match the committed files
+        run: git diff --exit-code -- ui/src/lib/generated
