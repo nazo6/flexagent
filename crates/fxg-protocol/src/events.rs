@@ -138,6 +138,11 @@ pub enum UnifiedEventPayload {
         attachments: Vec<AttachmentMeta>,
         /// Source (`cli` / `web` / `android` / `resume`)
         client_source: ClientSource,
+        /// Agent-side message ID when the driver can assign/observe one.
+        ///
+        /// Native drivers use it to target a message (revert, fork boundary).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_message_id: Option<String>,
     },
     /// A reply message from the agent.
     ///
@@ -327,6 +332,9 @@ pub enum UnifiedEventPayload {
         /// existed).
         #[serde(default)]
         fork_scope: Option<ForkScope>,
+        /// Optional native-only session operations (empty for ACP agents).
+        #[serde(default)]
+        native_features: Vec<crate::common::NativeSessionFeature>,
     },
     /// A progress log line of ephemeral VM provisioning (`stderr`).
     #[serde(alias = "bootstrap_log")]
@@ -405,6 +413,17 @@ pub enum UnifiedEventPayload {
         /// Extra information such as the failure reason (optional)
         detail: Option<String>,
     },
+    /// The conversation was reverted to a previous boundary.
+    ///
+    /// The event log is append-only: conversation events with a `node_seq` in
+    /// `(up_to_node_seq, this event's node_seq)` are hidden by clients. New
+    /// turns recorded after this event remain visible.
+    SessionReverted {
+        /// Last `node_seq` that remains visible (the revert boundary)
+        up_to_node_seq: u64,
+        /// Whether the agent also restored workspace files
+        files: bool,
+    },
     /// A change of the session status. The update source of the hub-side
     /// `sessions.status` projection.
     StatusChanged {
@@ -448,6 +467,7 @@ impl UnifiedEventPayload {
             Self::SubagentMessage { .. } => EventType::SubagentMessage,
             Self::TurnEnded { .. } => EventType::TurnEnded,
             Self::CompactionUpdated { .. } => EventType::CompactionUpdated,
+            Self::SessionReverted { .. } => EventType::SessionReverted,
             Self::StatusChanged { .. } => EventType::StatusChanged,
         }
     }
@@ -550,6 +570,7 @@ mod tests {
             text: "Fix the failing tests".to_owned(),
             attachments: vec![],
             client_source: ClientSource::Cli,
+            agent_message_id: None,
         });
         let json = serde_json::to_string(&envelope).unwrap();
         let decoded: SessionEventEnvelope = serde_json::from_str(&json).unwrap();
@@ -592,6 +613,7 @@ mod tests {
                 ],
             }],
             fork_scope: None,
+            native_features: Vec::new(),
         };
         let json = serde_json::to_value(&payload).unwrap();
         assert_eq!(json["type"], "capabilities_updated");
@@ -725,6 +747,7 @@ mod tests {
                 text: "question".to_owned(),
                 attachments: vec![],
                 client_source: ClientSource::Web,
+                agent_message_id: None,
             },
             UnifiedEventPayload::AgentMessage {
                 message_id: "m1".to_owned(),

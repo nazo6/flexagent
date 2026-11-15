@@ -100,6 +100,11 @@ impl ForkScope {
     pub const fn is_supported(self) -> bool {
         !matches!(self, Self::None)
     }
+
+    /// Whether an arbitrary completed message boundary can be forked.
+    pub const fn supports_message_boundary(self) -> bool {
+        matches!(self, Self::Message)
+    }
 }
 
 impl fmt::Display for ForkScope {
@@ -374,6 +379,12 @@ pub struct PromptInput {
     /// Attached images / files
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<AttachmentMeta>,
+    /// Agent-side message ID assigned by the node for native drivers.
+    ///
+    /// Clients never set this; the node forwards it to the driver so the
+    /// recorded `UserMessage` can be targeted by revert / fork.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_message_id: Option<String>,
 }
 
 impl PromptInput {
@@ -382,6 +393,7 @@ impl PromptInput {
         Self {
             text: text.into(),
             attachments: Vec::new(),
+            agent_message_id: None,
         }
     }
 
@@ -404,6 +416,21 @@ crate::open_string_enum! {
         Resume => "resume",
         /// History imported from an existing agent session
         Import => "import",
+    }
+}
+
+crate::open_string_enum! {
+    /// Optional session operations implemented by a native driver.
+    ///
+    /// Clients use these flags to show actions that ACP cannot provide
+    /// (revert, server-side steering, manual compaction).
+    pub enum NativeSessionFeature {
+        /// Revert the conversation (and optionally workspace files)
+        Revert => "revert",
+        /// Accept prompts while a turn is running (inbox steer / queue)
+        Steer => "steer",
+        /// Start a manual context compaction
+        Compact => "compact",
     }
 }
 
@@ -443,6 +470,18 @@ pub enum SessionControlAction {
         /// New policy
         policy: PermissionPolicy,
     },
+    /// Revert the conversation to a previous event boundary.
+    ///
+    /// Native drivers also support restoring the workspace files changed after
+    /// the boundary (`files = true`).
+    Revert {
+        /// Last `node_seq` that remains visible
+        up_to_node_seq: u64,
+        /// Whether to restore workspace files as well
+        files: bool,
+    },
+    /// Compact the agent context (summarize and replace the history).
+    Compact,
     /// Interrupt the current turn
     Cancel,
     /// End the session and return the agent process to the reuse pool
