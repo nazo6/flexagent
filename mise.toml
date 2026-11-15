@@ -10,6 +10,9 @@ pnpm = "12.8.1"
 watchexec = "2.8.0"
 tombi = "1.5.8"
 
+[shell_alias]
+fxg = "cargo run -p fxg-cli --"
+
 [tasks."fmt:rust"]
 description = "Format Rust code with rustfmt"
 run = "cargo fmt --all"
