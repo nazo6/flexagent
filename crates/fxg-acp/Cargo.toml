@@ -21,6 +21,7 @@ async-trait = { workspace = true }
 base64 = { workspace = true }
 diffy = { workspace = true }
 dirs = { workspace = true }
+eventsource-stream = { workspace = true }
 futures-util = { workspace = true }
 fxg-protocol = { workspace = true }
 fxg-pty = { workspace = true }

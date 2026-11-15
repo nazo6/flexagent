@@ -4,6 +4,7 @@
 )]
 
 use super::*;
+use eventsource_stream::Eventsource;
 
 pub(super) struct Server {
     pub(super) client: OpenCodeClient,
@@ -604,72 +605,19 @@ pub(super) async fn stream_events(
     if !response.status().is_success() {
         anyhow::bail!("OpenCode /api/event returned {}", response.status());
     }
-    let mut stream = response.bytes_stream();
-    let mut buffer = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
-        // Keep bytes until a complete frame is available. Decoding each network
-        // chunk independently can split a multi-byte UTF-8 character and
-        // replace it with U+FFFD.
-        buffer.extend_from_slice(&chunk);
-        for data in drain_sse_frames(&mut buffer) {
-            let Ok(value) = serde_json::from_str::<Value>(&data) else {
-                continue;
-            };
-            handle_raw_event(inner, &value).await;
+    let mut stream = response.bytes_stream().eventsource();
+    while let Some(event) = stream.next().await {
+        let event = event?;
+        // `eventsource-stream` reassembles frames across network chunks and
+        // decodes UTF-8 only after a complete frame, so split multibyte
+        // characters are preserved.
+        if event.data.is_empty() || event.data == "[DONE]" {
+            continue;
         }
+        let Ok(value) = serde_json::from_str::<Value>(&event.data) else {
+            continue;
+        };
+        handle_raw_event(inner, &value).await;
     }
     Ok(())
-}
-
-/// Removes all complete SSE frames from `buffer` and returns their data fields.
-pub(super) fn drain_sse_frames(buffer: &mut Vec<u8>) -> Vec<String> {
-    let mut frames = Vec::new();
-    while let Some((index, len)) = sse_frame_end(buffer) {
-        let frame = buffer[..index].to_vec();
-        buffer.drain(..index + len);
-        let frame = String::from_utf8_lossy(&frame);
-        let data = frame
-            .lines()
-            .filter_map(|line| line.strip_prefix("data:"))
-            .map(str::trim)
-            .collect::<Vec<_>>()
-            .join("\n");
-        if !data.is_empty() && data != "[DONE]" {
-            frames.push(data);
-        }
-    }
-    frames
-}
-
-fn sse_frame_end(buffer: &[u8]) -> Option<(usize, usize)> {
-    for index in 0..buffer.len() {
-        let rest = &buffer[index..];
-        if rest.starts_with(b"\r\n\r\n") {
-            return Some((index, 4));
-        }
-        if rest.starts_with(b"\n\n") {
-            return Some((index, 2));
-        }
-    }
-    None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::drain_sse_frames;
-
-    #[test]
-    fn sse_frames_survive_a_split_multibyte_chunk() {
-        let frame = "data: {\"text\":\"日本語\"}\n\n".as_bytes();
-        let split = frame.len() / 2;
-        let mut buffer = Vec::new();
-        buffer.extend_from_slice(&frame[..split]);
-        assert!(drain_sse_frames(&mut buffer).is_empty());
-        buffer.extend_from_slice(&frame[split..]);
-        assert_eq!(
-            drain_sse_frames(&mut buffer),
-            vec!["{\"text\":\"日本語\"}".to_owned()]
-        );
-    }
 }
