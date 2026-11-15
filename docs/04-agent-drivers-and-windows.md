@@ -12,9 +12,12 @@
 
 - `AgentDriver::start_session(req, event_tx)` は `StartedSession` を返します。
   `StartedSession` は操作ハンドル、`context_restored`、`agent_session_id` を持ちます。
-- `ActiveSessionHandle` は `send_prompt(PromptInput)`、`respond_permission`、
-  `respond_elicitation`、`set_mode`、`set_config`、`cancel_turn`、`dispose`、
-  `shutdown` を提供します。
+- `AgentDriver` は必要に応じて `management()`（セッション外管理）と
+  `probe_capabilities()`（一時セッションを作らない軽量 probe）を提供できます。
+- `ActiveSessionHandle` は `session_capabilities()`（`DriverSessionCapabilities`）、
+  `send_prompt(PromptInput)`、`respond_permission`、`respond_elicitation`、
+  `set_mode`、`set_config`、`revert_to_message`、`compact_context`、`cancel_turn`、
+  `dispose`、`shutdown` を提供します。
 - `dispose` はプロセスツリーを含めて終了し、`shutdown` はセッションを閉じて
   プロセスを再利用プールへ返します。
 - `DriverKind` は `Acp` / `AcpExtended` / `Custom` / `Other` です。
@@ -58,6 +61,14 @@ Tier 3 (`impl AgentDriver`) の基盤を持ち、`opencode` は Tier 2 で実装
 - 組み込みの `opencode` extension は、ACP では扱えない vendor 差分
   (`opencode/session/child_update` の子セッション更新と、権限要求への子 ID 付与)
   だけを担当する。
+- `UserMessage.agent_message_id` はネイティブドライバが発行するメッセージ ID
+  で、`SessionControlAction::Revert` とメッセージ境界 fork の対象解決に使う。
+- `CapabilitiesUpdated.native_features` はドライバが実装する追加操作
+  (`revert` / `steer` / `compact`) をクライアントへ伝える。
+- 管理 API (`/api/v1/nodes/:node_id/agents/:agent_id/management`) は**ローカルノード限定**で、
+  provider / model / MCP / skill / command の読み取りと MCP の追加・接続・
+  削除を行う。credential の値は返さない。`AgentProvider::management()` は既定で
+  `AgentBackend::Custom` の `AgentDriver::management()` へ委譲する。
 - `AgentSummary.icon` は `builtin:<id>` または URL を返す。Web UI は
   `builtin:opencode` を同梱アイコン (`/agents/opencode.png`) に解決し、
   `builtin:antigravity` / `builtin:copilot` / `builtin:qwen` /
@@ -69,8 +80,7 @@ Tier 3 (`impl AgentDriver`) の基盤を持ち、`opencode` は Tier 2 で実装
 - ビルトイン provider は `opencode`（Tier 2）に加え、
   `agy` / `github-copilot-cli` / `qwen-code` / `cline` / `auggie` /
   `kimi-code` のネイティブ CLI preset を持つ。一覧・起動は
-  ビルトインの表示名・アイコン・preset を使う。opencode は v2 の CLI 名が
-  `opencode` であるため、`opencode-v2` のような別 ID を持たない。
+  ビルトインの表示名・アイコン・preset を使う。
 - Gemini CLI は上流で deprecated のため builtin / alias を持たない。
   必要な場合は Registry から import して custom 定義として使う。
 - builtin にないエージェントは、Web UI の「Import from registry」で
@@ -313,6 +323,9 @@ fxg 側で履歴を組み立て直す Replay フォールバックは行いま�
   複製しません。複製範囲は Fork 作成時点の `node_seq`
   までに限定します。
 - 別ノード・一時VM・別エージェントへの Fork（Git bundle / 履歴引き継ぎ）は行いません。
+- ネイティブドライバが `fork_scope = message` を広告する場合、
+  任意のメッセージ境界から Fork できる。ノードは境界の次の
+  `UserMessage.agent_message_id` を `fork { before }` として渡す。
 
 ### 4.1 セッションのレジューム (Resume)
 

@@ -53,8 +53,8 @@ async fn thoughts_are_finalized_before_elicitation_and_permission_requests() {
                 initial_mode: None,
                 resume: None,
                 fork_from: None,
+                fork_before_message_id: None,
                 initial_config: Vec::new(),
-                acp_parser: None,
             },
             tx,
         )
@@ -208,8 +208,8 @@ async fn dispose_while_paused_on_elicitation_completes_without_hanging() {
                 initial_mode: None,
                 resume: None,
                 fork_from: None,
+                fork_before_message_id: None,
                 initial_config: Vec::new(),
-                acp_parser: None,
             },
             tx,
         )

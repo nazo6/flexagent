@@ -160,6 +160,15 @@ impl SessionManager {
             .map_err(|err| NodeError::Agent(format!("failed to select driver: {err}")))?;
         self.remember_driver(&driver);
 
+        if let Some(preview) = driver
+            .probe_capabilities(&spec, &cwd, initial_config)
+            .await
+            .map_err(|err| start_error(err, &spec.agent_id))?
+        {
+            self.inner.store_probe(key, preview.clone());
+            return Ok(preview);
+        }
+
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let request = StartSessionRequest {
             session_id: format!("probe-{}", uuid_v7()),
@@ -170,8 +179,8 @@ impl SessionManager {
             initial_mode: None,
             resume: None,
             fork_from: None,
+            fork_before_message_id: None,
             initial_config: initial_config.to_vec(),
-            acp_parser: None,
         };
 
         let started = match tokio::time::timeout(

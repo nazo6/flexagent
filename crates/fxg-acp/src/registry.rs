@@ -198,6 +198,8 @@ pub struct AgentListEntry {
     pub capabilities: fxg_protocol::settings::AgentAcpCapabilities,
     /// How the agent runtime is implemented
     pub backend: AgentBackendKind,
+    /// Whether this agent exposes out-of-session native management
+    pub has_management: bool,
     /// Icon URL or built-in asset key
     pub icon: Option<String>,
 }
@@ -441,6 +443,7 @@ impl AcpRegistry {
                 AgentListEntry {
                     name: config.name.clone().unwrap_or_else(|| id.clone()),
                     backend: AgentBackendKind::Acp,
+                    has_management: false,
                     icon: config.icon.clone(),
                     id,
                     version,

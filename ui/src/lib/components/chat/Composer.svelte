@@ -65,6 +65,11 @@
   // is the right one for the whole lifetime of this instance.
   const draft = untrack(() => composerDrafts.get(sessionId));
   let text = $state(draft.text);
+
+  /** Replace the composer text (e.g. restoring a reverted user turn). */
+  export function restoreText(value: string): void {
+    text = value;
+  }
   let sending = $state(false);
   let controlBusy = $state(false);
   let resuming = $state(false);

@@ -310,6 +310,7 @@ impl SessionCapabilitiesState {
             available_commands: self.available_commands.clone(),
             config_options: self.config_options.clone(),
             fork_scope: self.fork_scope,
+            native_features: Vec::new(),
         }
     }
 
@@ -381,10 +382,11 @@ impl StreamingAccumulator {
     ) -> Option<UnifiedEventPayload> {
         self.user_messages
             .remove(subagent_id)
-            .map(|(_message_id, text)| UnifiedEventPayload::UserMessage {
+            .map(|(message_id, text)| UnifiedEventPayload::UserMessage {
                 text,
                 attachments: Vec::new(),
                 client_source: fxg_protocol::common::ClientSource::Import,
+                agent_message_id: Some(message_id),
             })
     }
 

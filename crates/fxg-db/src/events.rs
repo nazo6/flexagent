@@ -550,6 +550,7 @@ pub(crate) async fn apply_projections(
             available_commands,
             config_options,
             fork_scope,
+            ..
         } => {
             let available_modes_json = if available_modes.is_empty() {
                 None
@@ -830,7 +831,8 @@ pub(crate) async fn apply_projections(
         | UnifiedEventPayload::SubagentUpdated { .. }
         | UnifiedEventPayload::SubagentMessage { .. }
         | UnifiedEventPayload::TurnEnded { .. }
-        | UnifiedEventPayload::CompactionUpdated { .. } => {}
+        | UnifiedEventPayload::CompactionUpdated { .. }
+        | UnifiedEventPayload::SessionReverted { .. } => {}
     }
 
     // Common to all events: reflect the highest applied node_seq and the update time in the

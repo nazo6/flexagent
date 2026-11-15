@@ -9,6 +9,7 @@ use fxg_protocol::client_api::AgentBackendKind;
 
 use super::extension::AgentExtension;
 use crate::driver::AgentDriver;
+use crate::management::AgentManagement;
 
 /// Static information needed even when the agent is not running.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,7 +43,12 @@ pub enum AgentBackend {
     /// ACP only (`AcpDriver`)
     Acp,
     /// ACP plus an fxg-side extension (`ExtendedAcpDriver`)
-    AcpExtended(Arc<dyn AgentExtension>),
+    AcpExtended {
+        /// Stable built-in extension ID (custom definitions reference extensions by this ID)
+        id: &'static str,
+        /// Extension implementation
+        extension: Arc<dyn AgentExtension>,
+    },
     /// Fully custom driver
     Custom(Arc<dyn AgentDriver>),
 }
@@ -52,8 +58,16 @@ impl AgentBackend {
     pub fn kind(&self) -> AgentBackendKind {
         match self {
             Self::Acp => AgentBackendKind::Acp,
-            Self::AcpExtended(_) => AgentBackendKind::AcpExtended,
+            Self::AcpExtended { .. } => AgentBackendKind::AcpExtended,
             Self::Custom(_) => AgentBackendKind::Custom,
+        }
+    }
+
+    /// Stable built-in extension ID when [`Self::AcpExtended`] is used.
+    pub fn extension_id(&self) -> Option<&'static str> {
+        match self {
+            Self::AcpExtended { id, .. } => Some(id),
+            Self::Acp | Self::Custom(_) => None,
         }
     }
 }
@@ -73,12 +87,12 @@ pub trait AgentProvider: Send + Sync {
         AgentBackend::Acp
     }
 
-    /// Stable built-in extension ID applied by this provider (`None` = ACP only).
-    ///
-    /// Custom definitions reference extensions by this ID, so it must not be
-    /// derived from the agent ID at the call site.
-    fn extension_id(&self) -> Option<&'static str> {
-        None
+    /// Native management integration (`None` = no out-of-session configuration).
+    fn management(&self) -> Option<Arc<dyn AgentManagement>> {
+        match self.backend() {
+            AgentBackend::Custom(driver) => driver.management(),
+            AgentBackend::Acp | AgentBackend::AcpExtended { .. } => None,
+        }
     }
 }
 
@@ -87,7 +101,6 @@ pub struct StaticProvider {
     definition: AgentDefinition,
     preset: Option<LaunchPreset>,
     backend: AgentBackend,
-    extension_id: Option<&'static str>,
 }
 
 impl StaticProvider {
@@ -97,11 +110,10 @@ impl StaticProvider {
             definition,
             preset,
             backend: AgentBackend::Acp,
-            extension_id: None,
         }
     }
 
-    /// Replaces the runtime backend (for example an ACP extension).
+    /// Replaces the runtime backend (for example a custom driver).
     ///
     /// Providers that declare an extension should prefer [`Self::with_extension`]
     /// so the adapters and the extension ID stay in sync.
@@ -116,8 +128,10 @@ impl StaticProvider {
         extension_id: &'static str,
         extension: Arc<dyn AgentExtension>,
     ) -> Self {
-        self.extension_id = Some(extension_id);
-        self.backend = AgentBackend::AcpExtended(extension);
+        self.backend = AgentBackend::AcpExtended {
+            id: extension_id,
+            extension,
+        };
         self
     }
 }
@@ -133,9 +147,5 @@ impl AgentProvider for StaticProvider {
 
     fn backend(&self) -> AgentBackend {
         self.backend.clone()
-    }
-
-    fn extension_id(&self) -> Option<&'static str> {
-        self.extension_id
     }
 }

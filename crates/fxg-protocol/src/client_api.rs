@@ -545,6 +545,9 @@ pub struct AgentSummary {
     pub capabilities: crate::settings::AgentAcpCapabilities,
     /// How the agent runtime is implemented
     pub backend: AgentBackendKind,
+    /// Whether this agent supports out-of-session native management
+    #[serde(default)]
+    pub has_management: bool,
     /// Icon URL or built-in asset key
     pub icon: Option<String>,
     /// Nodes where it is available (based on the NodeHello reports)
@@ -1488,6 +1491,212 @@ pub struct WorkspaceGitDiffQuery {
     pub base: Option<String>,
     /// Absolute file path inside the workspace (omit for the whole workspace)
     pub file: Option<String>,
+}
+
+/// Agent-native management snapshot (local node only).
+///
+/// This is the generic seam for agent integrations that expose configuration
+/// outside the ACP session protocol (providers, MCP servers, skills, commands).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct AgentManagementSnapshot {
+    /// Agent ID this snapshot belongs to.
+    pub agent_id: String,
+    /// Agent display name.
+    pub agent_name: String,
+    /// Whether the native integration is reachable on this node.
+    pub available: bool,
+    /// Reported agent version.
+    pub version: Option<String>,
+    /// Write capabilities supported by this integration.
+    pub capabilities: AgentManagementCapabilities,
+    /// Primary agents / modes.
+    pub agents: Vec<AgentManagementAgentSummary>,
+    /// Models with their selectable variants.
+    pub models: Vec<AgentModelSummary>,
+    /// Providers / integrations.
+    pub providers: Vec<AgentProviderSummary>,
+    /// MCP server status.
+    pub mcp_servers: Vec<AgentMcpSummary>,
+    /// Installed skills.
+    pub skills: Vec<AgentSkillSummary>,
+    /// Available slash commands.
+    pub commands: Vec<crate::common::CommandInfo>,
+}
+
+impl AgentManagementSnapshot {
+    /// An empty snapshot when the native integration is not running.
+    #[must_use]
+    pub fn unavailable(agent_id: impl Into<String>, agent_name: impl Into<String>) -> Self {
+        Self {
+            agent_id: agent_id.into(),
+            agent_name: agent_name.into(),
+            available: false,
+            version: None,
+            capabilities: AgentManagementCapabilities::default(),
+            agents: Vec::new(),
+            models: Vec::new(),
+            providers: Vec::new(),
+            mcp_servers: Vec::new(),
+            skills: Vec::new(),
+            commands: Vec::new(),
+        }
+    }
+}
+
+/// Write capabilities of an agent-native management integration.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct AgentManagementCapabilities {
+    /// MCP servers can be added / removed / connected.
+    pub mcp_write: bool,
+    /// Provider credentials can be changed (currently never exposed).
+    pub provider_write: bool,
+}
+
+crate::open_string_enum! {
+    /// Mode of a primary agent / subagent reported by native management.
+    pub enum AgentManagementAgentMode {
+        /// Primary user-facing agent
+        Primary => "primary",
+        /// Available in all contexts
+        All => "all",
+        /// Subagent only
+        Subagent => "subagent",
+    }
+}
+
+/// One primary agent / mode reported by the integration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct AgentManagementAgentSummary {
+    /// Agent ID
+    pub id: String,
+    /// Display name
+    pub name: String,
+    /// Description
+    pub description: Option<String>,
+    /// Agent mode (`primary` / `all` / ...)
+    pub mode: AgentManagementAgentMode,
+}
+
+/// One model reported by the integration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct AgentModelSummary {
+    /// Model ID
+    pub id: String,
+    /// Provider ID
+    pub provider_id: String,
+    /// Display name
+    pub name: String,
+    /// Whether the model is enabled
+    pub enabled: bool,
+    /// Selectable reasoning / thinking variants
+    pub variants: Vec<String>,
+}
+
+crate::open_string_enum! {
+    /// Activation state of a provider reported by native management.
+    pub enum AgentProviderActivation {
+        /// Enabled in configuration
+        Enabled => "enabled",
+        /// Automatically enabled (e.g. via environment)
+        Auto => "auto",
+        /// Configured via environment variables
+        Env => "env",
+    }
+}
+
+/// One provider / integration reported by the agent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct AgentProviderSummary {
+    /// Provider ID
+    pub id: String,
+    /// Display name
+    pub name: String,
+    /// Activation state (`enabled` / `auto` / ...)
+    pub activation: Option<AgentProviderActivation>,
+    /// Provider package
+    pub package: Option<String>,
+}
+
+crate::open_string_enum! {
+    /// Connection status of an MCP server reported by native management.
+    pub enum AgentMcpStatus {
+        /// Server is connected and ready
+        Connected => "connected",
+        /// Server is disabled
+        Disabled => "disabled",
+        /// Server connection failed
+        Failed => "failed",
+        /// Server requires authentication
+        NeedsAuth => "needs_auth",
+        /// Server requires dynamic client registration
+        NeedsClientRegistration => "needs_client_registration",
+    }
+}
+
+/// One MCP server reported by the agent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct AgentMcpSummary {
+    /// Server name
+    pub name: String,
+    /// Connection status (`connected` / `disabled` / `failed` / ...)
+    pub status: AgentMcpStatus,
+    /// Error message when the connection failed
+    pub error: Option<String>,
+}
+
+/// One installed skill reported by the agent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct AgentSkillSummary {
+    /// Skill ID
+    pub id: String,
+    /// Display name
+    pub name: String,
+    /// Description
+    pub description: Option<String>,
+}
+
+/// MCP management action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+#[specta(collect)]
+pub enum AgentMcpAction {
+    /// Connect the server
+    Connect,
+    /// Disconnect the server
+    Disconnect,
+}
+
+crate::open_string_enum! {
+    /// Transport type of a managed MCP server definition.
+    pub enum AgentMcpKind {
+        /// Local command spawned on the node
+        Local => "local",
+        /// Remote HTTP/SSE MCP server
+        Remote => "remote",
+    }
+}
+
+/// MCP server definition used when adding a server from the UI.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct AgentMcpDefinition {
+    /// Transport type (`local` / `remote`)
+    pub kind: AgentMcpKind,
+    /// Command and arguments for local servers
+    pub command: Vec<String>,
+    /// Environment variables for local servers
+    pub environment: std::collections::BTreeMap<String, String>,
+    /// Remote URL for remote servers
+    pub url: Option<String>,
+    /// Whether the server is enabled
+    pub enabled: bool,
 }
 
 #[cfg(test)]

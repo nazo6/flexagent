@@ -138,22 +138,92 @@ impl SessionManager {
             .await?;
 
         // Busy check and reservation (check-and-set)
-        {
+        let supports_steering = {
+            let sessions = self.inner.sessions.lock().expect("sessions poisoned");
+            sessions.active.get(session_id).is_some_and(|session| {
+                session
+                    .handle
+                    .session_capabilities()
+                    .supports(fxg_protocol::common::NativeSessionFeature::Steer)
+            })
+        };
+        let steer = {
             let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
             let session = sessions.active.get_mut(session_id).ok_or_else(|| {
                 NodeError::InvalidSession(format!("session {session_id} is not active"))
             })?;
             if session.busy {
-                session.pending_prompts.push_back(PendingPrompt {
-                    input,
-                    client_source,
-                });
-                return Ok(());
+                if supports_steering {
+                    // Native drivers accept a prompt while the current turn is
+                    // running (`steer` delivery). Keep the session busy; the
+                    // driver merges the input into the active turn.
+                    true
+                } else {
+                    session.pending_prompts.push_back(PendingPrompt {
+                        input,
+                        client_source,
+                    });
+                    return Ok(());
+                }
+            } else {
+                false
             }
+        };
+        if steer {
+            return dispatch_prompt(&self.inner, session_id, &input, client_source).await;
         }
 
         self.start_turn(session_id, &input, client_source).await
     }
+    /// Returns the agent-side message ID of the latest user message at or
+    /// before `up_to_node_seq`.
+    async fn agent_message_id_at(
+        &self,
+        session_id: &str,
+        up_to_node_seq: u64,
+    ) -> Result<Option<String>, NodeError> {
+        let mut cursor = 0;
+        let mut users = Vec::new();
+        let mut reverted = Vec::new();
+        loop {
+            let batch = self
+                .inner
+                .bus
+                .db()
+                .session_events_after(session_id, cursor, EVENT_LOAD_BATCH)
+                .await?;
+            if batch.events.is_empty() {
+                break;
+            }
+            cursor = batch.cursor;
+            for event in batch.events {
+                match event.payload {
+                    UnifiedEventPayload::UserMessage {
+                        agent_message_id: Some(id),
+                        ..
+                    } if event.node_seq <= up_to_node_seq => {
+                        users.push((event.node_seq, id));
+                    }
+                    UnifiedEventPayload::SessionReverted {
+                        up_to_node_seq: from,
+                        ..
+                    } => {
+                        reverted.push((from, event.node_seq));
+                    }
+                    _ => {}
+                }
+            }
+            if cursor == 0 {
+                break;
+            }
+        }
+        Ok(users
+            .into_iter()
+            .rev()
+            .find(|(seq, _)| !reverted.iter().any(|(from, to)| seq >= from && seq < to))
+            .map(|(_, id)| id))
+    }
+
     /// Mode switching / config change / cancel / kill.
     pub async fn control(
         &self,
@@ -208,7 +278,56 @@ impl SessionManager {
             SessionControlAction::SetPermissionPolicy { .. } => {
                 unreachable!("the approval policy is handled before the active-session lookup")
             }
-            // Compaction runs as a single turn, so allow it while busy
+            SessionControlAction::Compact => handle
+                .compact_context()
+                .await
+                .map_err(|err| NodeError::Hub(format!("failed to compact: {err:#}"))),
+            SessionControlAction::Revert {
+                up_to_node_seq,
+                files,
+            } => {
+                if is_busy {
+                    return Err(NodeError::InvalidState(
+                        "revert requires an idle session".to_owned(),
+                    ));
+                }
+                let agent_message_id = self
+                    .agent_message_id_at(session_id, *up_to_node_seq)
+                    .await?
+                    .ok_or_else(|| {
+                        NodeError::InvalidState(format!(
+                            "no native user message is available at or before {up_to_node_seq}"
+                        ))
+                    })?;
+                handle
+                    .revert_to_message(&agent_message_id, *files)
+                    .await
+                    .map_err(|err| {
+                        tracing::warn!(
+                            session_id,
+                            up_to_node_seq = *up_to_node_seq,
+                            agent_message_id = %agent_message_id,
+                            "failed to revert session: {err:#}"
+                        );
+                        if let Some(unavailable) =
+                            err.downcast_ref::<fxg_acp::NativeRevertUnavailable>()
+                        {
+                            return NodeError::InvalidState(unavailable.0.clone());
+                        }
+                        NodeError::Hub(format!("failed to revert: {err:#}"))
+                    })?;
+                self.inner
+                    .bus
+                    .record(
+                        session_id,
+                        UnifiedEventPayload::SessionReverted {
+                            up_to_node_seq: *up_to_node_seq,
+                            files: *files,
+                        },
+                    )
+                    .await?;
+                Ok(())
+            }
             SessionControlAction::Cancel => {
                 // If already idle (no turn running) there is nothing to cancel, so treat as success
                 if !is_busy {
@@ -323,6 +442,22 @@ pub(super) async fn dispatch_prompt(
     input: &PromptInput,
     client_source: ClientSource,
 ) -> Result<(), NodeError> {
+    let handle = {
+        let sessions = inner.sessions.lock().expect("sessions poisoned");
+        sessions
+            .active
+            .get(session_id)
+            .map(|session| Arc::clone(&session.handle))
+            .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?
+    };
+    let mut input = input.clone();
+    if input.agent_message_id.is_none()
+        && handle.session_capabilities().assigns_message_ids
+        && handle.assigns_message_id_for(&input)
+    {
+        input.agent_message_id = Some(format!("msg_{}", uuid_v7()));
+    }
+
     let should_update_title = {
         let mut sessions = inner.sessions.lock().expect("sessions poisoned");
         let session = sessions
@@ -354,20 +489,13 @@ pub(super) async fn dispatch_prompt(
                 text: input.text.clone(),
                 attachments: input.attachments.clone(),
                 client_source,
+                agent_message_id: input.agent_message_id.clone(),
             },
         )
         .await?;
 
-    let handle = {
-        let sessions = inner.sessions.lock().expect("sessions poisoned");
-        sessions
-            .active
-            .get(session_id)
-            .map(|session| Arc::clone(&session.handle))
-            .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?
-    };
     handle
-        .send_prompt(input.clone())
+        .send_prompt(input)
         .await
         .map_err(|err| NodeError::Hub(format!("failed to send prompt: {err:#}")))
 }

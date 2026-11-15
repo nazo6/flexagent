@@ -19,20 +19,48 @@ use tokio::sync::mpsc;
 use super::extension::{
     AgentExtension, CapabilitiesSnapshot, EventDisposition, Hook, SessionContext, SessionExtension,
 };
+use crate::acp::AcpDriver;
 use crate::driver::{
-    ActiveSessionHandle, AgentDriver, DriverEvent, DriverKind, StartSessionRequest, StartedSession,
+    ActiveSessionHandle, AgentDriver, DriverEvent, DriverKind, DriverSessionCapabilities,
+    StartSessionRequest, StartedSession,
 };
+
+enum ExtendedBase {
+    Acp(Arc<AcpDriver>),
+    Driver(Arc<dyn AgentDriver>),
+}
+
+impl ExtendedBase {
+    fn as_driver(&self) -> &dyn AgentDriver {
+        match self {
+            Self::Acp(driver) => driver.as_ref(),
+            Self::Driver(driver) => driver.as_ref(),
+        }
+    }
+}
 
 /// ACP driver with an extension layer.
 pub struct ExtendedAcpDriver {
-    base: Arc<dyn AgentDriver>,
+    base: ExtendedBase,
     extension: Arc<dyn AgentExtension>,
 }
 
 impl ExtendedAcpDriver {
-    /// Wraps `base` with `extension`.
-    pub fn new(base: Arc<dyn AgentDriver>, extension: Arc<dyn AgentExtension>) -> Self {
-        Self { base, extension }
+    /// Wraps an [`AcpDriver`] with `extension`, passing its notification parser
+    /// directly without exposing ACP-specific fields on [`StartSessionRequest`].
+    pub fn new(base: Arc<AcpDriver>, extension: Arc<dyn AgentExtension>) -> Self {
+        Self {
+            base: ExtendedBase::Acp(base),
+            extension,
+        }
+    }
+
+    /// Wraps an arbitrary [`AgentDriver`] with `extension` (used in unit tests).
+    pub fn with_driver(base: Arc<dyn AgentDriver>, extension: Arc<dyn AgentExtension>) -> Self {
+        Self {
+            base: ExtendedBase::Driver(base),
+            extension,
+        }
     }
 }
 
@@ -47,21 +75,38 @@ impl AgentDriver for ExtendedAcpDriver {
         launch: &crate::driver::AgentLaunchSpec,
         cwd: &std::path::Path,
     ) -> anyhow::Result<crate::driver::AgentSessionList> {
-        self.base.list_sessions(launch, cwd).await
+        self.base.as_driver().list_sessions(launch, cwd).await
+    }
+
+    async fn probe_capabilities(
+        &self,
+        launch: &crate::driver::AgentLaunchSpec,
+        cwd: &std::path::Path,
+        initial_config: &[fxg_protocol::common::InitialConfig],
+    ) -> anyhow::Result<Option<fxg_protocol::client_api::AgentCapabilitiesPreview>> {
+        self.base
+            .as_driver()
+            .probe_capabilities(launch, cwd, initial_config)
+            .await
     }
 
     async fn start_session(
         &self,
-        mut req: StartSessionRequest,
+        req: StartSessionRequest,
         event_tx: mpsc::UnboundedSender<DriverEvent>,
     ) -> anyhow::Result<StartedSession> {
-        req.acp_parser = self.extension.notification_parser();
         let session_id = req.session_id.clone();
         let agent_id = req.launch.agent_id.clone();
         let cwd = req.cwd.clone();
         let launch = req.launch.clone();
         let (tap_tx, tap_rx) = mpsc::unbounded_channel();
-        let started = self.base.start_session(req, tap_tx).await?;
+        let started = match &self.base {
+            ExtendedBase::Acp(acp) => {
+                acp.start_session_with_parser(req, self.extension.notification_parser(), tap_tx)
+                    .await?
+            }
+            ExtendedBase::Driver(driver) => driver.start_session(req, tap_tx).await?,
+        };
 
         let context = SessionContext {
             session_id,
@@ -102,15 +147,15 @@ impl AgentDriver for ExtendedAcpDriver {
     }
 
     async fn shutdown_idle(&self) -> usize {
-        self.base.shutdown_idle().await
+        self.base.as_driver().shutdown_idle().await
     }
 
     fn stderr_tail(&self, agent_id: &str) -> Vec<String> {
-        self.base.stderr_tail(agent_id)
+        self.base.as_driver().stderr_tail(agent_id)
     }
 
     fn stderr_snapshot(&self) -> BTreeMap<String, Vec<String>> {
-        self.base.stderr_snapshot()
+        self.base.as_driver().stderr_snapshot()
     }
 }
 
@@ -122,6 +167,10 @@ struct ExtendedSessionHandle {
 
 #[async_trait]
 impl ActiveSessionHandle for ExtendedSessionHandle {
+    fn session_capabilities(&self) -> DriverSessionCapabilities {
+        self.inner.session_capabilities()
+    }
+
     async fn send_prompt(&self, mut input: PromptInput) -> anyhow::Result<()> {
         if let Some(session) = &self.session
             && session.before_prompt(&mut input).await? == Hook::Handled
@@ -163,6 +212,14 @@ impl ActiveSessionHandle for ExtendedSessionHandle {
             return Ok(());
         }
         self.inner.set_config(key, value).await
+    }
+
+    async fn revert_to_message(&self, agent_message_id: &str, files: bool) -> anyhow::Result<()> {
+        self.inner.revert_to_message(agent_message_id, files).await
+    }
+
+    async fn compact_context(&self) -> anyhow::Result<()> {
+        self.inner.compact_context().await
     }
 
     async fn cancel_turn(&self) -> anyhow::Result<()> {
@@ -319,8 +376,8 @@ mod tests {
             initial_mode: None,
             resume: None,
             fork_from: None,
+            fork_before_message_id: None,
             initial_config: Vec::new(),
-            acp_parser: None,
         }
     }
 
@@ -342,6 +399,7 @@ mod tests {
                 options: vec![choice("fast")],
             }],
             fork_scope: None,
+            native_features: Vec::new(),
         }
     }
 
@@ -509,7 +567,7 @@ mod tests {
             fail_capabilities,
         });
         FakeHarness {
-            driver: ExtendedAcpDriver::new(base, extension),
+            driver: ExtendedAcpDriver::with_driver(base, extension),
             prompts,
             seen_ids,
             disposed,

@@ -476,6 +476,7 @@ impl DaemonState {
                     extension: entry.extension,
                     capabilities: entry.capabilities,
                     backend: entry.backend,
+                    has_management: entry.has_management,
                     icon: entry.icon,
                     installed_nodes: if available {
                         vec![node_id.clone()]

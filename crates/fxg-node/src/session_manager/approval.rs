@@ -14,20 +14,30 @@ impl SessionManager {
             return Err(NodeError::CommandDuplicate(command_id.to_string()));
         }
 
-        let handle = {
+        let (handle, summary) = {
             let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
             let session = sessions.active.get_mut(session_id).ok_or_else(|| {
                 NodeError::InvalidSession(format!("session {session_id} is not active"))
             })?;
-            if session.pending_permissions.remove(request_id).is_none() {
+            let Some(summary) = session.pending_permissions.remove(request_id) else {
                 return Err(NodeError::AlreadyResolved(request_id.to_owned()));
-            }
-            Arc::clone(&session.handle)
+            };
+            (Arc::clone(&session.handle), summary)
         };
-        handle
+        if let Err(err) = handle
             .respond_permission(request_id.to_owned(), selected_option_id.to_owned())
             .await
-            .map_err(|err| NodeError::Hub(format!("failed to respond: {err:#}")))?;
+        {
+            // Keep the request actionable when the driver rejects it (e.g. a
+            // transient native API error), matching elicitation handling.
+            let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
+            if let Some(session) = sessions.active.get_mut(session_id) {
+                session
+                    .pending_permissions
+                    .insert(request_id.to_owned(), summary);
+            }
+            return Err(NodeError::Hub(format!("failed to respond: {err:#}")));
+        }
 
         self.inner
             .bus

@@ -6,10 +6,11 @@ use async_trait::async_trait;
 use axum::http::{HeaderMap, header};
 use fxg_db::Db;
 use fxg_protocol::client_api::{
-    AgentCapabilitiesPreview, AgentDiagnostics, AgentOpResponse, AgentsResponse, ConnectionRole,
-    CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse,
-    HubLinkStatus, IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse,
-    NodeTokensResponse, ProbeAgentRequest, ProjectLinkRequest, ProjectLinkResponse, ProjectPreview,
+    AgentCapabilitiesPreview, AgentDiagnostics, AgentManagementSnapshot, AgentMcpAction,
+    AgentMcpDefinition, AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest,
+    CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse, HubLinkStatus,
+    IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse, NodeTokensResponse,
+    ProbeAgentRequest, ProjectLinkRequest, ProjectLinkResponse, ProjectPreview,
     ProjectPreviewRequest, ProjectScanRequest, ProjectScanResponse, ProjectUnlinkRequest,
     ProjectUnlinkResponse, ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest,
     PushSubscribeResponse, RemoveWorktreeRequest, RespondElicitationRequest,
@@ -673,6 +674,59 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
             "agent listing for a specific node is only available on the hub",
+        ))
+    }
+
+    /// `GET /api/v1/nodes/:node_id/agents/:agent_id/management`.
+    async fn agent_management(
+        &self,
+        _node_id: &str,
+        _agent_id: &str,
+    ) -> Result<AgentManagementSnapshot, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "agent management is only available on the local node",
+        ))
+    }
+
+    /// `POST /api/v1/nodes/:node_id/agents/:agent_id/management/mcp/:name/:action`.
+    async fn agent_mcp_action(
+        &self,
+        _node_id: &str,
+        _agent_id: &str,
+        _name: &str,
+        _action: AgentMcpAction,
+    ) -> Result<AgentManagementSnapshot, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "agent management is only available on the local node",
+        ))
+    }
+
+    /// `PUT /api/v1/nodes/:node_id/agents/:agent_id/management/mcp/:name`.
+    async fn agent_mcp_upsert(
+        &self,
+        _node_id: &str,
+        _agent_id: &str,
+        _name: &str,
+        _definition: AgentMcpDefinition,
+    ) -> Result<AgentManagementSnapshot, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "agent management is only available on the local node",
+        ))
+    }
+
+    /// `DELETE /api/v1/nodes/:node_id/agents/:agent_id/management/mcp/:name`.
+    async fn agent_mcp_remove(
+        &self,
+        _node_id: &str,
+        _agent_id: &str,
+        _name: &str,
+    ) -> Result<AgentManagementSnapshot, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "agent management is only available on the local node",
         ))
     }
 

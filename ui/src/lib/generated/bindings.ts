@@ -80,10 +80,118 @@ export type AgentDiagnostics = {
 	stderr_tail: string[],
 };
 
+/**  One primary agent / mode reported by the integration. */
+export type AgentManagementAgentSummary = {
+	/**  Agent ID */
+	id: string,
+	/**  Display name */
+	name: string,
+	/**  Description */
+	description: string | null,
+	/**  Agent mode (`primary` / `all` / ...) */
+	mode: string,
+};
+
+/**  Write capabilities of an agent-native management integration. */
+export type AgentManagementCapabilities = {
+	/**  MCP servers can be added / removed / connected. */
+	mcp_write: boolean,
+	/**  Provider credentials can be changed (currently never exposed). */
+	provider_write: boolean,
+};
+
+/**
+ *  Agent-native management snapshot (local node only).
+ *
+ *  This is the generic seam for agent integrations that expose configuration
+ *  outside the ACP session protocol (providers, MCP servers, skills, commands).
+ */
+export type AgentManagementSnapshot = {
+	/**  Agent ID this snapshot belongs to. */
+	agent_id: string,
+	/**  Agent display name. */
+	agent_name: string,
+	/**  Whether the native integration is reachable on this node. */
+	available: boolean,
+	/**  Reported agent version. */
+	version: string | null,
+	/**  Write capabilities supported by this integration. */
+	capabilities: AgentManagementCapabilities,
+	/**  Primary agents / modes. */
+	agents: AgentManagementAgentSummary[],
+	/**  Models with their selectable variants. */
+	models: AgentModelSummary[],
+	/**  Providers / integrations. */
+	providers: AgentProviderSummary[],
+	/**  MCP server status. */
+	mcp_servers: AgentMcpSummary[],
+	/**  Installed skills. */
+	skills: AgentSkillSummary[],
+	/**  Available slash commands. */
+	commands: CommandInfo[],
+};
+
+/**  MCP management action. */
+export type AgentMcpAction =
+/**  Connect the server */
+"connect" |
+/**  Disconnect the server */
+"disconnect";
+
+/**  MCP server definition used when adding a server from the UI. */
+export type AgentMcpDefinition = {
+	/**  Transport type (`local` / `remote`) */
+	kind: string,
+	/**  Command and arguments for local servers */
+	command: string[],
+	/**  Environment variables for local servers */
+	environment: { [key in string]: string },
+	/**  Remote URL for remote servers */
+	url: string | null,
+	/**  Whether the server is enabled */
+	enabled: boolean,
+};
+
+/**  One MCP server reported by the agent. */
+export type AgentMcpSummary = {
+	/**  Server name */
+	name: string,
+	/**  Connection status (`connected` / `disabled` / `failed` / ...) */
+	status: string,
+	/**  Error message when the connection failed */
+	error: string | null,
+};
+
+/**  One model reported by the integration. */
+export type AgentModelSummary = {
+	/**  Model ID */
+	id: string,
+	/**  Provider ID */
+	provider_id: string,
+	/**  Display name */
+	name: string,
+	/**  Whether the model is enabled */
+	enabled: boolean,
+	/**  Selectable reasoning / thinking variants */
+	variants: string[],
+};
+
 /**  Common response of agent management operations. */
 export type AgentOpResponse = {
 	/**  Message describing the outcome (e.g. `imported qwen-code from the registry`) */
 	message: string | null,
+};
+
+/**  One provider / integration reported by the agent. */
+export type AgentProviderSummary = {
+	/**  Provider ID */
+	id: string,
+	/**  Display name */
+	name: string,
+	/**  Activation state (`enabled` / `auto` / ...) */
+	activation: string | null,
+	/**  Provider package */
+	package: string | null,
 };
 
 /**  Node-owned agent settings stored in `node.db` (`agent_settings` / `agent_aliases`). */
@@ -98,6 +206,16 @@ export type AgentSettings = {
 	revision: number,
 	/**  Last update time (Unix epoch ms) */
 	updated_at: number,
+};
+
+/**  One installed skill reported by the agent. */
+export type AgentSkillSummary = {
+	/**  Skill ID */
+	id: string,
+	/**  Display name */
+	name: string,
+	/**  Description */
+	description: string | null,
 };
 
 /**  How an agent is launched (the means actually usable on this node). */
@@ -129,6 +247,8 @@ export type AgentSummary = {
 	capabilities: AgentAcpCapabilities,
 	/**  How the agent runtime is implemented */
 	backend: AgentBackendKind,
+	/**  Whether this agent supports out-of-session native management */
+	has_management?: boolean,
 	/**  Icon URL or built-in asset key */
 	icon: string | null,
 	/**  Nodes where it is available (based on the NodeHello reports) */
@@ -1526,6 +1646,13 @@ export type PromptInput = {
 	text: string,
 	/**  Attached images / files */
 	attachments?: AttachmentMeta[],
+	/**
+	 *  Agent-side message ID assigned by the node for native drivers.
+	 *
+	 *  Clients never set this; the node forwards it to the driver so the
+	 *  recorded `UserMessage` can be targeted by revert / fork.
+	 */
+	agent_message_id?: string | null,
 };
 
 /**  Definition of an ephemeral VM / sandbox provisioner (`provisioners` in `hub.db`). */
@@ -1950,6 +2077,19 @@ value: ConfigOptionValue } |
 { action: "set_permission_policy";
 /**  New policy */
 policy: string } |
+/**
+ *  Revert the conversation to a previous event boundary.
+ *
+ *  Native drivers also support restoring the workspace files changed after
+ *  the boundary (`files = true`).
+ */
+{ action: "revert";
+/**  Last `node_seq` that remains visible */
+up_to_node_seq: number;
+/**  Whether to restore workspace files as well */
+files: boolean } |
+/**  Compact the agent context (summarize and replace the history). */
+{ action: "compact" } |
 /**  Interrupt the current turn */
 { action: "cancel" } |
 /**  End the session and return the agent process to the reuse pool */
@@ -2422,6 +2562,12 @@ export type UnifiedEventPayload =
 	attachments: AttachmentMeta[],
 	/**  Source (`cli` / `web` / `android` / `resume`) */
 	client_source: string,
+	/**
+	 *  Agent-side message ID when the driver can assign/observe one.
+	 *
+	 *  Native drivers use it to target a message (revert, fork boundary).
+	 */
+	agent_message_id?: string | null,
 } } |
 /**
  *  A reply message from the agent.
@@ -2627,6 +2773,8 @@ export type UnifiedEventPayload =
 	 *  existed).
 	 */
 	fork_scope?: ForkScope | null,
+	/**  Optional native-only session operations (empty for ACP agents). */
+	native_features?: string[],
 } } |
 /**  A progress log line of ephemeral VM provisioning (`stderr`). */
 { type: "provisioning_log"; data: {
@@ -2717,6 +2865,19 @@ export type UnifiedEventPayload =
 	status: CompactionStatus,
 	/**  Extra information such as the failure reason (optional) */
 	detail: string | null,
+} } |
+/**
+ *  The conversation was reverted to a previous boundary.
+ *
+ *  The event log is append-only: conversation events with a `node_seq` in
+ *  `(up_to_node_seq, this event's node_seq)` are hidden by clients. New
+ *  turns recorded after this event remain visible.
+ */
+{ type: "session_reverted"; data: {
+	/**  Last `node_seq` that remains visible (the revert boundary) */
+	up_to_node_seq: number,
+	/**  Whether the agent also restored workspace files */
+	files: boolean,
 } } |
 /**
  *  A change of the session status. The update source of the hub-side

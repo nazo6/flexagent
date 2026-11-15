@@ -69,9 +69,17 @@ pub(super) async fn pump_events(
                                 },
                             );
                             if session.permission_policy == PermissionPolicy::AutoAllowAll {
+                                // `auto_allow_all` should persist the rule when
+                                // the agent offers `allow_always`, not merely
+                                // approve this request once.
                                 auto_permission = options
                                     .iter()
-                                    .find(|option| option.kind.is_allow())
+                                    .find(|option| {
+                                        option.kind.is_allow() && option.kind.is_always()
+                                    })
+                                    .or_else(|| {
+                                        options.iter().find(|option| option.kind.is_allow())
+                                    })
                                     .map(|option| (request_id.clone(), option.option_id.clone()));
                             }
                         }

@@ -320,19 +320,7 @@ impl AgentDriver for AcpDriver {
         req: StartSessionRequest,
         event_tx: mpsc::UnboundedSender<DriverEvent>,
     ) -> anyhow::Result<StartedSession> {
-        match self.start_session_inner(req, &event_tx).await {
-            Ok(started) => Ok(started),
-            Err(err) => {
-                // Record the start failure as an event (the session moves to the error state)
-                fxg_protocol::discard_with!(
-                    event_tx.send(DriverEvent::Failed {
-                        message: err.to_string(),
-                    }),
-                    "notify event subscribers"
-                );
-                Err(err)
-            }
-        }
+        self.start_session_with_parser(req, None, event_tx).await
     }
 
     async fn shutdown_idle(&self) -> usize {
@@ -360,10 +348,34 @@ impl AgentDriver for AcpDriver {
 }
 
 impl AcpDriver {
+    /// Starts an ACP session with an optional vendor notification parser
+    /// contributed by an [`crate::agent::extension::AgentExtension`].
+    pub(crate) async fn start_session_with_parser(
+        &self,
+        req: StartSessionRequest,
+        acp_parser: Option<Arc<dyn crate::agent::extension::AcpNotificationParser>>,
+        event_tx: mpsc::UnboundedSender<DriverEvent>,
+    ) -> anyhow::Result<StartedSession> {
+        match self.start_session_inner(req, acp_parser, &event_tx).await {
+            Ok(started) => Ok(started),
+            Err(err) => {
+                // Record the start failure as an event (the session moves to the error state)
+                fxg_protocol::discard_with!(
+                    event_tx.send(DriverEvent::Failed {
+                        message: err.to_string(),
+                    }),
+                    "notify event subscribers"
+                );
+                Err(err)
+            }
+        }
+    }
+
     /// Core session start (reuse idle process, then cold start).
     async fn start_session_inner(
         &self,
         req: StartSessionRequest,
+        acp_parser: Option<Arc<dyn crate::agent::extension::AcpNotificationParser>>,
         event_tx: &mpsc::UnboundedSender<DriverEvent>,
     ) -> anyhow::Result<StartedSession> {
         // Extension resolution for `npx` / `uvx` (Windows PATHEXT support)
@@ -386,7 +398,7 @@ impl AcpDriver {
             resume: req.resume.clone(),
             fork_from: req.fork_from.clone(),
             initial_config: req.initial_config.clone(),
-            acp_parser: req.acp_parser.clone(),
+            acp_parser,
         };
 
         // 1) Reuse an idle process (just session/new on an initialized connection)

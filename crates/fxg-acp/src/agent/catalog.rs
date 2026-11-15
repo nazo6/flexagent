@@ -29,7 +29,7 @@ pub struct AgentCatalog {
     providers: BTreeMap<String, Arc<dyn AgentProvider>>,
     /// Built-in extensions keyed by their stable extension ID.
     extensions: BTreeMap<String, Arc<dyn AgentExtension>>,
-    acp: Arc<dyn AgentDriver>,
+    acp: Arc<AcpDriver>,
     /// Tier 2 wrappers, cached so the driver identity stays stable per agent.
     extended: Mutex<BTreeMap<String, Arc<dyn AgentDriver>>>,
     /// Preset executable lookup (injectable for tests).
@@ -48,14 +48,8 @@ impl AgentCatalog {
         let mut provider_map = BTreeMap::new();
         for provider in providers {
             let backend = provider.backend();
-            if let AgentBackend::AcpExtended(extension) = &backend {
-                // Providers declare their extension ID explicitly. The agent ID
-                // remains a fallback for test providers built directly from a
-                // backend.
-                let extension_id = provider
-                    .extension_id()
-                    .map_or_else(|| provider.definition().id.clone(), str::to_owned);
-                extensions.insert(extension_id, Arc::clone(extension));
+            if let AgentBackend::AcpExtended { id, extension } = &backend {
+                extensions.insert((*id).to_owned(), Arc::clone(extension));
             }
             provider_map.insert(provider.definition().id.clone(), provider);
         }
@@ -82,6 +76,20 @@ impl AgentCatalog {
         self.providers
             .get(id)
             .is_some_and(|provider| matches!(provider.backend(), AgentBackend::Custom(_)))
+    }
+
+    /// Returns the agent-native management integration, if the agent has one.
+    ///
+    /// Custom definitions always resolve through ACP and have no management
+    /// integration, even when their ID matches a built-in agent.
+    pub fn management(
+        &self,
+        agent_id: &str,
+    ) -> Option<Arc<dyn crate::management::AgentManagement>> {
+        if self.registry.custom_agent(agent_id).is_some() {
+            return None;
+        }
+        self.providers.get(agent_id)?.management()
     }
 
     /// The underlying ACP Registry (catalog fetch / cache).
@@ -147,9 +155,14 @@ impl AgentCatalog {
                 description: definition.description.clone(),
                 sources,
                 custom: None,
-                extension: provider.extension_id().map(str::to_owned),
-                capabilities: fxg_protocol::settings::AgentAcpCapabilities::default(),
+                extension: backend.extension_id().map(str::to_owned),
+                capabilities: if is_custom {
+                    fxg_protocol::settings::AgentAcpCapabilities { subagents: false }
+                } else {
+                    fxg_protocol::settings::AgentAcpCapabilities::default()
+                },
                 backend: backend.kind(),
+                has_management: provider.management().is_some(),
                 icon: definition.icon.clone(),
             });
         }
@@ -182,7 +195,7 @@ impl AgentCatalog {
                 continue;
             };
             match provider.backend() {
-                AgentBackend::AcpExtended(extension) => {
+                AgentBackend::AcpExtended { extension, .. } => {
                     entry.backend = AgentBackendKind::AcpExtended;
                     let metadata = extension.metadata();
                     if let Some(name) = metadata.name {
@@ -266,19 +279,20 @@ impl AgentCatalog {
         let capabilities = fxg_protocol::settings::AgentAcpCapabilities::default();
         let mut spec = Self::preset_spec(provider.definition(), preset, program, extra_args);
         spec.driver_kind = Self::driver_kind(&backend);
-        if let AgentBackend::AcpExtended(extension) = &backend {
-            spec.extension = Some(
-                provider
-                    .extension_id()
-                    .map_or_else(|| id.clone(), str::to_owned),
-            );
+        if let AgentBackend::AcpExtended {
+            id: extension_id,
+            extension,
+        } = &backend
+        {
+            spec.extension = Some((*extension_id).to_owned());
             extension.prepare_launch(cwd, &mut spec)?;
             spec.acp = extension.acp_options(&capabilities);
             if let Some(name) = extension.metadata().name {
                 spec.display_name = name;
             }
+        } else {
+            Self::apply_capabilities(&mut spec, capabilities);
         }
-        Self::apply_capabilities(&mut spec, capabilities);
         Ok(spec)
     }
 
@@ -302,7 +316,7 @@ impl AgentCatalog {
     /// Selects the driver for a resolved launch spec.
     pub fn driver_for(&self, spec: &AgentLaunchSpec) -> anyhow::Result<Arc<dyn AgentDriver>> {
         match &spec.driver_kind {
-            DriverKind::Acp => Ok(Arc::clone(&self.acp)),
+            DriverKind::Acp => Ok(Arc::clone(&self.acp) as Arc<dyn AgentDriver>),
             DriverKind::AcpExtended => {
                 let extension_id = spec.extension.as_deref().unwrap_or(&spec.agent_id);
                 self.extended_driver(extension_id)
@@ -316,7 +330,7 @@ impl AgentCatalog {
     fn driver_kind(backend: &AgentBackend) -> DriverKind {
         match backend {
             AgentBackend::Acp => DriverKind::Acp,
-            AgentBackend::AcpExtended(_) => DriverKind::AcpExtended,
+            AgentBackend::AcpExtended { .. } => DriverKind::AcpExtended,
             AgentBackend::Custom(_) => DriverKind::Custom,
         }
     }
@@ -814,7 +828,7 @@ mod tests {
                 args: &["acp"],
             }),
         )
-        .with_backend(AgentBackend::AcpExtended(Arc::new(DummyExtension)));
+        .with_extension("extended", Arc::new(DummyExtension));
         let mut catalog =
             AgentCatalog::with_providers(registry(dir.path()), vec![Arc::new(provider)]);
         catalog.preset_lookup = |_| Some(PathBuf::from("/fake/bin/extended"));
