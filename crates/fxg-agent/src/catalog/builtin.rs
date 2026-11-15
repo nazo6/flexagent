@@ -12,6 +12,7 @@ use fxg_protocol::client_api::AgentBackendKind;
 use fxg_protocol::common::AgentAuthMethodInfo;
 
 use crate::acp::extensions::AgentExtension;
+use crate::acp::extensions::antigravity::AntigravityExtension;
 use crate::acp::extensions::opencode::OpenCodeExtension;
 use crate::driver::AgentDriver;
 use crate::management::AgentManagement;
@@ -25,6 +26,8 @@ pub const OPENCODE_ACP: &str = "opencode-acp";
 pub const OPENCODE_EXTENSION: &str = "opencode";
 /// ACP-only Antigravity CLI (`agy acp`).
 pub const AGY: &str = "agy";
+/// Extension ID applied to [`AGY`].
+pub const ANTIGRAVITY_EXTENSION: &str = "antigravity";
 /// ACP-only GitHub Copilot CLI (`copilot --acp`).
 pub const COPILOT: &str = "github-copilot-cli";
 /// ACP-only Qwen Code CLI (`qwen --acp`).
@@ -236,6 +239,10 @@ pub fn agents() -> Vec<BuiltinAgent> {
             AGY,
             &["acp"],
             "builtin:antigravity",
+        )
+        .with_extension(
+            ANTIGRAVITY_EXTENSION,
+            Arc::new(AntigravityExtension::default()),
         ),
         acp_agent(
             COPILOT,

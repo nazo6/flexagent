@@ -1013,8 +1013,7 @@ impl ClientApiBackend for DaemonState {
         let cwd = local_path
             .map(PathBuf::from)
             .filter(|path| path.is_dir())
-            .or_else(|| std::env::current_dir().ok())
-            .unwrap_or_else(|| PathBuf::from("."));
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
         let usage = self
             .session_manager()
             .catalog()

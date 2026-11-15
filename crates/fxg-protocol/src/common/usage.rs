@@ -77,6 +77,8 @@ crate::open_string_enum! {
     pub enum UsageWindowKind {
         /// Rolling 5-hour window (OpenCode Go).
         Rolling5h => "rolling_5h",
+        /// Fixed 5-hour window (Antigravity).
+        FiveHour => "5h",
         /// Weekly window.
         Weekly => "weekly",
         /// Monthly window.

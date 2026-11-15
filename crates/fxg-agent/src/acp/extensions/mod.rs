@@ -17,6 +17,7 @@ use fxg_protocol::events::SubagentStatus;
 
 use crate::driver::{AgentLaunchSpec, DriverEvent};
 
+pub mod antigravity;
 pub mod opencode;
 
 /// Display metadata that an extension may override.

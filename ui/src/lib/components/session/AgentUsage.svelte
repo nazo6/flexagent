@@ -86,6 +86,8 @@
     switch (window.kind) {
       case "rolling_5h":
         return m.session_usage_window_rolling_5h();
+      case "5h":
+        return m.session_usage_window_5h();
       case "weekly":
         return m.session_usage_window_weekly();
       case "monthly":
@@ -104,18 +106,19 @@
     return "bg-signal";
   }
 
-  function resetsIn(window: UsageWindow): string {
-    if (window.resets_at === null) return "—";
+  function resetsIn(window: UsageWindow): string | null {
+    if (window.resets_at === null) return null;
     const remaining = window.resets_at - Date.now();
-    return remaining > 0 ? formatDurationMs(remaining) : "—";
+    return remaining > 0 ? formatDurationMs(remaining) : null;
   }
 
   const chipLabel = $derived.by(() => {
     if (usage === null || worst === null) return "";
+    const group = usage.groups.length > 1 ? `${worst.group.label} · ` : "";
     if (worst.window.limited) {
-      return `${usage.source.label} · ${m.session_usage_limited()}`;
+      return `${usage.source.label} · ${group}${m.session_usage_limited()}`;
     }
-    return `${usage.source.label} · ${windowLabel(worst.window)} ${m.session_usage_left({
+    return `${usage.source.label} · ${group}${windowLabel(worst.window)} ${m.session_usage_left({
       percent: remainingPercent(worst.window),
     })}`;
   });
@@ -181,6 +184,7 @@
             {/if}
             <div class="mt-1.5 space-y-1.5">
               {#each group.windows as window (window.kind + (window.label ?? ""))}
+                {@const reset = resetsIn(window)}
                 <div class="grid grid-cols-[3.4rem_minmax(3rem,1fr)_4.5rem] items-center gap-2">
                   <span class="text-[11px] font-medium">{windowLabel(window)}</span>
                   <span class="bg-muted h-1.5 overflow-hidden rounded-full">
@@ -197,9 +201,11 @@
                     {/if}
                   </span>
                 </div>
-                <div class="text-muted-foreground -mt-1 text-right text-[10px]">
-                  {m.session_usage_resets_in({ time: resetsIn(window) })}
-                </div>
+                {#if reset !== null}
+                  <div class="text-muted-foreground -mt-1 text-right text-[10px]">
+                    {m.session_usage_resets_in({ time: reset })}
+                  </div>
+                {/if}
               {/each}
             </div>
           </section>

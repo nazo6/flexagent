@@ -188,6 +188,63 @@ fn per_agent_capabilities_apply_to_the_launch_spec() {
 }
 
 #[test]
+fn usage_limits_delegate_to_the_agent_extension() {
+    struct UsageExtension;
+
+    #[async_trait::async_trait]
+    impl AgentExtension for UsageExtension {
+        async fn usage_limits(
+            &self,
+            _launch: &AgentLaunchSpec,
+            _cwd: &Path,
+        ) -> anyhow::Result<Option<AgentUsageLimits>> {
+            Ok(Some(AgentUsageLimits {
+                source: fxg_protocol::common::UsageSource {
+                    id: "demo".to_owned(),
+                    label: "Demo".to_owned(),
+                    plan: None,
+                    account: None,
+                    icon: None,
+                },
+                groups: Vec::new(),
+                fetched_at: 1,
+            }))
+        }
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let agent =
+        demo_agent("demo", "Demo", "demo").with_extension("demo-usage", Arc::new(UsageExtension));
+    let mut catalog = catalog_with_agents(dir.path(), vec![agent]);
+    catalog.preset_lookup = |_| Some(PathBuf::from("/fake/bin/demo"));
+
+    let usage = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(catalog.usage_limits("demo", Path::new(".")))
+        .expect("usage")
+        .expect("limits");
+    assert_eq!(usage.source.id, "demo");
+}
+
+#[test]
+fn antigravity_uses_its_usage_extension() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let agent = builtin::agents()
+        .into_iter()
+        .find(|agent| agent.definition().id == builtin::AGY)
+        .expect("Antigravity built-in");
+    let mut catalog = catalog_with_agents(dir.path(), vec![agent]);
+    catalog.preset_lookup = |_| Some(PathBuf::from("/fake/bin/agy"));
+
+    let spec = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(catalog.launch_spec("agy", Path::new("."), &[]))
+        .expect("spec");
+    assert_eq!(spec.extension_id(), Some(builtin::ANTIGRAVITY_EXTENSION));
+    assert!(catalog.extension(builtin::ANTIGRAVITY_EXTENSION).is_some());
+}
+
+#[test]
 fn agents_declare_their_extension_id_explicitly() {
     struct SharedExtension;
 

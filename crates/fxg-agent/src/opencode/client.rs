@@ -936,7 +936,10 @@ enum GoUsageStatus {
 
 /// Parses the local server's `GET /api/experimental/usage/limits` payload.
 pub(super) fn parse_local_usage(value: &Value) -> Option<AgentUsageLimits> {
-    let envelope = serde_json::from_value::<LocalUsageEnvelope>(value.clone()).ok()?;
+    let envelope = match serde_json::from_value::<LocalUsageEnvelope>(value.clone()) {
+        Ok(envelope) => envelope,
+        Err(_) => return None,
+    };
     let go = envelope.data?.go?;
     Some(AgentUsageLimits {
         source: go_source(),
@@ -951,7 +954,10 @@ pub(super) fn parse_local_usage(value: &Value) -> Option<AgentUsageLimits> {
 
 /// Parses the OpenCode Go `GET /zen/go/v1/usage` payload.
 pub(super) fn parse_go_usage(value: &Value) -> Option<AgentUsageLimits> {
-    let envelope = serde_json::from_value::<GoUsageEnvelope>(value.clone()).ok()?;
+    let envelope = match serde_json::from_value::<GoUsageEnvelope>(value.clone()) {
+        Ok(envelope) => envelope,
+        Err(_) => return None,
+    };
     let usage = envelope.usage;
     Some(AgentUsageLimits {
         source: go_source(),
