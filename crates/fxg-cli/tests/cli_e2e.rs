@@ -115,6 +115,27 @@ impl TestEnv {
             .output()
             .expect("run fxg command")
     }
+
+    /// Run `fxg` with text fed to stdin (for confirmation prompts).
+    fn run_with_stdin(&self, args: &[&str], input: &str) -> Output {
+        use std::io::Write;
+
+        let mut child = self
+            .command()
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn fxg command");
+        child
+            .stdin
+            .take()
+            .expect("child stdin")
+            .write_all(input.as_bytes())
+            .expect("write child stdin");
+        child.wait_with_output().expect("run fxg command")
+    }
 }
 
 impl Drop for TestEnv {
@@ -343,6 +364,85 @@ async fn cli_shows_help_for_missing_subcommand() {
         text.contains("list") && text.contains("show"),
         "container command must show help: {text}"
     );
+}
+
+#[tokio::test]
+async fn internal_wipe_removes_all_data_and_optionally_config() {
+    let env = TestEnv::new();
+    let node = fxg_protocol::paths::Paths::portable(&env.home, fxg_protocol::paths::Role::Node);
+    let hub = fxg_protocol::paths::Paths::portable(&env.home, fxg_protocol::paths::Role::Hub);
+    node.ensure_dirs().expect("create node dirs");
+    hub.ensure_dirs().expect("create hub dirs");
+    for path in [
+        node.db_path(),
+        hub.db_path(),
+        node.auth_token_path(),
+        node.node_token_path(),
+        hub.vapid_path(),
+        node.secrets_dir().join("example"),
+        node.log_path(),
+        node.config_path(),
+        hub.config_path(),
+    ] {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create parent dir");
+        }
+        std::fs::write(&path, "x").expect("write test file");
+    }
+
+    // A running node is refused and nothing is deleted.
+    std::fs::write(node.addr_path(), "127.0.0.1:1").expect("write addr file");
+    let output = env.run(&["internal", "wipe"], None);
+    assert!(!output.status.success(), "wipe must refuse a running node");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("stop it with `fxg node stop`"),
+        "got: {stderr}"
+    );
+    assert!(
+        node.db_path().is_file(),
+        "a refused wipe must not delete data"
+    );
+    std::fs::remove_file(node.addr_path()).expect("remove addr file");
+
+    // Declining the confirmation keeps everything.
+    let output = env.run_with_stdin(&["internal", "wipe"], "n\n");
+    assert!(output.status.success(), "declining must not fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("aborted"), "got: {stderr}");
+    assert!(
+        node.db_path().is_file(),
+        "a declined wipe must not delete data"
+    );
+
+    // Data, state, cache and logs go; the configuration files stay.
+    let text = stdout_of(&env.run_with_stdin(&["internal", "wipe"], "y\n"));
+    assert!(text.contains("removed"), "got: {text}");
+    for path in [
+        node.data_dir(),
+        hub.data_dir(),
+        node.state_dir(),
+        hub.state_dir(),
+        node.cache_dir(),
+        hub.cache_dir(),
+        node.log_dir(),
+        hub.log_dir(),
+    ] {
+        assert!(!path.exists(), "{} must be removed", path.display());
+    }
+    assert!(
+        node.config_path().is_file(),
+        "node.toml must stay without --config"
+    );
+    assert!(
+        hub.config_path().is_file(),
+        "hub.toml must stay without --config"
+    );
+
+    // --config also deletes the bootstrap configuration.
+    stdout_of(&env.run_with_stdin(&["internal", "wipe", "--config"], "y\n"));
+    assert!(!node.config_path().exists(), "node.toml must be removed");
+    assert!(!hub.config_path().exists(), "hub.toml must be removed");
 }
 
 #[tokio::test]
