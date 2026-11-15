@@ -10,9 +10,31 @@
 type ShikiModule = typeof import("shiki");
 
 interface SharedHighlighter {
-  codeToHtml(code: string, options: { lang: string; theme: string }): string;
+  codeToHtml(
+    code: string,
+    options: { lang: string; theme: string; transformers?: unknown[] },
+  ): string;
   getLoadedLanguages(): string[];
   loadLanguage(...langs: unknown[]): Promise<void>;
+}
+
+/** Class shiki puts on the focused line (styled by `CodeView`). */
+export const FOCUS_LINE_CLASS = "fxg-line-focus";
+
+function focusLineTransformer(line: number): unknown {
+  return {
+    line(node: { properties: Record<string, unknown> }, current: number): void {
+      if (current !== line) return;
+      const existing = node.properties.class;
+      if (Array.isArray(existing)) {
+        node.properties.class = [...existing, FOCUS_LINE_CLASS];
+      } else if (typeof existing === "string" && existing !== "") {
+        node.properties.class = `${existing} ${FOCUS_LINE_CLASS}`;
+      } else {
+        node.properties.class = FOCUS_LINE_CLASS;
+      }
+    },
+  };
 }
 
 let shikiPromise: Promise<ShikiModule> | null = null;
@@ -69,6 +91,7 @@ export async function highlightCodeBlock(
   code: string,
   lang: string,
   dark: boolean,
+  line: number | null = null,
 ): Promise<string | null> {
   const shiki = await getShiki();
   const resolved = resolveBundledLanguage(shiki, lang);
@@ -80,6 +103,7 @@ export async function highlightCodeBlock(
   return highlighter.codeToHtml(code, {
     lang: resolved.id,
     theme: dark ? "github-dark" : "github-light",
+    transformers: line === null ? undefined : [focusLineTransformer(line)],
   });
 }
 

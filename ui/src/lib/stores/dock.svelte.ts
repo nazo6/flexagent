@@ -18,6 +18,8 @@ export interface DockFileTab {
   path: string;
   mode: DockFileMode;
   scope: DockDiffScope;
+  /** 1-based line to focus (from a chat file link), or `null`. */
+  line: number | null;
 }
 
 /** One shell tab inside the Terminal tool. */
@@ -71,6 +73,7 @@ interface PersistedFile {
   path: string;
   mode: DockFileMode;
   scope: DockDiffScope;
+  line: number | null;
 }
 
 interface PersistedTerminal {
@@ -190,7 +193,11 @@ function restoreWorkspace(value: unknown): DockWorkspace | null {
       if (files.some((file) => file.path === raw.path)) continue;
       const mode: DockFileMode = raw.mode === "diff" ? "diff" : "view";
       const scope: DockDiffScope = raw.scope === "branch_base" ? "branch_base" : "uncommitted";
-      files.push({ path: raw.path, mode, scope });
+      const line =
+        typeof raw.line === "number" && Number.isInteger(raw.line) && raw.line > 0
+          ? raw.line
+          : null;
+      files.push({ path: raw.path, mode, scope, line });
       if (files.length >= MAX_FILES) break;
     }
   }
@@ -287,6 +294,7 @@ function serialize(workspaces: Record<string, DockWorkspace>, width: number): st
             path: file.path,
             mode: file.mode,
             scope: file.scope,
+            line: file.line,
           })),
           activeFile: workspace.activeFile,
           terminals: workspace.terminals.map((terminal) => ({
@@ -470,15 +478,22 @@ export class WorkspaceDockStore {
   }
 
   /** Opens a file preview inside Files (or focuses and updates an existing one). */
-  openFile(path: string, mode: DockFileMode = "view", scope: DockDiffScope = "uncommitted"): void {
+  openFile(
+    path: string,
+    mode: DockFileMode = "view",
+    scope: DockDiffScope = "uncommitted",
+    line: number | null = null,
+  ): void {
     if (this.currentKey === null) return;
     this.fileOpenVersion += 1;
     this.update((workspace) => {
       const existing = workspace.files.find((file) => file.path === path);
       const files =
         existing === undefined
-          ? trimFiles([...workspace.files, { path, mode, scope }], path)
-          : workspace.files.map((file) => (file.path === path ? { ...file, mode, scope } : file));
+          ? trimFiles([...workspace.files, { path, mode, scope, line }], path)
+          : workspace.files.map((file) =>
+              file.path === path ? { ...file, mode, scope, line } : file,
+            );
       return {
         ...workspace,
         files,

@@ -12,8 +12,11 @@
    *   The finalized text is rendered immediately.
    */
   import { untrack } from "svelte";
+  import { resolveFileHref } from "#lib/dock/file-links.ts";
   import { enhanceCodeBlocks } from "#lib/highlight.ts";
   import { renderMarkdown } from "#lib/markdown.ts";
+  import { dock } from "#lib/stores/dock.svelte.ts";
+  import { sync } from "#lib/stores/app.svelte.ts";
 
   /** Minimum spacing between markdown re-renders while the text is streaming. */
   const STREAM_RENDER_INTERVAL_MS = 80;
@@ -22,7 +25,20 @@
     text,
     streaming = false,
     class: className = "",
-  }: { text: string; streaming?: boolean; class?: string } = $props();
+    /** Directory for relative file links (defaults to the workspace root). */
+    fileBaseDir: baseDirProp = null,
+  }: {
+    text: string;
+    streaming?: boolean;
+    class?: string;
+    fileBaseDir?: string | null;
+  } = $props();
+
+  const workspaceRoot = $derived(dock.context?.localPath ?? null);
+  const fileBaseDir = $derived(baseDirProp ?? workspaceRoot);
+  const fileLinksEnabled = $derived(
+    sync.connection.role === "local_node" && workspaceRoot !== null,
+  );
 
   let root: HTMLDivElement | undefined = $state(undefined);
 
@@ -76,9 +92,38 @@
     }, 150);
     return () => clearTimeout(highlightTimer);
   });
+
+  /** Opens a link to a workspace file in the Files dock instead of a new tab. */
+  function openFileLink(event: MouseEvent): void {
+    if (!fileLinksEnabled || fileBaseDir === null || workspaceRoot === null) return;
+    // Delegated `auxclick` also covers right-click; only middle-click opens.
+    if (event.type === "auxclick" && event.button !== 1) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const anchor = target.closest("a");
+    if (anchor === null) return;
+    const href = anchor.getAttribute("href");
+    if (href === null) return;
+    const resolved = resolveFileHref(href, fileBaseDir, workspaceRoot);
+    if (resolved === null) return;
+    event.preventDefault();
+    dock.openFile(resolved.path, "view", "uncommitted", resolved.line);
+  }
+
+  /** Event delegation survives the DOM rebuilds caused by `{@html}`. */
+  function activateFileLinks(node: HTMLElement) {
+    node.addEventListener("click", openFileLink);
+    node.addEventListener("auxclick", openFileLink);
+    return {
+      destroy() {
+        node.removeEventListener("click", openFileLink);
+        node.removeEventListener("auxclick", openFileLink);
+      },
+    };
+  }
 </script>
 
-<div class="fxg-md {className}" bind:this={root}>
+<div class="fxg-md {className}" bind:this={root} use:activateFileLinks>
   {@html html}{#if streaming}<span class="animate-pulse">▍</span>{/if}
 </div>
 

@@ -1,9 +1,11 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import CodeView from "#lib/components/dock/CodeView.svelte";
   import GitStatusBadge from "#lib/components/dock/GitStatusBadge.svelte";
   import DiffViewer from "#lib/components/diff/DiffViewer.svelte";
   import MarkdownText from "#lib/components/MarkdownText.svelte";
   import { errorMessage } from "#lib/api/error-messages.ts";
+  import { dirname } from "#lib/dock/paths.ts";
   import type {
     DockContext,
     DockDiffScope,
@@ -42,7 +44,15 @@
   const scope = $derived<DockDiffScope>(tab.scope);
   const isMarkdown = $derived(/\.(md|markdown|mdx)$/i.test(path));
 
-  let markdownPreview = $state(true);
+  let markdownPreview = $state(untrack(() => tab.line === null));
+  let previewKey = untrack(() => `${tab.path}\u0000${tab.line ?? ""}`);
+  // A chat link with a line opens in source view; keep the toggle available.
+  $effect(() => {
+    const key = `${tab.path}\u0000${tab.line ?? ""}`;
+    if (key === previewKey) return;
+    previewKey = key;
+    markdownPreview = tab.line === null;
+  });
   let view = $state<WorkspaceFileView | null>(null);
   let diff = $state<WorkspaceDiffResponse | null>(null);
   let viewLoading = $state(false);
@@ -212,10 +222,10 @@
       {#if view.content.kind === "text"}
         {#if isMarkdown && markdownPreview}
           <div class="app-scroll h-full overflow-y-auto rounded-md border p-4">
-            <MarkdownText text={view.content.text} />
+            <MarkdownText text={view.content.text} fileBaseDir={dirname(view.path)} />
           </div>
         {:else}
-          <CodeView path={view.path} text={view.content.text} />
+          <CodeView path={view.path} text={view.content.text} line={tab.line} />
         {/if}
       {:else if view.content.kind === "image"}
         <div class="flex h-full items-center justify-center overflow-auto rounded-md border p-2">
