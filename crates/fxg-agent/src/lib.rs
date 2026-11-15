@@ -26,6 +26,7 @@ pub mod catalog;
 pub mod driver;
 pub mod management;
 pub mod opencode;
+mod usage;
 
 pub use acp::AcpDriver;
 pub use acp::extensions::{AgentExtension, AgentMetadata, EventDisposition};
