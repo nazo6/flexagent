@@ -60,10 +60,10 @@
   - `fxg-db`: SQLite (`sqlx`, WAL, FTS5 `tokenize='trigram'`) による `hub.db`
     / `node.db` 管理
   - `fxg-pty`: ConPTY / Unix PTY (`portable-pty`)、Windows Job Object 管理
-  - `fxg-agent`: `AgentDriver` トレイト、`AcpDriver` / `ExtendedAcpDriver`
-    (`agent-client-protocol`)、`OpenCodeNativeDriver` (Tier 3, OpenCode v2
-    HTTP/SSE)、`AgentCatalog` / `AgentExtension`、ACP Registry（custom 定義の
-    import 用）、ローカル PATH 実行
+  - `fxg-agent`: `AgentDriver` トレイト、`AcpDriver`（`agent-client-protocol`）、
+    `OpenCodeNativeDriver` (Tier 3, OpenCode v2 HTTP/SSE)、`AgentCatalog` /
+    `AgentExtension`（`acp::extensions`）、ACP Registry（custom 定義の import
+    用）、ローカル PATH 実行
   - `fxg-node`: ノード (ループバック HTTP/WS、Outbox 同期、Git
     Worktree 管理、ACP ネイティブ Fork/Resume)
   - `fxg-hub`: ハブ (Axum、Node Hub、VAPID Web Push、Stdio
