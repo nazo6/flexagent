@@ -18,7 +18,7 @@ use std::time::Duration;
 use fxg_agent::driver::{
     AgentDriver, AgentLaunchSpec, DriverEvent, LaunchBackend, StartSessionRequest,
 };
-use fxg_agent::opencode_native::OpenCodeNativeDriver;
+use fxg_agent::opencode::OpenCodeNativeDriver;
 use fxg_protocol::common::{PromptInput, StreamDeltaPayload};
 use fxg_protocol::events::UnifiedEventPayload;
 use tokio::sync::mpsc;

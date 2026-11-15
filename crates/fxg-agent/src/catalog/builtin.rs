@@ -11,11 +11,11 @@ use std::sync::Arc;
 use fxg_protocol::client_api::AgentBackendKind;
 use fxg_protocol::common::AgentAuthMethodInfo;
 
+use crate::acp::extensions::AgentExtension;
+use crate::acp::extensions::opencode::OpenCodeExtension;
 use crate::driver::AgentDriver;
-use crate::extension::AgentExtension;
 use crate::management::AgentManagement;
-use crate::opencode::OpenCodeExtension;
-use crate::opencode_native::{OpenCodeNativeDriver, auth as opencode_auth};
+use crate::opencode::{OpenCodeNativeDriver, auth as opencode_auth};
 
 /// OpenCode native driver (Tier 3, OpenCode v2 HTTP + SSE).
 pub const OPENCODE: &str = "opencode";

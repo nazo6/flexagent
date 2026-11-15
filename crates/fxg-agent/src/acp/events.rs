@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
+use crate::acp::extensions::{AgentExtension, EventDisposition};
 use crate::driver::DriverEvent;
-use crate::extension::{AgentExtension, EventDisposition};
 
 /// Sink that forwards driver events through an optional extension transform.
 #[derive(Clone)]

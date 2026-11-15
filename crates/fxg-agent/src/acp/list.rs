@@ -84,7 +84,7 @@ pub(super) async fn list_sessions(
 /// Runs `initialize` + paginated `session/list` on an initialized connection.
 async fn query_sessions(
     cx: &ConnectionTo<Agent>,
-    acp: &crate::extension::AcpExtensionOptions,
+    acp: &crate::acp::extensions::AcpExtensionOptions,
 ) -> Result<crate::driver::AgentSessionList, ListFailure> {
     let initialize = cx
         .send_request(

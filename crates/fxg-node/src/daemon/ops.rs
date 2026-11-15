@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fxg_agent::registry::LocalSource;
+use fxg_agent::acp::registry::LocalSource;
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{AgentSource, AgentSummary, AgentsResponse, WorktreeInfo};
 use fxg_protocol::common::{AgentAction, ProjectSummary};

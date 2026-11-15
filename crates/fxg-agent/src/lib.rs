@@ -2,16 +2,16 @@
 //!
 //! Design: `docs/04-agent-drivers-and-windows.md`
 //!
-//! - [`driver`]: [`AgentDriver`] / [`ActiveSessionHandle`] traits — the
+//! - [`driver`][]: [`AgentDriver`] / [`ActiveSessionHandle`] traits — the
 //!   abstraction for adding agents with custom protocols without changing
 //!   `fxg-node` itself
-//! - [`catalog`]: agent definitions, built-in providers and the catalog used for
+//! - [`catalog`][]: agent definitions, built-in agents and the catalog used for
 //!   launch resolution and driver selection
-//! - [`extension`]: Tier 2 ACP extensions applied by [`acp::AcpDriver`]
-//! - [`registry`]: fetching and caching the ACP Registry (`registry.json`),
-//!   plus custom agent management used by the Web UI
-//! - [`acp`][]: `AcpDriver` (standard ACP agent control via `agent-client-protocol`)
-//! - [`opencode_native`][]: `OpenCodeNativeDriver` (OpenCode v2 HTTP + SSE)
+//! - [`acp`][]: `AcpDriver` (standard ACP agent control via
+//!   `agent-client-protocol`) and the Tier 2 extensions in
+//!   [`acp::extensions`] module
+//! - [`acp::registry`]: fetching and caching the ACP Registry (`registry.json`)
+//! - [`opencode`][]: `OpenCodeNativeDriver` (OpenCode v2 HTTP + SSE)
 
 // Migration baseline: remove this crate-level allow as Phase 1 of
 // `docs/proposals/2026-11-08-type-safety-plan.md` lands.
@@ -22,21 +22,17 @@
 
 pub mod acp;
 pub mod auth;
-pub mod builtin;
 pub mod catalog;
 pub mod driver;
-pub mod extension;
 pub mod management;
 pub mod opencode;
-pub mod opencode_native;
-pub mod registry;
-mod warm;
 
 pub use acp::AcpDriver;
-pub use builtin::{
+pub use acp::extensions::{AgentExtension, AgentMetadata, EventDisposition};
+pub use catalog::AgentCatalog;
+pub use catalog::builtin::{
     AgentAuth, AgentBackend, AgentCommand, AgentDefinition, BuiltinAgent, LaunchPreset,
 };
-pub use catalog::AgentCatalog;
 pub use driver::{
     AcpLaunchOptions, ActiveSessionHandle, AgentAuthRequired, AgentDriver, AgentLaunchSpec,
     AgentSessionInfo, AgentSessionList, DriverEvent, DriverKind, DriverSessionCapabilities,
@@ -44,4 +40,3 @@ pub use driver::{
     NativeResumeUnavailable, NativeRevertUnavailable, ResumeRequest, StartSessionRequest,
     StartedSession,
 };
-pub use extension::{AgentExtension, AgentMetadata, EventDisposition};

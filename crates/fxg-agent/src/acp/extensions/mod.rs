@@ -16,6 +16,8 @@ use fxg_protocol::events::SubagentStatus;
 
 use crate::driver::DriverEvent;
 
+pub mod opencode;
+
 /// Display metadata that an extension may override.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentMetadata {

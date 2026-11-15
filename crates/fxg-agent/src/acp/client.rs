@@ -384,7 +384,7 @@ pub(super) struct AcpProcessTaskParams {
     /// Agent ID (diagnostics key)
     pub(super) agent_id: String,
     /// ACP connection options (client capabilities / vendor notifications)
-    pub(super) acp: crate::extension::AcpExtensionOptions,
+    pub(super) acp: crate::acp::extensions::AcpExtensionOptions,
     /// Recent stderr buffer shared with the driver
     pub(super) stderr: StderrRegistry,
     /// Process ready (initialize complete) notification

@@ -119,13 +119,17 @@ fn env_var(name: &str) -> Option<String> {
 mod auth;
 mod client;
 mod driver;
+mod history;
 mod mapping;
 mod server;
+mod state;
 
 pub use auth::auth;
 pub use client::OpenCodeClient;
 pub use server::OpenCodeNativeDriver;
 
 use driver::*;
+use history::*;
 use mapping::*;
 use server::*;
+use state::*;

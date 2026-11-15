@@ -108,7 +108,7 @@ impl usage::RunAsync for AgentsLoginArgs {
         let native = catalog.native_auth(&id);
         let methods = match native {
             Some(auth) => auth.methods.clone(),
-            None => fxg_agent::auth::discover_auth_methods(&spec)
+            None => fxg_agent::acp::auth::discover_auth_methods(&spec)
                 .await
                 .with_context(|| format!("failed to query authentication methods for {id}"))?,
         };
@@ -123,11 +123,11 @@ impl usage::RunAsync for AgentsLoginArgs {
                 if let Some(command) = native.and_then(|auth| auth.login.as_ref()) {
                     fxg_agent::auth::run_agent_command(command, &spec.env).await?;
                 } else {
-                    fxg_agent::auth::run_terminal_login(&spec, &method).await?;
+                    fxg_agent::acp::auth::run_terminal_login(&spec, &method).await?;
                 }
             }
             AgentAuthMethodKind::Agent => {
-                fxg_agent::auth::authenticate(&spec, &method.id).await?;
+                fxg_agent::acp::auth::authenticate(&spec, &method.id).await?;
             }
             _ => bail!("unsupported authentication method kind: {}", method.kind),
         }
@@ -158,7 +158,7 @@ impl usage::RunAsync for AgentsLogoutArgs {
                 .await
                 .with_context(|| format!("failed to log out from {id}"))?;
         } else {
-            fxg_agent::auth::logout(&spec)
+            fxg_agent::acp::auth::logout(&spec)
                 .await
                 .with_context(|| format!("failed to log out from {id}"))?;
         }

@@ -11,11 +11,11 @@ use std::sync::Arc;
 use fxg_protocol::common::RawJson;
 use fxg_protocol::events::{SubagentStatus, UnifiedEventPayload};
 
-use crate::driver::DriverEvent;
-use crate::extension::{
+use crate::acp::extensions::{
     AcpChildUpdate, AcpExtensionOptions, AcpNotificationParser, AgentExtension, AgentMetadata,
     EventDisposition,
 };
+use crate::driver::DriverEvent;
 
 /// OpenCode ACP extension.
 #[derive(Debug, Default)]

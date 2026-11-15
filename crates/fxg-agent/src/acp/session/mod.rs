@@ -2,10 +2,15 @@ use super::mapping::*;
 use super::subagent::map_state_update;
 use super::subagent::{ChildNotificationHandler, ChildSessions, SessionIngress};
 use super::*;
-use crate::extension::{AcpCapability, AcpExtensionOptions};
+use crate::acp::extensions::{AcpCapability, AcpExtensionOptions};
 use fxg_protocol::events::SubagentStatus;
 
 use agent_client_protocol::v1::schema::SubagentCapabilities;
+
+mod capabilities;
+
+pub(crate) use capabilities::client_capabilities;
+use capabilities::{apply_initial_config, apply_initial_mode, session_capabilities_after_initial};
 
 /// Reason the turn loop ended.
 pub(super) enum ServeOutcome {
@@ -130,134 +135,31 @@ pub(super) async fn build_session<'a>(
         "notify event subscribers"
     );
 
-    // Apply initial configuration (model / thinking level, etc.).
-    //
-    // The response may contain the refreshed option list: selecting a model can
-    // add dependent options (for example effort levels) that are not
-    // part of the `session/new` payload.
-    let mut applied_config_options: Option<Vec<SessionConfigOption>> = None;
-    for setting in &params.initial_config {
-        let value = match parse_config_value(setting.value.clone()) {
-            Ok(value) => value,
-            Err(err) => {
-                tracing::warn!(key = %setting.key, "invalid initial config value: {err}");
-                continue;
-            }
-        };
-        match cx
-            .send_request(SetSessionConfigOptionRequest::new(
-                acp_session_id.clone(),
-                setting.key.clone(),
-                value,
-            ))
-            .block_task()
-            .await
-        {
-            Ok(response) if !response.config_options.is_empty() => {
-                applied_config_options = Some(response.config_options);
-            }
-            Ok(_) => {}
-            Err(err) => {
-                tracing::warn!(key = %setting.key, "failed to set initial config: {err}");
-            }
-        }
-    }
+    let mut applied_config_options =
+        apply_initial_config(cx, &acp_session_id, &params.initial_config).await;
 
-    // Apply the initial mode
-    //
-    // ACP supersedes Session Modes with Session Config Options: agents such as
-    // OpenCode only report the selector as `configOptions[category = mode]` and
-    // reject those IDs in `session/set_mode`, so use whichever channel the agent
-    // reports.
-    let mode_option = mode_config_option(acquired_config_options.as_deref().unwrap_or_default());
-    let mode_via_config = mode_option.is_some();
-    let mut initial_mode_applied = false;
-    if let Some(mode_id) = params.initial_mode.as_ref() {
-        let result = match mode_option {
-            Some(option) => cx
-                .send_request(SetSessionConfigOptionRequest::new(
-                    acp_session_id.clone(),
-                    option.id.clone(),
-                    SessionConfigOptionValue::value_id(mode_id.clone()),
-                ))
-                .block_task()
-                .await
-                .map(|response| {
-                    if !response.config_options.is_empty() {
-                        applied_config_options = Some(response.config_options);
-                    }
-                }),
-            None => cx
-                .send_request(SetSessionModeRequest::new(
-                    acp_session_id.clone(),
-                    mode_id.clone(),
-                ))
-                .block_task()
-                .await
-                .map(|_| ()),
-        };
-        match result {
-            Ok(()) => initial_mode_applied = true,
-            Err(err) => tracing::warn!("failed to set initial mode {mode_id}: {err}"),
-        }
-    }
+    let initial_mode_applied = apply_initial_mode(
+        cx,
+        &acp_session_id,
+        params.initial_mode.as_deref(),
+        acquired_config_options.as_deref(),
+        &mut applied_config_options,
+    )
+    .await;
 
     // Publish modes, slash commands and config options.
-    //
-    // `session/new` reports the agent defaults; reflect the initial values we
-    // just applied so the first `CapabilitiesUpdated` matches the session state
-    // (the agent usually does not emit a config update for `set_config_option`).
-    let (modes, mut current_mode, mut config_options) = session_capabilities(
+    let capabilities_state = session_capabilities_after_initial(
+        agent_capabilities,
         acquired_modes.as_ref(),
-        applied_config_options
-            .as_deref()
-            .or(acquired_config_options.as_deref()),
+        applied_config_options.as_deref(),
+        acquired_config_options.as_deref(),
+        &params.initial_config,
+        params.initial_mode.as_deref(),
+        initial_mode_applied,
     );
-    for setting in &params.initial_config {
-        if let Some(option) = config_options
-            .iter_mut()
-            .find(|option| option.key == setting.key)
-        {
-            option.current_value = setting.value.clone();
-        }
-    }
-    // `session/new` reports the mode from before the initial mode was applied.
-    if initial_mode_applied && let Some(mode_id) = params.initial_mode.as_ref() {
-        current_mode = Some(mode_id.clone());
-        if mode_via_config
-            && let Some(option) = config_options
-                .iter_mut()
-                .find(|option| is_mode_option(option))
-        {
-            // Keep the label from the agent's option list when the mode exists.
-            option.current_value = option
-                .options
-                .iter()
-                .find(|choice| choice.select_value() == Some(mode_id.as_str()))
-                .cloned()
-                .unwrap_or_else(|| {
-                    ConfigOptionValue::Choice(ConfigOptionChoice::from_value(mode_id.clone()))
-                });
-        }
-    }
-    let capabilities_state = SessionCapabilitiesState {
-        current_mode: current_mode.clone(),
-        available_modes: modes.clone(),
-        available_commands: Vec::new(),
-        config_options: config_options.clone(),
-        fork_scope: Some(
-            if agent_capabilities.session_capabilities.fork.is_some()
-                && agent_capabilities.load_session
-            {
-                ForkScope::Last
-            } else {
-                ForkScope::None
-            },
-        ),
-    };
-    if !modes.is_empty()
-        || !config_options.is_empty()
-        || current_mode.is_some()
+    if !capabilities_state.available_modes.is_empty()
+        || !capabilities_state.config_options.is_empty()
+        || capabilities_state.current_mode.is_some()
         || capabilities_state.fork_scope.is_some()
     {
         fxg_protocol::discard_with!(
@@ -1134,37 +1036,4 @@ pub(super) async fn drain_replay_updates(
         tracing::debug!(discarded, "discarded session/load replay updates");
     }
     replayed
-}
-
-/// Client capabilities advertised to every ACP agent.
-///
-/// `auth.terminal` is enabled because fxg can reproduce the configured agent
-/// invocation in an interactive terminal (`fxg agents login`).
-pub(crate) fn client_capabilities(acp: &AcpExtensionOptions) -> ClientCapabilities {
-    let mut capabilities = ClientCapabilities::new()
-        .fs(FileSystemCapabilities::new()
-            .read_text_file(true)
-            .write_text_file(true))
-        .terminal(true)
-        .auth(AuthCapabilities::new().terminal(true))
-        .elicitation(ElicitationCapabilities::new().form(ElicitationFormCapabilities::new()));
-
-    if let Some(meta) = &acp.client_meta
-        && let serde_json::Value::Object(map) = meta.as_value()
-    {
-        capabilities = capabilities.meta(map.clone());
-    }
-
-    for capability in acp.capabilities.iter() {
-        match capability {
-            AcpCapability::Subagents => {
-                capabilities = capabilities.subagents(Some(SubagentCapabilities::new()));
-            }
-            AcpCapability::Unknown(name) => {
-                tracing::warn!(capability = name, "unknown ACP capability ignored");
-            }
-        }
-    }
-
-    capabilities
 }

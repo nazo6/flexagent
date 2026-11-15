@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use fxg_agent::extension::AgentExtension;
-use fxg_agent::opencode::OpenCodeExtension;
+use fxg_agent::acp::extensions::AgentExtension;
+use fxg_agent::acp::extensions::opencode::OpenCodeExtension;
 use fxg_agent::{
     AcpDriver, AcpLaunchOptions, AgentDriver, AgentLaunchSpec, DriverEvent, LaunchBackend,
     StartSessionRequest,
@@ -36,7 +36,7 @@ fn request(mode: &str, mut launch: AgentLaunchSpec, cwd: &Path) -> StartSessionR
 
 fn launch(
     extension: Option<&str>,
-    options: fxg_agent::extension::AcpExtensionOptions,
+    options: fxg_agent::acp::extensions::AcpExtensionOptions,
 ) -> AgentLaunchSpec {
     AgentLaunchSpec {
         agent_id: extension.unwrap_or("mock").to_owned(),

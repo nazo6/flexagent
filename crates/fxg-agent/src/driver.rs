@@ -75,7 +75,7 @@ pub struct AgentLaunchSpec {
 
 impl AgentLaunchSpec {
     /// ACP connection options, when this is an ACP launch.
-    pub fn acp_options(&self) -> Option<&crate::extension::AcpExtensionOptions> {
+    pub fn acp_options(&self) -> Option<&crate::acp::extensions::AcpExtensionOptions> {
         match &self.backend {
             LaunchBackend::Acp(options) => Some(&options.options),
             LaunchBackend::Custom | LaunchBackend::Other(_) => None,
@@ -117,7 +117,7 @@ pub struct AcpLaunchOptions {
     pub extension: Option<String>,
     /// Connection options contributed by the extension (client capabilities,
     /// vendor notification methods).
-    pub options: crate::extension::AcpExtensionOptions,
+    pub options: crate::acp::extensions::AcpExtensionOptions,
 }
 
 /// Resume selection from an existing agent session ([`StartSessionRequest::resume`]).

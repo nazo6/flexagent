@@ -67,21 +67,25 @@ use fxg_protocol::events::UnifiedEventPayload;
 use fxg_protocol::util::uuid_v7;
 use tokio::sync::{mpsc, oneshot, watch};
 
+use crate::acp::warm::{DEFAULT_WARM_IDLE, LaunchKey, WarmPool, WarmProcess};
 use crate::driver::{
     ActiveSessionHandle, AgentAuthRequired, AgentDriver, DriverEvent, HistoryCaptureUnavailable,
     NativeForkUnavailable, NativeResumeUnavailable, ResumeRequest, StartSessionRequest,
     StartedSession,
 };
-use crate::warm::{DEFAULT_WARM_IDLE, LaunchKey, WarmPool, WarmProcess};
 
+pub mod auth;
 mod client;
 mod events;
+pub mod extensions;
 mod list;
 mod mapping;
 mod process;
+pub mod registry;
 mod session;
 mod subagent;
 mod terminal;
+mod warm;
 
 pub(crate) use mapping::map_auth_method;
 pub(crate) use session::client_capabilities;
@@ -101,7 +105,7 @@ pub struct AcpDriver {
     /// Recent agent stderr lines for diagnostics
     stderr: StderrRegistry,
     /// Optional Tier 2 extension applied to every event of this driver
-    extension: Option<Arc<dyn crate::extension::AgentExtension>>,
+    extension: Option<Arc<dyn crate::acp::extensions::AgentExtension>>,
 }
 
 /// Bounded per-agent stderr buffer used by diagnostics.
@@ -203,7 +207,7 @@ impl AcpDriver {
     }
 
     /// Creates a driver that applies `extension` to every event (Tier 2).
-    pub fn with_extension(extension: Arc<dyn crate::extension::AgentExtension>) -> Self {
+    pub fn with_extension(extension: Arc<dyn crate::acp::extensions::AgentExtension>) -> Self {
         Self {
             extension: Some(extension),
             ..Self::new()
@@ -213,7 +217,7 @@ impl AcpDriver {
     /// Creates a driver with the idle pool disabled that applies `extension`
     /// (used by tests).
     pub fn without_pool_with_extension(
-        extension: Arc<dyn crate::extension::AgentExtension>,
+        extension: Arc<dyn crate::acp::extensions::AgentExtension>,
     ) -> Self {
         Self {
             extension: Some(extension),
@@ -293,7 +297,7 @@ struct SessionParams {
     /// Initial configuration applied after `session/new`
     initial_config: Vec<fxg_protocol::common::InitialConfig>,
     /// Parser for vendor subagent notifications (set by the extension layer).
-    acp_parser: Option<Arc<dyn crate::extension::AcpNotificationParser>>,
+    acp_parser: Option<Arc<dyn crate::acp::extensions::AcpNotificationParser>>,
 }
 
 /// Per-session shared information (handlers look it up by the ACP session_id).
