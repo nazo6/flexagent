@@ -27,34 +27,40 @@
 ACP だけでは、アイコンや起動オプションなどのエージェント固有メタデータや、
 ACP に存在しない機能（独自 API によるモデル一覧の取得など）を扱えない。将来の
 拡張を `agent_id` 分岐なしで追加できるよう、実装を次の3層に分ける。
-現在は `AgentCatalog`、Tier 2 (`ExtendedAcpDriver` + `AgentExtension`)、
+現在は `AgentCatalog`、Tier 2 (`AcpDriver` + `AgentExtension`)、
 Tier 3 (`impl AgentDriver`) を持ち、`opencode` は Tier 3
 (`OpenCodeNativeDriver`) で実装している。ACP 経路は `opencode-acp` として
 フォールバック用に残す。
 
-| 層                   | 実行時の実装                           | ACP の再利用 | エージェントごとに追加するコード            |
-| :------------------- | :------------------------------------- | :----------- | :------------------------------------------ |
-| Tier 1: ACP only     | `AcpDriver`                            | すべて       | なし（registry / preset / custom 定義のみ） |
-| Tier 2: ACP + custom | `ExtendedAcpDriver` + `AgentExtension` | すべて       | `AgentExtension` の差分のみ                 |
-| Tier 3: Full custom  | `impl AgentDriver`                     | なし         | 起動・イベント変換を含む driver 実装        |
+クレート直下は共通契約 (`driver` / `management` / `auth`)、カタログ
+(`catalog/`)、実装ディレクトリ (`acp/` / `opencode/`) に分ける。ACP 固有の
+コード (`acp::auth` / `acp::warm` / `acp::registry` / `acp::extensions` /
+`acp::session`) は `acp/` 配下に置き、`catalog/` は定義と解決だけを持つ。
+
+| 層                   | 実行時の実装                   | ACP の再利用 | エージェントごとに追加するコード            |
+| :------------------- | :----------------------------- | :----------- | :------------------------------------------ |
+| Tier 1: ACP only     | `AcpDriver`                    | すべて       | なし（registry / preset / custom 定義のみ） |
+| Tier 2: ACP + custom | `AcpDriver` + `AgentExtension` | すべて       | `AgentExtension` の差分のみ                 |
+| Tier 3: Full custom  | `impl AgentDriver`             | なし         | 起動・イベント変換を含む driver 実装        |
 
 - エージェント固有の知識は `AgentCatalog` と extension に閉じ込め、
   `SessionManager` と `AcpDriver` には追加しない。
 - 実行時カタログは **custom 定義 → builtin provider** の順で解決する。
   ACP Registry は実行時カタログには含めず、custom 定義を import するための
   テンプレートとしてだけ使う（§2.1・§3.1）。
-- `AgentLaunchSpec` は program / args / env / driver_kind / extension を持つ
-  純粋データとし、warm pool のキー（`LaunchKey`）として扱う。extension の
+- `AgentLaunchSpec` は program / args / env / backend を持つ純粋データとし、
+  warm pool のキー（`LaunchKey`）として扱う。backend は
+  `LaunchBackend::Acp(AcpLaunchOptions)`（extension ID と接続オプション）/
+  `LaunchBackend::Custom` / `LaunchBackend::Other` に分かれ、extension の
   インスタンスは含めない。
-- Tier 2 は `ExtendedAcpDriver` が ACP イベントを中継し、
-  `CapabilitiesUpdated` に `CapabilityOverlay` を適用してから
-  `SessionExtension` に通す。capability probe も同じ経路を通る。
-  overlay はイベントごとに現在値（`CapabilitiesSnapshot`）から再計算する。
+- Tier 2 は `AcpDriver` が `AgentExtension::transform_event` を送出時に同期適用
+  する。イベントは所有権ごと渡すため、中継タスクも `clone()` も挟まない。
+  metadata・接続オプション・vendor 通知の解釈だけが extension の責務である。
 - ユーザー定義のカスタム ACP エージェント（§3）は既定で Tier 1。
   `CustomAgentConfig.extension` に builtin extension ID を指定すると
-  `DriverKind::AcpExtended` となり、同じ overlay / メタデータを再利用できる。
-- driver の選択は `AgentLaunchSpec.driver_kind` と `extension` で行う。
-  Tier 2 の `ExtendedAcpDriver` は extension ID ごとに1つだけ生成して共有する。
+  `DriverKind::AcpExtended` となり、同じ extension を再利用できる。
+- driver の選択は `AgentLaunchSpec.backend` の variant と extension ID で行う。
+  Tier 2 の `AcpDriver` は extension ID ごとに1つだけ生成して共有する。
 - Tier 3 の builtin ID は予約し、custom 定義による上書きを拒否する。
 - ACP の config option は `{ value, name, description }` を返すため、fxg は
   これを `ConfigOptionChoice` として保持する。モデル名や説明を extension で
@@ -62,16 +68,16 @@ Tier 3 (`impl AgentDriver`) を持ち、`opencode` は Tier 3
   などは UI の汎用処理で行う。
 - 組み込みの `opencode` extension は `opencode-acp` の ACP 経路で使う。
   ACP では扱えない vendor 差分 (`opencode/session/child_update` の子セッション
-  更新と、権限要求への子 ID 付与) を担当する。
+  更新と、権限要求への子 ID 付与) を `transform_event` で担当する。
 - `opencode` (Tier 3) は OpenCode v2 の HTTP + SSE を一次インターフェースとし、
   ACP では表現できない revert、メッセージ境界 fork、実行中入力 (steer)、
   compact、provider / MCP / skill / command の管理を提供する。ACP 経路との
   パリティとして、`todowrite` を `PlanUpdate` に、`finish` / `provider.auth`
   を `TurnEnded` / ログイン案内に変換し、ターン終了時にコマンドカタログを
-  再取得する。実装は `crates/fxg-agent/src/opencode_native/`。セッションは
+  再取得する。実装は `crates/fxg-agent/src/opencode/`。セッションは
   OpenCode 側のストアを一次ソースとし、fxg は正規化イベントを `node.db` に
   記録する。
-- ネイティブドライバの認証は `AgentProvider::auth()` が terminal の
+- ネイティブドライバの認証は `BuiltinAgent::auth()` が terminal の
   login / logout コマンドを宣言し、`fxg agents login/logout` は ACP
   `initialize` の代わりにそれを使う。custom 定義は従来どおり ACP の
   認証方法を使う。ACP の `effort` は native では `model` の `#variant` に
@@ -82,7 +88,7 @@ Tier 3 (`impl AgentDriver`) を持ち、`opencode` は Tier 3
   (`revert` / `steer` / `compact`) をクライアントへ伝える。
 - 管理 API (`/api/v1/nodes/:node_id/agents/:agent_id/management`) は**ローカルノード限定**で、
   provider / model / MCP / skill / command の読み取りと MCP の追加・接続・
-  削除を行う。credential の値は返さない。`AgentProvider::management()` は既定で
+  削除を行う。credential の値は返さない。`BuiltinAgent::management()` は
   `AgentBackend::Custom` の `AgentDriver::management()` へ委譲する。
 - `AgentSummary.icon` は `builtin:<id>` または URL を返す。Web UI は
   `builtin:opencode` を同梱アイコン (`/agents/opencode.png`) に解決し、
@@ -92,7 +98,7 @@ Tier 3 (`impl AgentDriver`) を持ち、`opencode` は Tier 3
   bot アイコンにフォールバックする。
   `AgentSummary.backend` はエージェント一覧にバッジ
   (`ACP` / `ACP + extension` / `Custom driver`) として表示する。
-- ビルトイン provider は `opencode`（Tier 3）と `opencode-acp`（Tier 2）に加え、
+- ビルトイン agent は `opencode`（Tier 3）と `opencode-acp`（Tier 2）に加え、
   `agy` / `github-copilot-cli` / `qwen-code` / `cline` / `auggie` /
   `kimi-code` のネイティブ CLI preset を持つ。一覧・起動は
   ビルトインの表示名・アイコン・preset を使う。opencode は v2 の CLI 名が
@@ -109,14 +115,14 @@ Tier 3 (`impl AgentDriver`) を持ち、`opencode` は Tier 3
   子セッションのコンテキスト管理・正規化だけを行い、opencode 固有の
   解釈は `OpenCodeExtension` に閉じる。`AcpDriver` にはエージェント別の分岐を
   入れず、汎用の ACP seam だけをコアに置く。
-- ビルトイン provider は拡張を `with_extension(<extension ID>, <instance>)`
+- ビルトイン agent は拡張を `BuiltinAgent::with_extension(<extension ID>, <instance>)`
   で明示する。extension ID はエージェント ID から暗黙導出しない。カスタム定義は
   この ID を `CustomAgentConfig.extension` に保存し、一覧
   (`AgentSummary.extension`) にも表示する。
 - ACP capability の広告は接続ごとに決まる。ビルトインは
   `AgentAcpCapabilities::default()`（`subagents` ON）を読み取り専用で使い、
   カスタム定義だけが `CustomAgentConfig.capabilities` として自分の選択を持つ。
-  値は起動スペック (`AgentLaunchSpec.acp`) に適用され、warm pool のキーにも
+  値は起動スペック (`LaunchBackend::Acp(AcpLaunchOptions)`) に適用され、warm pool のキーにも
   含まれるため、設定変更後に古い capability で初期化済みのプロセスを
   再利用しない。UI は custom agent の編集フォームで変更し、一覧では全員の
   有効な capability をバッジで表示する。
@@ -287,7 +293,7 @@ ACP Registry に載っていないエージェントや自前の ACP 実装は�
    - 実行時設定はノードの DB にのみ保存し、ハブへ同期しない。
 2. **解決と起動**:
    - 既定では Tier 1 (`AcpDriver`) として解決する（§1.1）。`extension` を
-     指定した場合は Tier 2 (`ExtendedAcpDriver`) になる。
+     指定した場合は Tier 2 (`AcpDriver` + `AgentExtension`) になる。
    - `command` は `PATH` 上のコマンド名または絶対パス。シェル経由ではないため
      グロブ・`~`・環境変数の展開は行わない。
    - 起動直前に `fxg_pty::resolve_command` が `which` (`PATHEXT`) で解決し、

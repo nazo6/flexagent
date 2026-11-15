@@ -1,7 +1,7 @@
 # `fxg-agent` のモジュール構成・トレイト・責務境界の再編
 
 - **日付**: 2026-11-15
-- **状態**: Draft
+- **状態**: Implemented
 - **対象パッケージ**: `fxg-agent`, `fxg-node`, `fxg-cli`, `docs`
 - **対象スクリプト**: `mise run fmt`, `mise run lint:errors`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`
 
