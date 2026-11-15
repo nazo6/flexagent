@@ -13,9 +13,10 @@ use fxg_hub::api::{
 };
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
-    AgentDiagnostics, AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest,
-    CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse, ExternalSessionListResponse,
-    HubLinkState, KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
+    AgentDiagnostics, AgentManagementSnapshot, AgentMcpAction, AgentMcpDefinition, AgentOpResponse,
+    AgentsResponse, ConnectionRole, CreateSessionRequest, CreateSessionResponse,
+    CreateWorktreeRequest, DiagnosticsResponse, ExternalSessionListResponse, HubLinkState,
+    KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
     ProjectScanResponse, ProjectUnlinkRequest, ProjectUnlinkResponse, ProvisionersResponse,
     PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
     RespondElicitationRequest, RespondElicitationResponse, RespondPermissionRequest,
@@ -43,6 +44,21 @@ fn api_error(err: NodeError) -> ApiError {
     ApiError::from_code(err.error_code(), err.to_string())
 }
 
+/// Converts an OpenCode management failure into an API error.
+fn agent_management_error(err: anyhow::Error) -> ApiError {
+    ApiError::from_code(
+        fxg_protocol::common::ErrorCode::InvalidState,
+        format!("agent management request failed: {err:#}"),
+    )
+}
+
+fn agent_management_unavailable(agent_id: &str) -> ApiError {
+    ApiError::from_code(
+        fxg_protocol::common::ErrorCode::InvalidState,
+        format!("agent {agent_id} does not expose native management"),
+    )
+}
+
 /// Converts a `ClientInfo` into the audit log source.
 fn audit_source(client: &ClientInfo) -> AuditSource {
     AuditSource {
@@ -54,6 +70,18 @@ fn audit_source(client: &ClientInfo) -> AuditSource {
 }
 
 impl DaemonState {
+    /// Rejects a request for another node (these endpoints are node-local).
+    fn ensure_local_node(&self, node_id: &str) -> Result<(), ApiError> {
+        if node_id == self.node_id() {
+            Ok(())
+        } else {
+            Err(ApiError::bad_request(format!(
+                "requested node {node_id} but this node is {}",
+                self.node_id()
+            )))
+        }
+    }
+
     /// Shared diagnostics payload (REST).
     pub async fn diagnostics_response(&self) -> Result<DiagnosticsResponse, ApiError> {
         <Self as ClientApiBackend>::diagnostics(self).await
@@ -953,6 +981,77 @@ impl ClientApiBackend for DaemonState {
             )));
         }
         self.agents_catalog().await.map_err(api_error)
+    }
+
+    async fn agent_management(
+        &self,
+        node_id: &str,
+        agent_id: &str,
+    ) -> Result<AgentManagementSnapshot, ApiError> {
+        self.ensure_local_node(node_id)?;
+        let Some(management) = self.session_manager().catalog().management(agent_id) else {
+            return Ok(AgentManagementSnapshot::unavailable(agent_id, agent_id));
+        };
+        management.snapshot().await.map_err(agent_management_error)
+    }
+
+    async fn agent_mcp_action(
+        &self,
+        node_id: &str,
+        agent_id: &str,
+        name: &str,
+        action: AgentMcpAction,
+    ) -> Result<AgentManagementSnapshot, ApiError> {
+        self.ensure_local_node(node_id)?;
+        let management = self
+            .session_manager()
+            .catalog()
+            .management(agent_id)
+            .ok_or_else(|| agent_management_unavailable(agent_id))?;
+        management
+            .mcp_action(name, action)
+            .await
+            .map_err(agent_management_error)?;
+        management.snapshot().await.map_err(agent_management_error)
+    }
+
+    async fn agent_mcp_upsert(
+        &self,
+        node_id: &str,
+        agent_id: &str,
+        name: &str,
+        definition: AgentMcpDefinition,
+    ) -> Result<AgentManagementSnapshot, ApiError> {
+        self.ensure_local_node(node_id)?;
+        let management = self
+            .session_manager()
+            .catalog()
+            .management(agent_id)
+            .ok_or_else(|| agent_management_unavailable(agent_id))?;
+        management
+            .upsert_mcp(name, &definition)
+            .await
+            .map_err(agent_management_error)?;
+        management.snapshot().await.map_err(agent_management_error)
+    }
+
+    async fn agent_mcp_remove(
+        &self,
+        node_id: &str,
+        agent_id: &str,
+        name: &str,
+    ) -> Result<AgentManagementSnapshot, ApiError> {
+        self.ensure_local_node(node_id)?;
+        let management = self
+            .session_manager()
+            .catalog()
+            .management(agent_id)
+            .ok_or_else(|| agent_management_unavailable(agent_id))?;
+        management
+            .remove_mcp(name)
+            .await
+            .map_err(agent_management_error)?;
+        management.snapshot().await.map_err(agent_management_error)
     }
 
     async fn push_subscribe(

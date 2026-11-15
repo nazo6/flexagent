@@ -53,6 +53,9 @@ use handlers::admin::{
     issue_node_token, kill_switch, node_tokens, push_subscribe, revoke_node_token,
     rotate_auth_token, shutdown,
 };
+use handlers::agent_management::{
+    management as agent_management, mcp_action, mcp_remove, mcp_upsert,
+};
 use handlers::agents::{
     import_registry_agent, list_agents, probe_agent_config, refresh_catalog, remove_custom_agent,
     upsert_custom_agent,
@@ -212,6 +215,18 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         )
         .route("/api/v1/auth/rotate-token", post(rotate_auth_token::<B>))
         .route("/api/v1/nodes", get(list_nodes::<B>))
+        .route(
+            "/api/v1/nodes/{node_id}/agents/{agent_id}/management",
+            get(agent_management::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/agents/{agent_id}/management/mcp/{name}",
+            put(mcp_upsert::<B>).delete(mcp_remove::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/agents/{agent_id}/management/mcp/{name}/{action}",
+            post(mcp_action::<B>),
+        )
         .route("/api/v1/nodes/{node_id}/fs/browse", get(browse_fs::<B>))
         .route(
             "/api/v1/nodes/{node_id}/workspace/fs/list",
