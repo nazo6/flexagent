@@ -67,25 +67,31 @@ use fxg_protocol::events::UnifiedEventPayload;
 use fxg_protocol::util::uuid_v7;
 use tokio::sync::{mpsc, oneshot, watch};
 
+use crate::acp::warm::{DEFAULT_WARM_IDLE, LaunchKey, WarmPool, WarmProcess};
 use crate::driver::{
     ActiveSessionHandle, AgentAuthRequired, AgentDriver, DriverEvent, HistoryCaptureUnavailable,
     NativeForkUnavailable, NativeResumeUnavailable, ResumeRequest, StartSessionRequest,
     StartedSession,
 };
-use crate::warm::{DEFAULT_WARM_IDLE, LaunchKey, WarmPool, WarmProcess};
 
+pub mod auth;
 mod client;
+mod events;
+pub mod extensions;
 mod list;
 mod mapping;
 mod process;
+pub mod registry;
 mod session;
 mod subagent;
 mod terminal;
+mod warm;
 
 pub(crate) use mapping::map_auth_method;
 pub(crate) use session::client_capabilities;
 
 use self::client::AcpSessionHandle;
+use self::events::EventSink;
 use self::process::{ProcessHandle, ProcessLease, spawn_agent_process};
 
 /// Driver that controls standard ACP agents via `agent-client-protocol`.
@@ -98,6 +104,8 @@ pub struct AcpDriver {
     pool: Option<Arc<WarmPool<ProcessHandle>>>,
     /// Recent agent stderr lines for diagnostics
     stderr: StderrRegistry,
+    /// Optional Tier 2 extension applied to every event of this driver
+    extension: Option<Arc<dyn crate::acp::extensions::AgentExtension>>,
 }
 
 /// Bounded per-agent stderr buffer used by diagnostics.
@@ -183,6 +191,7 @@ impl AcpDriver {
         Self {
             pool: Some(Arc::new(WarmPool::new(idle))),
             stderr: StderrRegistry::default(),
+            extension: None,
         }
     }
 
@@ -193,6 +202,26 @@ impl AcpDriver {
         Self {
             pool: None,
             stderr: StderrRegistry::default(),
+            extension: None,
+        }
+    }
+
+    /// Creates a driver that applies `extension` to every event (Tier 2).
+    pub fn with_extension(extension: Arc<dyn crate::acp::extensions::AgentExtension>) -> Self {
+        Self {
+            extension: Some(extension),
+            ..Self::new()
+        }
+    }
+
+    /// Creates a driver with the idle pool disabled that applies `extension`
+    /// (used by tests).
+    pub fn without_pool_with_extension(
+        extension: Arc<dyn crate::acp::extensions::AgentExtension>,
+    ) -> Self {
+        Self {
+            extension: Some(extension),
+            ..Self::without_pool()
         }
     }
 }
@@ -237,7 +266,7 @@ enum ProcessCommand {
         /// Session creation parameters
         params: Box<SessionParams>,
         /// Event sender for the session
-        events: mpsc::UnboundedSender<DriverEvent>,
+        events: EventSink,
         /// Process lease held by the session
         lease: Arc<ProcessLease>,
         /// Command channel to the session (the handle holds the sender)
@@ -268,7 +297,7 @@ struct SessionParams {
     /// Initial configuration applied after `session/new`
     initial_config: Vec<fxg_protocol::common::InitialConfig>,
     /// Parser for vendor subagent notifications (set by the extension layer).
-    acp_parser: Option<Arc<dyn crate::extension::AcpNotificationParser>>,
+    acp_parser: Option<Arc<dyn crate::acp::extensions::AcpNotificationParser>>,
 }
 
 /// Per-session shared information (handlers look it up by the ACP session_id).
@@ -280,7 +309,7 @@ struct SessionContext {
     /// Working directory (used to resolve relative paths for fs / terminal)
     cwd: PathBuf,
     /// Event sender (status updates, approvals, fs change notifications)
-    events: mpsc::UnboundedSender<DriverEvent>,
+    events: EventSink,
     /// Subagent that owns this context (`None` = the root session)
     subagent_id: Option<String>,
     /// Ingress channel to flush buffered streams on the turn loop before blocking requests
@@ -312,7 +341,11 @@ fn session_context(contexts: &SessionContexts, session_id: &SessionId) -> Option
 #[async_trait]
 impl AgentDriver for AcpDriver {
     fn driver_kind(&self) -> crate::driver::DriverKind {
-        crate::driver::DriverKind::Acp
+        if self.extension.is_some() {
+            crate::driver::DriverKind::AcpExtended
+        } else {
+            crate::driver::DriverKind::Acp
+        }
     }
 
     async fn start_session(
@@ -320,7 +353,20 @@ impl AgentDriver for AcpDriver {
         req: StartSessionRequest,
         event_tx: mpsc::UnboundedSender<DriverEvent>,
     ) -> anyhow::Result<StartedSession> {
-        self.start_session_with_parser(req, None, event_tx).await
+        let events = EventSink::new(event_tx, self.extension.clone());
+        match self.start_session_inner(req, &events).await {
+            Ok(started) => Ok(started),
+            Err(err) => {
+                // Record the start failure as an event (the session moves to the error state)
+                fxg_protocol::discard_with!(
+                    events.send(DriverEvent::Failed {
+                        message: err.to_string(),
+                    }),
+                    "notify event subscribers"
+                );
+                Err(err)
+            }
+        }
     }
 
     async fn shutdown_idle(&self) -> usize {
@@ -338,46 +384,22 @@ impl AgentDriver for AcpDriver {
         list::list_sessions(launch, cwd).await
     }
 
-    fn stderr_tail(&self, agent_id: &str) -> Vec<String> {
-        self.stderr.tail(agent_id)
-    }
-
     fn stderr_snapshot(&self) -> BTreeMap<String, Vec<String>> {
         self.stderr.snapshot()
     }
 }
 
 impl AcpDriver {
-    /// Starts an ACP session with an optional vendor notification parser
-    /// contributed by an [`crate::extension::AgentExtension`].
-    pub(crate) async fn start_session_with_parser(
-        &self,
-        req: StartSessionRequest,
-        acp_parser: Option<Arc<dyn crate::extension::AcpNotificationParser>>,
-        event_tx: mpsc::UnboundedSender<DriverEvent>,
-    ) -> anyhow::Result<StartedSession> {
-        match self.start_session_inner(req, acp_parser, &event_tx).await {
-            Ok(started) => Ok(started),
-            Err(err) => {
-                // Record the start failure as an event (the session moves to the error state)
-                fxg_protocol::discard_with!(
-                    event_tx.send(DriverEvent::Failed {
-                        message: err.to_string(),
-                    }),
-                    "notify event subscribers"
-                );
-                Err(err)
-            }
-        }
-    }
-
     /// Core session start (reuse idle process, then cold start).
     async fn start_session_inner(
         &self,
         req: StartSessionRequest,
-        acp_parser: Option<Arc<dyn crate::extension::AcpNotificationParser>>,
-        event_tx: &mpsc::UnboundedSender<DriverEvent>,
+        event_tx: &EventSink,
     ) -> anyhow::Result<StartedSession> {
+        let acp_parser = self
+            .extension
+            .as_ref()
+            .and_then(|extension| extension.notification_parser());
         // Extension resolution for `npx` / `uvx` (Windows PATHEXT support)
         let program_path =
             req.launch.program.as_deref().ok_or_else(|| {
@@ -451,7 +473,7 @@ impl AcpDriver {
             AcpAgent::new(config),
             req.launch.agent_id.clone(),
             self.stderr.clone(),
-            req.launch.acp.clone(),
+            req.launch.acp_options().cloned().unwrap_or_default(),
         );
         ready_rx
             .await

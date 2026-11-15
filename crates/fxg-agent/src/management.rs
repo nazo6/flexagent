@@ -3,10 +3,10 @@
 //! Session lifecycle is described by [`crate::driver::AgentDriver`]. Some
 //! agents additionally expose configuration outside the session protocol
 //! (providers, MCP servers, skills, commands). Those integrations implement
-//! [`AgentManagement`] and register it on their [`AgentProvider`], so the node
+//! [`AgentManagement`] and let their [`BuiltinAgent`] expose it, so the node
 //! API and UI do not need agent-specific route names.
 //!
-//! [`AgentProvider`]: crate::provider::AgentProvider
+//! [`BuiltinAgent`]: crate::catalog::builtin::BuiltinAgent
 
 use async_trait::async_trait;
 use fxg_protocol::client_api::{AgentManagementSnapshot, AgentMcpAction, AgentMcpDefinition};

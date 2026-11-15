@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use fxg_protocol::common::{AgentAuthMethodInfo, AgentAuthMethodKind};
 
-use crate::provider::{AgentAuth, AgentCommand};
+use crate::catalog::builtin::{AgentAuth, AgentCommand};
 
 /// Authentication method ID shown by `fxg agents login`.
 pub const AUTH_METHOD_ID: &str = "opencode-login";

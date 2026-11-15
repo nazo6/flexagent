@@ -3,9 +3,9 @@
 //! Design: `docs/04-agent-drivers-and-windows.md` §1.
 //!
 //! The `fxg-node` session manager depends only on this trait and hides the
-//! differences between ACP (`AcpDriver`), ACP + extension, and full custom drivers.
-//! Drivers emit normalized events ([`UnifiedEventPayload`] /
-//! [`StreamDeltaPayload`]) as [`DriverEvent`]; persistence and delivery are
+//! differences between ACP (`AcpDriver`, with or without an extension) and full
+//! custom drivers. Drivers emit normalized events ([`UnifiedEventPayload`] /
+//! [`StreamDeltaPayload`]) as `DriverEvent`; persistence and delivery are
 //! handled centrally by the session manager (event bus).
 
 use std::collections::BTreeMap;
@@ -26,7 +26,7 @@ use tokio::sync::mpsc;
 pub enum DriverKind {
     /// Standard ACP agent (`AcpDriver`)
     Acp,
-    /// ACP agent with fxg-side extensions (`ExtendedAcpDriver`)
+    /// ACP agent with an fxg-side extension (`AcpDriver` with an extension)
     AcpExtended,
     /// Fully custom driver (the agent ID is in [`AgentLaunchSpec::agent_id`])
     Custom,
@@ -59,14 +59,8 @@ pub struct AgentLaunchSpec {
     pub agent_id: String,
     /// Display name
     pub display_name: String,
-    /// Driver kind (see [`DriverKind`])
-    pub driver_kind: DriverKind,
-    /// Built-in extension ID for [`DriverKind::AcpExtended`].
-    ///
-    /// `None` means the extension is selected by `agent_id` (provider-backed
-    /// agents). Custom agents use this field to reference a built-in extension
-    /// whose ID differs from the custom agent ID.
-    pub extension: Option<String>,
+    /// Backend-specific launch information
+    pub backend: LaunchBackend,
     /// Executable (absolute path, or a command name on `PATH`).
     /// `PATH` resolution (`which` / `PATHEXT`) is done by the driver right before launch.
     ///
@@ -77,9 +71,53 @@ pub struct AgentLaunchSpec {
     pub args: Vec<String>,
     /// Additional environment variables injected into the process (overrides inherited ones)
     pub env: Vec<(String, String)>,
-    /// ACP connection options contributed by an extension (client capabilities,
-    /// vendor notification methods). Kept as plain data for the warm-pool key.
-    pub acp: crate::extension::AcpExtensionOptions,
+}
+
+impl AgentLaunchSpec {
+    /// ACP connection options, when this is an ACP launch.
+    pub fn acp_options(&self) -> Option<&crate::acp::extensions::AcpExtensionOptions> {
+        match &self.backend {
+            LaunchBackend::Acp(options) => Some(&options.options),
+            LaunchBackend::Custom | LaunchBackend::Other(_) => None,
+        }
+    }
+
+    /// Built-in extension ID applied to this launch (`None` = plain ACP / custom).
+    pub fn extension_id(&self) -> Option<&str> {
+        match &self.backend {
+            LaunchBackend::Acp(options) => options.extension.as_deref(),
+            LaunchBackend::Custom | LaunchBackend::Other(_) => None,
+        }
+    }
+}
+
+/// Backend-specific launch information.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaunchBackend {
+    /// ACP agent (`AcpDriver`), optionally with an fxg-side extension.
+    Acp(AcpLaunchOptions),
+    /// Fully custom driver (the driver owns its launch).
+    Custom,
+    /// Another backend, preserved for diagnostics.
+    Other(String),
+}
+
+impl Default for LaunchBackend {
+    fn default() -> Self {
+        Self::Acp(AcpLaunchOptions::default())
+    }
+}
+
+/// ACP connection options contributed by the resolved agent definition.
+///
+/// Kept as plain data so it can be part of the warm-pool key.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AcpLaunchOptions {
+    /// Built-in extension ID applied to this agent (`None` = plain ACP).
+    pub extension: Option<String>,
+    /// Connection options contributed by the extension (client capabilities,
+    /// vendor notification methods).
+    pub options: crate::acp::extensions::AcpExtensionOptions,
 }
 
 /// Resume selection from an existing agent session ([`StartSessionRequest::resume`]).
@@ -258,11 +296,6 @@ pub trait AgentDriver: Send + Sync {
     /// The default implementation for drivers that hold no processes returns 0 (no-op).
     async fn shutdown_idle(&self) -> usize {
         0
-    }
-
-    /// Recent stderr lines for an agent (diagnostics; empty when unsupported).
-    fn stderr_tail(&self, _agent_id: &str) -> Vec<String> {
-        Vec::new()
     }
 
     /// Snapshot of recent stderr lines for every agent (diagnostics).

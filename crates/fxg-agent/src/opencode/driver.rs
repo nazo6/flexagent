@@ -228,10 +228,11 @@ impl AgentDriver for OpenCodeNativeDriver {
         usize::from(self.inner.stop_if_idle().await)
     }
 
-    fn stderr_tail(&self, _agent_id: &str) -> Vec<String> {
+    fn stderr_snapshot(&self) -> BTreeMap<String, Vec<String>> {
         // Keep the same chronological order as the ACP driver; diagnostics
         // clients render the tail top-to-bottom.
-        self.inner
+        let lines = self
+            .inner
             .stderr
             .lock()
             .expect("stderr poisoned")
@@ -240,11 +241,8 @@ impl AgentDriver for OpenCodeNativeDriver {
             .take(50)
             .rev()
             .cloned()
-            .collect()
-    }
-
-    fn stderr_snapshot(&self) -> BTreeMap<String, Vec<String>> {
-        BTreeMap::from([("opencode".to_owned(), self.stderr_tail("opencode"))])
+            .collect();
+        BTreeMap::from([("opencode".to_owned(), lines)])
     }
 }
 

@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use fxg_agent::{
-    AcpDriver, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind, ExternalSessionsUnsupported,
-    HistoryCaptureUnavailable, ResumeRequest, StartSessionRequest,
+    AcpDriver, AcpLaunchOptions, AgentDriver, AgentLaunchSpec, DriverEvent,
+    ExternalSessionsUnsupported, HistoryCaptureUnavailable, LaunchBackend, ResumeRequest,
+    StartSessionRequest,
 };
 use fxg_protocol::common::ClientSource;
 use fxg_protocol::events::UnifiedEventPayload;
@@ -18,12 +19,10 @@ fn launch(mode: &str) -> AgentLaunchSpec {
     AgentLaunchSpec {
         agent_id: "mock".to_owned(),
         display_name: "Mock".to_owned(),
-        driver_kind: DriverKind::Acp,
-        extension: None,
+        backend: LaunchBackend::Acp(AcpLaunchOptions::default()),
         program: Some(mock_agent_bin()),
         args: vec!["--mode".to_owned(), mode.to_owned()],
         env: Vec::new(),
-        acp: Default::default(),
     }
 }
 

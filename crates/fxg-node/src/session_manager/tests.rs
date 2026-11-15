@@ -3,13 +3,7 @@ use super::replay::*;
 use super::*;
 use crate::testutil::MockAgent;
 use fxg_agent::AgentSessionInfo;
-use fxg_agent::DriverKind;
-use fxg_agent::registry::AcpRegistry;
-use fxg_agent::{
-    AgentBackend, AgentCatalog, AgentDefinition, AgentExtension, CapabilitiesSnapshot,
-    CapabilityOverlay, ConfigOptionPatch, ExtendedAcpDriver, LaunchPreset, SessionContext,
-    StaticProvider,
-};
+use fxg_agent::{AgentBackend, AgentCatalog, AgentDefinition, BuiltinAgent};
 use fxg_db::Db;
 use fxg_db::queries::SessionFilter;
 use fxg_protocol::SessionId;
@@ -63,11 +57,7 @@ async fn setup() -> (SessionManager, MockAgent, tempfile::TempDir) {
         revision: 1,
         updated_at: 0,
     };
-    let catalog = AgentCatalog::new(AcpRegistry::new(
-        Paths::portable(dir.path(), Role::Node),
-        &settings,
-        custom,
-    ));
+    let catalog = AgentCatalog::new(Paths::portable(dir.path(), Role::Node), &settings, custom);
 
     let mock = MockAgent::default();
     let manager = SessionManager::with_factory(bus, "test-node", catalog, mock.factory());
@@ -257,110 +247,6 @@ async fn probe_agent_capabilities_returns_options_and_caches() {
     assert_eq!(mock.starts().len(), 3);
 }
 
-struct ProbeExtension;
-
-#[async_trait::async_trait]
-impl AgentExtension for ProbeExtension {
-    async fn capabilities(
-        &self,
-        _ctx: &SessionContext,
-        _current: &CapabilitiesSnapshot,
-    ) -> anyhow::Result<Option<CapabilityOverlay>> {
-        Ok(Some(CapabilityOverlay {
-            modes: Some(vec![ModeInfo {
-                mode_id: "enriched".to_owned(),
-                name: "Enriched".to_owned(),
-                description: None,
-            }]),
-            current_mode: Some("enriched".to_owned()),
-            config_options: vec![ConfigOptionPatch::Merge {
-                key: "model".to_owned(),
-                name: Some("Model (enriched)".to_owned()),
-                options: None,
-                current: None,
-            }],
-            add_commands: Vec::new(),
-        }))
-    }
-}
-
-#[tokio::test]
-async fn probe_applies_extension_capability_overlay() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let db = Db::open_in_memory(Role::Node).await.expect("db");
-    let bus = SessionEventBus::new(db);
-    Paths::portable(dir.path(), Role::Node)
-        .ensure_dirs()
-        .expect("dirs");
-    let settings = AgentSettings {
-        registry_url: None,
-        registry_cache_ttl_secs: None,
-        aliases: BTreeMap::new(),
-        revision: 1,
-        updated_at: 0,
-    };
-    let provider = StaticProvider::new(
-        AgentDefinition {
-            id: "extended".to_owned(),
-            name: "Extended".to_owned(),
-            description: None,
-            icon: None,
-        },
-        Some(LaunchPreset {
-            program: "git",
-            args: &["acp"],
-        }),
-    )
-    .with_extension("extended", Arc::new(ProbeExtension));
-    let catalog = AgentCatalog::with_providers(
-        AcpRegistry::new(
-            Paths::portable(dir.path(), Role::Node),
-            &settings,
-            BTreeMap::new(),
-        ),
-        vec![Arc::new(provider)],
-    );
-
-    let mock = MockAgent::default();
-    let extended: Arc<dyn AgentDriver> = Arc::new(ExtendedAcpDriver::with_driver(
-        Arc::new(mock.clone()),
-        Arc::new(ProbeExtension),
-    ));
-    let factory: DriverFactory = {
-        let extended = Arc::clone(&extended);
-        Arc::new(move |spec: &AgentLaunchSpec| {
-            assert_eq!(spec.driver_kind, DriverKind::AcpExtended);
-            Ok(Arc::clone(&extended))
-        })
-    };
-    let manager = SessionManager::with_factory(bus, "test-node", catalog, factory);
-
-    mock.set_start_capabilities(AgentCapabilitiesPreview {
-        current_mode: Some("code".to_owned()),
-        available_modes: vec![ModeInfo {
-            mode_id: "code".to_owned(),
-            name: "Code".to_owned(),
-            description: None,
-        }],
-        config_options: vec![ConfigOptionInfo {
-            key: "model".to_owned(),
-            name: "Model".to_owned(),
-            description: None,
-            category: Some(ConfigOptionCategory::Model),
-            current_value: choice("gpt-5"),
-            options: vec![choice("gpt-5")],
-        }],
-    });
-
-    let probed = manager
-        .probe_agent_capabilities("extended", dir.path(), &[], true)
-        .await
-        .expect("probe");
-    assert_eq!(probed.current_mode.as_deref(), Some("enriched"));
-    assert_eq!(probed.available_modes[0].mode_id, "enriched");
-    assert_eq!(probed.config_options[0].name, "Model (enriched)");
-}
-
 #[tokio::test]
 async fn full_custom_driver_starts_through_the_catalog() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -387,7 +273,7 @@ async fn full_custom_driver_starts_through_the_catalog() {
     };
     let mock = MockAgent::default();
     mock.set_start_capabilities(AgentCapabilitiesPreview::default());
-    let provider = StaticProvider::new(
+    let agent = BuiltinAgent::new(
         AgentDefinition {
             id: "custom".to_owned(),
             name: "Custom".to_owned(),
@@ -397,13 +283,11 @@ async fn full_custom_driver_starts_through_the_catalog() {
         None,
     )
     .with_backend(AgentBackend::Custom(Arc::new(mock.clone())));
-    let catalog = AgentCatalog::with_providers(
-        AcpRegistry::new(
-            Paths::portable(dir.path(), Role::Node),
-            &settings,
-            BTreeMap::new(),
-        ),
-        vec![Arc::new(provider)],
+    let catalog = AgentCatalog::with_agents(
+        Paths::portable(dir.path(), Role::Node),
+        &settings,
+        BTreeMap::new(),
+        vec![agent],
     );
     let manager = SessionManager::new(bus, "test-node", catalog);
 
@@ -447,7 +331,7 @@ async fn full_custom_driver_probe_uses_the_catalog_driver() {
         config_options: Vec::new(),
     };
     mock.set_start_capabilities(preview.clone());
-    let provider = StaticProvider::new(
+    let agent = BuiltinAgent::new(
         AgentDefinition {
             id: "custom".to_owned(),
             name: "Custom".to_owned(),
@@ -457,13 +341,11 @@ async fn full_custom_driver_probe_uses_the_catalog_driver() {
         None,
     )
     .with_backend(AgentBackend::Custom(Arc::new(mock.clone())));
-    let catalog = AgentCatalog::with_providers(
-        AcpRegistry::new(
-            Paths::portable(dir.path(), Role::Node),
-            &settings,
-            BTreeMap::new(),
-        ),
-        vec![Arc::new(provider)],
+    let catalog = AgentCatalog::with_agents(
+        Paths::portable(dir.path(), Role::Node),
+        &settings,
+        BTreeMap::new(),
+        vec![agent],
     );
     let manager = SessionManager::new(bus, "test-node", catalog);
 

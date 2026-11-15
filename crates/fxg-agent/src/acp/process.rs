@@ -14,7 +14,7 @@ impl ProcessHandle {
     pub(super) async fn new_session(
         &self,
         params: Box<SessionParams>,
-        events: mpsc::UnboundedSender<DriverEvent>,
+        events: EventSink,
         lease: Arc<ProcessLease>,
     ) -> anyhow::Result<(AcpSessionHandle, bool)> {
         let commands = mpsc::unbounded_channel();
@@ -158,7 +158,7 @@ pub(super) fn spawn_agent_process(
     agent: AcpAgent,
     agent_id: String,
     stderr: StderrRegistry,
-    acp: crate::extension::AcpExtensionOptions,
+    acp: crate::acp::extensions::AcpExtensionOptions,
 ) -> (Arc<ProcessHandle>, oneshot::Receiver<anyhow::Result<()>>) {
     let (control_tx, control_rx) = mpsc::unbounded_channel();
     let (ready_tx, ready_rx) = oneshot::channel();

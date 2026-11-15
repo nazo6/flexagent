@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use fxg_agent::extended::ExtendedAcpDriver;
-use fxg_agent::extension::AgentExtension;
-use fxg_agent::opencode::OpenCodeExtension;
+use fxg_agent::acp::extensions::AgentExtension;
+use fxg_agent::acp::extensions::opencode::OpenCodeExtension;
 use fxg_agent::{
-    AcpDriver, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind, StartSessionRequest,
+    AcpDriver, AcpLaunchOptions, AgentDriver, AgentLaunchSpec, DriverEvent, LaunchBackend,
+    StartSessionRequest,
 };
 use fxg_protocol::common::PromptInput;
 use fxg_protocol::events::UnifiedEventPayload;
@@ -36,21 +36,18 @@ fn request(mode: &str, mut launch: AgentLaunchSpec, cwd: &Path) -> StartSessionR
 
 fn launch(
     extension: Option<&str>,
-    acp: fxg_agent::extension::AcpExtensionOptions,
+    options: fxg_agent::acp::extensions::AcpExtensionOptions,
 ) -> AgentLaunchSpec {
     AgentLaunchSpec {
         agent_id: extension.unwrap_or("mock").to_owned(),
         display_name: "Mock".to_owned(),
-        driver_kind: if extension.is_some() {
-            DriverKind::AcpExtended
-        } else {
-            DriverKind::Acp
-        },
-        extension: extension.map(str::to_owned),
+        backend: LaunchBackend::Acp(AcpLaunchOptions {
+            extension: extension.map(str::to_owned),
+            options,
+        }),
         program: Some(mock_agent_bin()),
         args: Vec::new(),
         env: Vec::new(),
-        acp,
     }
 }
 
@@ -162,10 +159,7 @@ async fn acp_child_updates_are_tagged_and_announced() {
 async fn opencode_child_notifications_are_parsed() {
     let extension = Arc::new(OpenCodeExtension);
     let options = extension.acp_options(&Default::default());
-    let driver = Arc::new(ExtendedAcpDriver::new(
-        Arc::new(AcpDriver::without_pool()),
-        extension,
-    ));
+    let driver = Arc::new(AcpDriver::without_pool_with_extension(extension));
     let events = run(
         "opencode-subagents",
         driver,

@@ -16,10 +16,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use fxg_agent::driver::{
-    AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind, StartSessionRequest,
+    AgentDriver, AgentLaunchSpec, DriverEvent, LaunchBackend, StartSessionRequest,
 };
-use fxg_agent::extension::AcpExtensionOptions;
-use fxg_agent::opencode_native::OpenCodeNativeDriver;
+use fxg_agent::opencode::OpenCodeNativeDriver;
 use fxg_protocol::common::{PromptInput, StreamDeltaPayload};
 use fxg_protocol::events::UnifiedEventPayload;
 use tokio::sync::mpsc;
@@ -39,12 +38,10 @@ async fn native_driver_streams_a_real_turn() {
                 launch: AgentLaunchSpec {
                     agent_id: "opencode".to_owned(),
                     display_name: "OpenCode".to_owned(),
-                    driver_kind: DriverKind::Custom,
-                    extension: None,
+                    backend: LaunchBackend::Custom,
                     program: Some(PathBuf::from("opencode")),
                     args: vec!["serve".to_owned()],
                     env: Vec::new(),
-                    acp: AcpExtensionOptions::default(),
                 },
                 extra_args: Vec::new(),
                 initial_mode: None,
@@ -118,12 +115,10 @@ async fn native_driver_streams_a_real_turn() {
                 launch: AgentLaunchSpec {
                     agent_id: "opencode".to_owned(),
                     display_name: "OpenCode".to_owned(),
-                    driver_kind: DriverKind::Custom,
-                    extension: None,
+                    backend: LaunchBackend::Custom,
                     program: Some(PathBuf::from("opencode")),
                     args: vec!["serve".to_owned()],
                     env: Vec::new(),
-                    acp: AcpExtensionOptions::default(),
                 },
                 extra_args: Vec::new(),
                 initial_mode: None,

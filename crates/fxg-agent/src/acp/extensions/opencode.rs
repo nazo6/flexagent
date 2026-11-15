@@ -8,21 +8,19 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use fxg_protocol::common::RawJson;
 use fxg_protocol::events::{SubagentStatus, UnifiedEventPayload};
 
-use crate::driver::DriverEvent;
-use crate::extension::{
+use crate::acp::extensions::{
     AcpChildUpdate, AcpExtensionOptions, AcpNotificationParser, AgentExtension, AgentMetadata,
-    EventDisposition, SessionExtension,
+    EventDisposition,
 };
+use crate::driver::DriverEvent;
 
 /// OpenCode ACP extension.
 #[derive(Debug, Default)]
 pub struct OpenCodeExtension;
 
-#[async_trait]
 impl AgentExtension for OpenCodeExtension {
     fn metadata(&self) -> AgentMetadata {
         AgentMetadata {
@@ -45,11 +43,8 @@ impl AgentExtension for OpenCodeExtension {
         Some(Arc::new(OpenCodeNotificationParser))
     }
 
-    async fn open_session(
-        &self,
-        _ctx: &crate::extension::SessionContext,
-    ) -> anyhow::Result<Option<Arc<dyn SessionExtension>>> {
-        Ok(Some(Arc::new(OpenCodeSessionExtension)))
+    fn transform_event(&self, event: DriverEvent) -> EventDisposition {
+        tag_permission_request(event)
     }
 }
 
@@ -138,50 +133,42 @@ fn map_child_status(status: &str) -> SubagentStatus {
 }
 
 /// Tags child permission requests with the vendor `_meta` child ID.
-#[derive(Debug, Default)]
-struct OpenCodeSessionExtension;
-
-#[async_trait]
-impl SessionExtension for OpenCodeSessionExtension {
-    async fn on_event(&self, event: DriverEvent) -> anyhow::Result<EventDisposition> {
-        let DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
-            subagent_id: None,
-            details,
-            ..
-        }) = &event
-        else {
-            return Ok(EventDisposition::Emit);
-        };
-        let Some(child_id) = details
-            .as_value()
-            .get("_meta")
-            .and_then(|meta| meta.get("opencode/child-session"))
-            .and_then(|child| child.get("id"))
-            .and_then(|id| id.as_str())
-        else {
-            return Ok(EventDisposition::Emit);
-        };
-        let child_id = child_id.to_owned();
-        let DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
-            request_id,
-            tool_name,
-            summary,
-            options,
-            details,
-            subagent_id: _,
-        }) = event
-        else {
-            unreachable!("matched above");
-        };
-        Ok(EventDisposition::Replace(Box::new(DriverEvent::Event(
-            UnifiedEventPayload::PermissionRequest {
-                request_id,
-                tool_name,
-                summary,
-                options,
-                details,
-                subagent_id: Some(child_id),
-            },
-        ))))
-    }
+fn tag_permission_request(event: DriverEvent) -> EventDisposition {
+    let DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
+        subagent_id: None,
+        details,
+        ..
+    }) = &event
+    else {
+        return EventDisposition::Emit(event);
+    };
+    let Some(child_id) = details
+        .as_value()
+        .get("_meta")
+        .and_then(|meta| meta.get("opencode/child-session"))
+        .and_then(|child| child.get("id"))
+        .and_then(|id| id.as_str())
+    else {
+        return EventDisposition::Emit(event);
+    };
+    let child_id = child_id.to_owned();
+    let DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
+        request_id,
+        tool_name,
+        summary,
+        options,
+        details,
+        subagent_id: _,
+    }) = event
+    else {
+        unreachable!("matched above");
+    };
+    EventDisposition::Emit(DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
+        request_id,
+        tool_name,
+        summary,
+        options,
+        details,
+        subagent_id: Some(child_id),
+    }))
 }

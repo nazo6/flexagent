@@ -18,7 +18,7 @@ use fxg_protocol::events::SubagentStatus;
 use tokio::sync::{mpsc, oneshot};
 
 use super::SessionContexts;
-use crate::extension::{AcpChildUpdate, AcpNotificationParser};
+use crate::acp::extensions::{AcpChildUpdate, AcpNotificationParser};
 
 /// Work routed from a dynamic handler to the session turn loop.
 #[derive(Debug)]
@@ -218,7 +218,7 @@ impl ChildSessions {
         &self,
         child: &str,
         cwd: PathBuf,
-        events: mpsc::UnboundedSender<super::DriverEvent>,
+        events: super::events::EventSink,
     ) {
         self.contexts
             .lock()

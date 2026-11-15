@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fxg_agent::{
-    AcpDriver, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind, StartSessionRequest,
-    StartedSession,
+    AcpDriver, AcpLaunchOptions, AgentDriver, AgentLaunchSpec, DriverEvent, LaunchBackend,
+    StartSessionRequest, StartedSession,
 };
 use fxg_protocol::common::{PromptInput, SessionStatus};
 use fxg_protocol::events::UnifiedEventPayload;
@@ -28,12 +28,10 @@ fn launch(mode: &str) -> AgentLaunchSpec {
     AgentLaunchSpec {
         agent_id: "mock".to_owned(),
         display_name: "Mock".to_owned(),
-        driver_kind: DriverKind::Acp,
-        extension: None,
+        backend: LaunchBackend::Acp(AcpLaunchOptions::default()),
         program: Some(mock_agent_bin()),
         args: vec!["--mode".to_owned(), mode.to_owned()],
         env: Vec::new(),
-        acp: Default::default(),
     }
 }
 

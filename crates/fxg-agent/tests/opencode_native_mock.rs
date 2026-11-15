@@ -24,10 +24,9 @@ use axum::response::sse::{Event, Sse};
 use axum::routing::{get, post};
 use futures_util::StreamExt;
 use fxg_agent::driver::{
-    AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind, ResumeRequest, StartSessionRequest,
+    AgentDriver, AgentLaunchSpec, DriverEvent, LaunchBackend, ResumeRequest, StartSessionRequest,
 };
-use fxg_agent::extension::AcpExtensionOptions;
-use fxg_agent::opencode_native::OpenCodeNativeDriver;
+use fxg_agent::opencode::OpenCodeNativeDriver;
 use fxg_protocol::common::{
     ElicitationAction, ElicitationContent, ElicitationValue, PlanEntryStatus, PromptInput,
     StreamDeltaPayload, TurnStopReason,
@@ -113,12 +112,10 @@ async fn native_driver_uses_the_http_and_sse_contract() {
     let launch = AgentLaunchSpec {
         agent_id: "opencode".to_owned(),
         display_name: "OpenCode".to_owned(),
-        driver_kind: DriverKind::Custom,
-        extension: None,
+        backend: LaunchBackend::Custom,
         program: Some(PathBuf::from("opencode")),
         args: vec!["serve".to_owned()],
         env: Vec::new(),
-        acp: AcpExtensionOptions::default(),
     };
     let probed = driver
         .probe_capabilities(&launch, dir.path(), &[])
