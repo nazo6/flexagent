@@ -1311,7 +1311,7 @@ async fn registration_upserts_and_audit_logs() {
 }
 
 #[tokio::test]
-async fn default_local_path_prefers_recent_binding_then_session_history() {
+async fn default_local_path_prefers_recent_existing_binding() {
     let fixture = Fixture::new(Role::Hub).await;
 
     // Add a Worktree binding (almost the same time as the main repo → tie-break favors main)
@@ -1389,40 +1389,7 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
         .expect("resolve default");
     assert_eq!(path.as_deref(), Some("/home/nazo/src/flexagent-wt"));
 
-    // A project without bindings falls back to the latest session's local_path
-    // (assuming a session started before binding registration on session start existed)
-    let legacy_project = "github.com/nazo6/legacy";
-    let legacy_path = "/home/nazo/src/legacy";
-    let legacy_event = SessionEventEnvelope {
-        event_id: uuid_v7().into(),
-        session_id: uuid_v7().into(),
-        node_seq: 1,
-        created_at: now_ms(),
-        payload: UnifiedEventPayload::SessionCreated {
-            node_id: NODE_ID.into(),
-            project_id: legacy_project.into(),
-            project_name: "legacy".to_owned(),
-            local_path: legacy_path.to_owned(),
-            git_branch: None,
-            is_worktree: false,
-            agent_id: "opencode2".to_owned(),
-            parent_session_id: None,
-            title: "New Session".to_owned(),
-        },
-    };
-    fixture
-        .db
-        .append_events(std::slice::from_ref(&legacy_event))
-        .await
-        .expect("append legacy session");
-    let path = fixture
-        .db
-        .resolve_default_local_path(&ProjectId::from(legacy_project), &NodeId::from(NODE_ID))
-        .await
-        .expect("resolve default");
-    assert_eq!(path.as_deref(), Some(legacy_path));
-
-    // None when there are neither bindings nor sessions
+    // None when there are no bindings
     let path = fixture
         .db
         .resolve_default_local_path(

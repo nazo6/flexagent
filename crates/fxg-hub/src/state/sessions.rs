@@ -40,10 +40,8 @@ impl HubState {
 
     /// Picks one online node that can serve the ACP Registry catalog.
     ///
-    /// Resolves the default working directory for a project on this node.
-    ///
-    /// Prefers the most recently used binding (including worktrees) and falls back to the
-    /// latest session's working directory when there is no binding
+    /// Resolves the default working directory for a project on this node from the most
+    /// recently used binding (including worktrees)
     /// ([`fxg_db::queries::resolve_default_local_path`]).
     async fn project_local_path(
         &self,

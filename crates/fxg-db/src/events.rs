@@ -644,22 +644,24 @@ pub(crate) async fn apply_projections(
             )
             .fetch_optional(&mut *conn)
             .await?;
-            let status = resolve_permission_status(stored.as_deref(), selected_option_id);
             // If there is no matching PermissionRequest row (e.g. resync started from a
-            // mid-stream node_seq), this updates 0 rows (discarded).
-            sqlx::query!(
-                r#"
+            // mid-stream node_seq), there is nothing to update.
+            if let Some(details_json) = stored {
+                let status = resolve_permission_status(&details_json, selected_option_id)?;
+                sqlx::query!(
+                    r#"
                 UPDATE permission_requests
                    SET status = ?, resolved_by = ?, resolved_at = ?
                  WHERE request_id = ?
                 "#,
-                status.as_str(),
-                resolved_by.as_str(),
-                envelope.created_at,
-                request_id,
-            )
-            .execute(&mut *conn)
-            .await?;
+                    status.as_str(),
+                    resolved_by.as_str(),
+                    envelope.created_at,
+                    request_id,
+                )
+                .execute(&mut *conn)
+                .await?;
+            }
         }
         UnifiedEventPayload::ElicitationRequest {
             elicitation_id,
@@ -865,48 +867,29 @@ fn elicitation_status(action: ElicitationAction) -> ElicitationRequestStatus {
 /// Determines the resolution state from the kind of the option matching `selected_option_id`.
 ///
 /// Refers to the `options` stored in `details_json`: `reject*` kinds map to `rejected`, all
-/// others to `approved`. If the options cannot be retrieved (e.g. mid-resync), falls back to
-/// the `option_id` naming convention (containing `reject` / `deny`).
-#[allow(
-    clippy::disallowed_methods,
-    reason = "mid-resync rows may lack decodable details; the documented fallback uses the option id naming"
-)]
+/// others to `approved`. A selected option that is absent from the stored request is a data
+/// inconsistency and therefore an error instead of a guess.
 fn resolve_permission_status(
-    details_json: Option<&str>,
+    details_json: &str,
     selected_option_id: &str,
-) -> PermissionRequestStatus {
-    let kind = details_json
-        .and_then(|json| serde_json::from_str::<StoredPermissionDetails>(json).ok())
-        .and_then(|stored| {
-            stored
-                .options
-                .into_iter()
-                .find(|option| option.option_id == selected_option_id)
-        })
-        .map(|option| option.kind);
+) -> Result<PermissionRequestStatus, DbError> {
+    let stored: StoredPermissionDetails = serde_json::from_str(details_json)?;
+    let kind = stored
+        .options
+        .into_iter()
+        .find(|option| option.option_id == selected_option_id)
+        .map(|option| option.kind)
+        .ok_or_else(|| {
+            DbError::InvalidPayload(format!(
+                "selected permission option {selected_option_id} is not in the stored request"
+            ))
+        })?;
 
-    match kind {
-        Some(kind) if kind.is_reject() => PermissionRequestStatus::Rejected,
-        Some(_) => PermissionRequestStatus::Approved,
-        None => {
-            if option_id_looks_like_reject(selected_option_id) {
-                PermissionRequestStatus::Rejected
-            } else {
-                PermissionRequestStatus::Approved
-            }
-        }
-    }
-}
-
-/// Fallback for mid-resync rows without decodable options.
-///
-/// Option IDs conventionally contain `reject` / `deny` for rejection.
-#[allow(
-    clippy::disallowed_methods,
-    reason = "documented legacy fallback for rows whose option kind is unavailable"
-)]
-fn option_id_looks_like_reject(selected_option_id: &str) -> bool {
-    selected_option_id.contains("reject") || selected_option_id.contains("deny")
+    Ok(if kind.is_reject() {
+        PermissionRequestStatus::Rejected
+    } else {
+        PermissionRequestStatus::Approved
+    })
 }
 
 /// Rebuilds the `sessions` / `permission_requests` / `elicitation_requests` projections from
@@ -1084,28 +1067,21 @@ mod tests {
             ("deny", PermissionOptionKind::RejectOnce),
         ]);
         assert_eq!(
-            resolve_permission_status(Some(&stored), "allow"),
+            resolve_permission_status(&stored, "allow").expect("allow"),
             PermissionRequestStatus::Approved
         );
         assert_eq!(
-            resolve_permission_status(Some(&stored), "deny"),
+            resolve_permission_status(&stored, "deny").expect("deny"),
             PermissionRequestStatus::Rejected
         );
     }
 
     #[test]
-    fn permission_status_falls_back_to_the_option_id() {
-        assert_eq!(
-            resolve_permission_status(None, "reject_once"),
-            PermissionRequestStatus::Rejected
-        );
-        assert_eq!(
-            resolve_permission_status(None, "deny"),
-            PermissionRequestStatus::Rejected
-        );
-        assert_eq!(
-            resolve_permission_status(None, "allow_once"),
-            PermissionRequestStatus::Approved
-        );
+    fn permission_status_rejects_an_unknown_option() {
+        let stored = details(&[("allow", PermissionOptionKind::AllowOnce)]);
+        assert!(matches!(
+            resolve_permission_status(&stored, "reject_once"),
+            Err(DbError::InvalidPayload(_))
+        ));
     }
 }
