@@ -353,6 +353,7 @@ impl ClientApiBackend for HubState {
         node_id: &str,
         agent_id: &str,
         local_path: Option<String>,
+        force: bool,
     ) -> Result<AgentUsageResponse, ApiError> {
         let response = self
             .execute_node_rpc(
@@ -360,6 +361,7 @@ impl ClientApiBackend for HubState {
                 NodeRpcRequest::AgentUsage {
                     agent_id: agent_id.to_owned(),
                     local_path,
+                    force,
                 },
                 None,
             )

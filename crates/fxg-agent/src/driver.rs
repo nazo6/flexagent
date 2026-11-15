@@ -325,11 +325,13 @@ pub trait AgentDriver: Send + Sync {
     ///
     /// This is an out-of-session, best-effort query: `Ok(None)` means the agent
     /// (or its current authentication) does not expose limits, and callers
-    /// should hide the meter rather than treat it as an error.
+    /// should hide the meter rather than treat it as an error. `force` bypasses
+    /// any driver-side cache for an explicit user refresh.
     async fn usage_limits(
         &self,
         _launch: &AgentLaunchSpec,
         _cwd: &Path,
+        _force: bool,
     ) -> anyhow::Result<Option<AgentUsageLimits>> {
         Ok(None)
     }

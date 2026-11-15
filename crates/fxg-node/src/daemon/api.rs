@@ -1008,6 +1008,7 @@ impl ClientApiBackend for DaemonState {
         node_id: &str,
         agent_id: &str,
         local_path: Option<String>,
+        force: bool,
     ) -> Result<AgentUsageResponse, ApiError> {
         self.ensure_local_node(node_id)?;
         let cwd = local_path
@@ -1017,7 +1018,7 @@ impl ClientApiBackend for DaemonState {
         let usage = self
             .session_manager()
             .catalog()
-            .usage_limits(agent_id, &cwd)
+            .usage_limits(agent_id, &cwd, force)
             .await
             .map_err(agent_usage_error)?;
         Ok(AgentUsageResponse { usage })

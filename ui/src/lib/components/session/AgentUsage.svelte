@@ -7,7 +7,9 @@
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { cn } from "#lib/utils.ts";
+  import CheckIcon from "@lucide/svelte/icons/check";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
+  import TriangleAlertIcon from "@lucide/svelte/icons/triangle-alert";
 
   interface Props {
     /** Node that owns the agent process. */
@@ -23,26 +25,60 @@
 
   const REFRESH_MS = 60_000;
 
+  type RefreshState = "idle" | "refreshing" | "updated" | "failed";
+
   let usage = $state<AgentUsageLimits | null>(null);
-  let loading = $state(false);
+  let refreshState = $state<RefreshState>("idle");
+  let statusTimer: ReturnType<typeof setTimeout> | null = null;
   let requestId = 0;
+
+  function flashStatus(state: "updated" | "failed"): void {
+    refreshState = state;
+    if (statusTimer !== null) clearTimeout(statusTimer);
+    statusTimer = setTimeout(() => {
+      refreshState = "idle";
+      statusTimer = null;
+    }, 2500);
+  }
 
   /**
    * Usage limits are an optional, out-of-session probe. A failure (agent not
    * running, no login, unsupported build) hides the meter instead of surfacing
    * a session error.
+   *
+   * `manual` is an explicit user refresh: it shows progress and a short
+   * success/failure confirmation, and `force` bypasses the node's cache.
    */
-  async function load(node = nodeId, agent = agentId, path = localPath): Promise<void> {
+  async function load(
+    node = nodeId,
+    agent = agentId,
+    path = localPath,
+    options: { manual?: boolean; force?: boolean } = {},
+  ): Promise<void> {
     if (node === "" || agent === "") return;
+    if (options.manual && refreshState === "refreshing") return;
+    if (options.manual) refreshState = "refreshing";
     const current = ++requestId;
-    loading = true;
     try {
-      const response = await sync.connection.client.agentUsage(node, agent, path);
-      if (current === requestId) usage = response.usage;
+      const response = await sync.connection.client.agentUsage(
+        node,
+        agent,
+        path,
+        options.force ?? false,
+      );
+      if (current === requestId) {
+        usage = response.usage;
+        if (options.manual) flashStatus("updated");
+      }
     } catch {
       // Keep the last snapshot; the next refresh may succeed.
+      if (current === requestId && options.manual) flashStatus("failed");
     } finally {
-      if (current === requestId) loading = false;
+      // A background poll may supersede this request; do not leave the button
+      // spinning forever.
+      if (current !== requestId && refreshState === "refreshing") {
+        refreshState = "idle";
+      }
     }
   }
 
@@ -53,7 +89,13 @@
     if (node === "" || agent === "") return;
     untrack(() => void load(node, agent, path));
     const timer = setInterval(() => void load(node, agent, path), REFRESH_MS);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      if (statusTimer !== null) {
+        clearTimeout(statusTimer);
+        statusTimer = null;
+      }
+    };
   });
 
   /** Flattened window with the least remaining quota (used for the chip). */
@@ -197,10 +239,12 @@
             class="text-muted-foreground hover:text-foreground hover:bg-accent ml-auto flex size-6 shrink-0 items-center justify-center rounded-md transition-colors"
             title={m.session_usage_refresh()}
             aria-label={m.session_usage_refresh()}
-            onclick={() => void load()}
-            disabled={loading}
+            onclick={() => void load(nodeId, agentId, localPath, { manual: true, force: true })}
+            disabled={refreshState === "refreshing"}
           >
-            <RefreshCwIcon class={cn("size-3.5", loading && "animate-spin")} />
+            <RefreshCwIcon
+              class={cn("size-3.5", refreshState === "refreshing" && "animate-spin")}
+            />
           </button>
         </div>
       </div>
@@ -245,8 +289,22 @@
           </section>
         {/each}
 
-        <div class="text-muted-foreground border-t border-border pt-2 text-[10px]">
-          {m.session_usage_updated({ time: formatRelativeTime(usage.fetched_at) })}
+        <div
+          class="text-muted-foreground flex items-center gap-1 border-t border-border pt-2 text-[10px]"
+          aria-live="polite"
+        >
+          {#if refreshState === "refreshing"}
+            <RefreshCwIcon class="size-3 animate-spin" />
+            <span>{m.session_usage_checking()}</span>
+          {:else if refreshState === "updated"}
+            <CheckIcon class="text-ok size-3" />
+            <span>{m.session_usage_updated_just_now()}</span>
+          {:else if refreshState === "failed"}
+            <TriangleAlertIcon class="text-destructive size-3" />
+            <span class="text-destructive">{m.session_usage_update_failed()}</span>
+          {:else}
+            <span>{m.session_usage_updated({ time: formatRelativeTime(usage.fetched_at) })}</span>
+          {/if}
         </div>
       </div>
     </Popover.Content>

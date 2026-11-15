@@ -23,6 +23,8 @@ rolling 5h / weekly / monthly、Antigravity の 5h / weekly など）を取得�
 - **API**: `GET /api/v1/nodes/:node_id/agents/:agent_id/usage` を追加。
   ハブは `NodeRpcRequest::AgentUsage` でノードに中継し、ローカルノードは
   in-process で実行する。未対応・未ログイン時は `usage: null`。
+  `force=true` は driver 側のキャッシュを無視し、UI の明示的な Refresh が
+  実際に再取得する。
 - **OpenCode (Tier 3)**: ローカルサーバーの
   `/api/experimental/usage/limits` を優先し、データがない場合は
   `/api/credential` の Go キーで `https://opencode.ai/zen/go/v1/usage` を
@@ -33,7 +35,9 @@ rolling 5h / weekly / monthly、Antigravity の 5h / weekly など）を取得�
   引き継ぎ、60秒キャッシュする。
 - **UI**: セッションヘッダーに利用上限チップを追加。チップは source と
   最も残量が少ない window を表示し、ポップオーバーで group / window /
-  リセット時刻を表示する。取得できない場合は何も表示しない。
+  リセット時刻を表示する。取得できない場合は何も表示しない。ポップオーバーの
+  Refresh は実行中に `Checking…`、成功時に `Updated just now`、失敗時に
+  `Could not update` を表示し、結果が同じでも操作が伝わるようにした。
 
 ## テスト
 

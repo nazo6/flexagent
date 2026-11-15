@@ -142,6 +142,9 @@ pub enum NodeRpcRequest {
         agent_id: String,
         /// Working directory used for agent-specific lookups
         local_path: Option<String>,
+        /// Bypass driver-side caches for an explicit refresh
+        #[serde(default)]
+        force: bool,
     },
     /// Fetch the node settings snapshot.
     GetNodeSettings,

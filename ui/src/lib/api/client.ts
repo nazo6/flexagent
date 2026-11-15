@@ -291,11 +291,12 @@ export class ApiClient {
     nodeId: string,
     agentId: string,
     localPath?: string | null,
+    force = false,
   ): Promise<AgentUsageResponse> {
     return this.#request(
       "GET",
       `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/usage`,
-      { query: { local_path: localPath ?? undefined } },
+      { query: { local_path: localPath ?? undefined, force: force ? true : undefined } },
     );
   }
 

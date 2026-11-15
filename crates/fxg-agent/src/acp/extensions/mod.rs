@@ -218,6 +218,7 @@ pub trait AgentExtension: Send + Sync {
         &self,
         _launch: &AgentLaunchSpec,
         _cwd: &Path,
+        _force: bool,
     ) -> anyhow::Result<Option<AgentUsageLimits>> {
         Ok(None)
     }

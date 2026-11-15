@@ -38,6 +38,9 @@ const PROFILE_FLAGS: [&str; 4] = [
 #[derive(Debug, Default)]
 pub struct AntigravityExtension {
     cache: Mutex<HashMap<String, CachedUsage>>,
+    /// Serializes cold fetches so concurrent sessions do not spawn duplicate
+    /// `agy` processes; the second waiter reads the cache after the first.
+    fetch: Mutex<()>,
 }
 
 #[derive(Debug)]
@@ -52,12 +55,14 @@ impl AgentExtension for AntigravityExtension {
         &self,
         launch: &AgentLaunchSpec,
         cwd: &Path,
+        force: bool,
     ) -> anyhow::Result<Option<AgentUsageLimits>> {
         let Some(program) = launch.program.as_deref() else {
             return Ok(None);
         };
         let key = cache_key(program, launch);
-        if let Some(usage) = self.cached(&key).await {
+        let _fetch = self.fetch.lock().await;
+        if !force && let Some(usage) = self.cached(&key).await {
             return Ok(Some(usage));
         }
         let Some(usage) = run_usage(program, launch, cwd).await? else {
@@ -355,7 +360,7 @@ mod tests {
             env: Vec::new(),
         };
         let usage = AntigravityExtension::default()
-            .usage_limits(&launch, Path::new("."))
+            .usage_limits(&launch, Path::new("."), true)
             .await
             .expect("agy usage")
             .expect("usage limits");

@@ -777,6 +777,7 @@ impl OpenCodeClient {
     pub async fn usage_limits(
         &self,
         cwd: Option<&Path>,
+        _force: bool,
     ) -> anyhow::Result<Option<AgentUsageLimits>> {
         if let Some(usage) = self.local_usage_limits(cwd).await {
             return Ok(Some(usage));

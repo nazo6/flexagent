@@ -289,7 +289,8 @@ prune します。`sessions` は最大 1000 件で、超過時は
 #### エージェント利用上限
 
 `GET /api/v1/nodes/:node_id/agents/:agent_id/usage?local_path=<path>` は、
-エージェントの契約・アカウントに紐づく利用上限を返す。レスポンスは
+エージェントの契約・アカウントに紐づく利用上限を返す。`force=true` は
+driver 側のキャッシュを無視する（UI の明示的な Refresh 用）。レスポンスは
 `AgentUsageResponse { usage: AgentUsageLimits | null }` で、未対応・未ログイン・
 取得失敗時は `usage: null` とする（UI はメーターを隠す）。
 

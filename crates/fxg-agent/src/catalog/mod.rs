@@ -422,10 +422,11 @@ impl AgentCatalog {
         &self,
         agent_id: &str,
         cwd: &Path,
+        force: bool,
     ) -> anyhow::Result<Option<AgentUsageLimits>> {
         let spec = self.launch_spec(agent_id, cwd, &[]).await?;
         let driver = self.driver_for(&spec)?;
-        driver.usage_limits(&spec, cwd).await
+        driver.usage_limits(&spec, cwd, force).await
     }
 
     /// Returns the built-in driver of a full custom agent.

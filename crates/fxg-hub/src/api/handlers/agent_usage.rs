@@ -12,6 +12,9 @@ use crate::api::{ClientApiBackend, ClientApiState};
 pub(crate) struct AgentUsageQuery {
     /// Working directory used for agent-specific lookups
     pub local_path: Option<String>,
+    /// Bypass driver-side caches for an explicit refresh
+    #[serde(default)]
+    pub force: bool,
 }
 
 pub(crate) async fn usage<B: ClientApiBackend>(
@@ -21,7 +24,7 @@ pub(crate) async fn usage<B: ClientApiBackend>(
 ) -> Response {
     match state
         .backend
-        .agent_usage(&node_id, &agent_id, query.local_path)
+        .agent_usage(&node_id, &agent_id, query.local_path, query.force)
         .await
     {
         Ok(response) => Json(response).into_response(),

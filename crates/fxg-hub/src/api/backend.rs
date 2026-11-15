@@ -695,6 +695,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         _node_id: &str,
         _agent_id: &str,
         _local_path: Option<String>,
+        _force: bool,
     ) -> Result<AgentUsageResponse, ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,

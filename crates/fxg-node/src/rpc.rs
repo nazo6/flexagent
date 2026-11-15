@@ -309,6 +309,7 @@ async fn execute_inner(
         NodeRpcRequest::AgentUsage {
             agent_id,
             local_path,
+            force,
         } => {
             let cwd = local_path
                 .map(PathBuf::from)
@@ -317,7 +318,7 @@ async fn execute_inner(
             let usage = state
                 .session_manager()
                 .catalog()
-                .usage_limits(&agent_id, &cwd)
+                .usage_limits(&agent_id, &cwd, force)
                 .await
                 .map_err(|err| NodeError::Agent(format!("{err:#}")))?;
             Ok(NodeRpcResponse::AgentUsage { usage })

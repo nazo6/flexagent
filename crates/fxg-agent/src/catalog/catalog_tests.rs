@@ -197,6 +197,7 @@ fn usage_limits_delegate_to_the_agent_extension() {
             &self,
             _launch: &AgentLaunchSpec,
             _cwd: &Path,
+            _force: bool,
         ) -> anyhow::Result<Option<AgentUsageLimits>> {
             Ok(Some(AgentUsageLimits {
                 source: fxg_protocol::common::UsageSource {
@@ -220,7 +221,7 @@ fn usage_limits_delegate_to_the_agent_extension() {
 
     let usage = tokio::runtime::Runtime::new()
         .unwrap()
-        .block_on(catalog.usage_limits("demo", Path::new(".")))
+        .block_on(catalog.usage_limits("demo", Path::new("."), false))
         .expect("usage")
         .expect("limits");
     assert_eq!(usage.source.id, "demo");

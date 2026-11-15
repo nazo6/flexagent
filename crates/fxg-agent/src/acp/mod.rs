@@ -388,9 +388,10 @@ impl AgentDriver for AcpDriver {
         &self,
         launch: &crate::driver::AgentLaunchSpec,
         cwd: &Path,
+        force: bool,
     ) -> anyhow::Result<Option<AgentUsageLimits>> {
         match &self.extension {
-            Some(extension) => extension.usage_limits(launch, cwd).await,
+            Some(extension) => extension.usage_limits(launch, cwd, force).await,
             None => Ok(None),
         }
     }
