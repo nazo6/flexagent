@@ -162,12 +162,7 @@ impl AgentDriver for OpenCodeNativeDriver {
 
         match wait_for_capabilities(&client, &req.cwd, Some(&agent_session_id)).await {
             Some((payload, commands, context_size)) => {
-                {
-                    let mut state = runtime.state.lock().expect("state poisoned");
-                    state.commands = commands;
-                    state.context_size = context_size;
-                }
-                runtime.emit_event(payload);
+                runtime.set_capabilities(payload, commands, context_size);
             }
             None => warn!(
                 session_id = %req.session_id,
@@ -426,6 +421,17 @@ impl ActiveSessionHandle for OpenCodeSessionHandle {
     }
 
     async fn shutdown(&self) -> anyhow::Result<()> {
+        // ACP `session/close` interrupts active work before detaching. OpenCode
+        // keeps its saved session, so the native equivalent is interrupt +
+        // unsubscribe rather than deleting the session.
+        if self.runtime.is_busy()
+            && let Err(err) = self.client.interrupt(&self.agent_session_id).await
+        {
+            warn!(
+                session_id = %self.agent_session_id,
+                "failed to interrupt OpenCode before shutdown: {err:#}"
+            );
+        }
         self.inner.unregister(&self.agent_session_id);
         Ok(())
     }

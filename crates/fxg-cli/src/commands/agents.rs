@@ -106,9 +106,13 @@ impl usage::RunAsync for AgentsLoginArgs {
         let catalog = agent_catalog().await?;
         let id = catalog.resolve_alias(&self.id);
         let spec = resolve_agent_launch_spec(&catalog, &id).await?;
-        let methods = fxg_agent::auth::discover_auth_methods(&spec)
-            .await
-            .with_context(|| format!("failed to query authentication methods for {id}"))?;
+        let native = catalog.native_auth(&id);
+        let methods = match native {
+            Some(auth) => auth.methods.clone(),
+            None => fxg_agent::auth::discover_auth_methods(&spec)
+                .await
+                .with_context(|| format!("failed to query authentication methods for {id}"))?,
+        };
         if methods.is_empty() {
             println!("{id} does not advertise authentication methods; it may already be signed in");
             return Ok(());
@@ -117,7 +121,11 @@ impl usage::RunAsync for AgentsLoginArgs {
         println!("using {} ({})", method.name, method.id);
         match method.kind {
             AgentAuthMethodKind::Terminal => {
-                fxg_agent::auth::run_terminal_login(&spec, &method).await?;
+                if let Some(command) = native.and_then(|auth| auth.login.as_ref()) {
+                    fxg_agent::auth::run_agent_command(command, &spec.env).await?;
+                } else {
+                    fxg_agent::auth::run_terminal_login(&spec, &method).await?;
+                }
             }
             AgentAuthMethodKind::Agent => {
                 fxg_agent::auth::authenticate(&spec, &method.id).await?;
@@ -143,9 +151,18 @@ impl usage::RunAsync for AgentsLogoutArgs {
         let catalog = agent_catalog().await?;
         let id = catalog.resolve_alias(&self.id);
         let spec = resolve_agent_launch_spec(&catalog, &id).await?;
-        fxg_agent::auth::logout(&spec)
-            .await
-            .with_context(|| format!("failed to log out from {id}"))?;
+        if let Some(command) = catalog
+            .native_auth(&id)
+            .and_then(|auth| auth.logout.as_ref())
+        {
+            fxg_agent::auth::run_agent_command(command, &spec.env)
+                .await
+                .with_context(|| format!("failed to log out from {id}"))?;
+        } else {
+            fxg_agent::auth::logout(&spec)
+                .await
+                .with_context(|| format!("failed to log out from {id}"))?;
+        }
         println!("logged out of {id}");
         Ok(())
     }

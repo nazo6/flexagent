@@ -29,6 +29,13 @@ pub(super) struct RuntimeState {
     pub(super) seen_event_ids: SeenEventIds,
     pub(super) durable_seq: HashMap<String, u64>,
     pub(super) context_size: u64,
+    /// Last completed step's finish reason (`session.step.ended`).
+    pub(super) finish: Option<String>,
+    /// Last failed step / execution error type (`provider.auth`, ...).
+    pub(super) step_error: Option<String>,
+    /// Last capabilities payload sent to the session, used to suppress
+    /// redundant refreshes when commands / models did not change.
+    pub(super) last_capabilities: Option<UnifiedEventPayload>,
     /// Context usage by scope (`None` = the root session).
     pub(super) usage: HashMap<Option<String>, UsageState>,
 }
@@ -91,18 +98,82 @@ impl SessionRuntime {
     pub(super) async fn refresh_capabilities(&self, client: &OpenCodeClient) {
         match fetch_capabilities(client, &self.cwd, Some(&self.agent_session_id)).await {
             Ok((payload, commands, context_size)) => {
-                {
+                let changed = {
                     let mut state = self.state.lock().expect("state poisoned");
                     state.commands = commands;
                     state.context_size = context_size;
+                    if state.last_capabilities.as_ref() == Some(&payload) {
+                        false
+                    } else {
+                        state.last_capabilities = Some(payload.clone());
+                        true
+                    }
+                };
+                if changed {
+                    self.emit_event(payload);
                 }
-                self.emit_event(payload);
             }
             Err(err) => warn!(
                 session_id = %self.fxg_session_id,
                 "failed to refresh OpenCode capabilities: {err:#}"
             ),
         }
+    }
+
+    /// Records the capabilities sent at session start so the first idle
+    /// refresh does not emit a duplicate.
+    pub(super) fn set_capabilities(
+        &self,
+        payload: UnifiedEventPayload,
+        commands: Vec<String>,
+        context_size: u64,
+    ) {
+        {
+            let mut state = self.state.lock().expect("state poisoned");
+            state.commands = commands;
+            state.context_size = context_size;
+            state.last_capabilities = Some(payload.clone());
+        }
+        self.emit_event(payload);
+    }
+}
+
+impl RuntimeState {
+    /// Takes the reason the turn was cut off, clearing the per-turn state.
+    fn take_turn_stop_reason(&mut self) -> Option<TurnStopReason> {
+        let finish = self.finish.take();
+        let error = self.step_error.take();
+        turn_stop_reason(finish.as_deref(), error.as_deref())
+    }
+}
+
+/// Maps OpenCode's finish reason / error type to the normalized stop reason.
+///
+/// `end_turn` and cancellation are not surfaced (matching ACP). Content
+/// filtering is a refusal, not an error.
+fn turn_stop_reason(finish: Option<&str>, error: Option<&str>) -> Option<TurnStopReason> {
+    if error == Some("provider.content-filter") || finish == Some("content-filter") {
+        return Some(TurnStopReason::Refusal);
+    }
+    match finish {
+        Some("length") => Some(TurnStopReason::MaxTokens),
+        Some("max-turns" | "max_turn_requests") => Some(TurnStopReason::MaxTurnRequests),
+        _ => None,
+    }
+}
+
+/// Returns a user-facing error message, with a login hint for provider auth.
+fn error_message(data: &Value, fallback: &str) -> String {
+    match data.pointer("/error/type").and_then(Value::as_str) {
+        Some("provider.auth") => {
+            "OpenCode requires authentication; run `opencode auth login` or `fxg agents login opencode`"
+                .to_owned()
+        }
+        _ => data
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .unwrap_or(fallback)
+            .to_owned(),
     }
 }
 
@@ -582,7 +653,12 @@ pub(super) async fn apply_raw_event(inner: &Arc<DriverInner>, value: &Value) {
             );
             runtime.emit(events);
             if subagent_id.is_none()
-                && matches!(kind, "session.agent.selected" | "session.model.selected")
+                && matches!(
+                    kind,
+                    "session.agent.selected"
+                        | "session.model.selected"
+                        | "session.execution.succeeded"
+                )
                 && let Some(server) = inner.server().await
             {
                 runtime.refresh_capabilities(&server.client).await;
@@ -745,19 +821,34 @@ pub(super) fn map_event(
                     status,
                 })];
             }
+            let turn_end = {
+                let mut state = runtime.state.lock().expect("state poisoned");
+                if kind == "session.execution.succeeded" {
+                    state.take_turn_stop_reason()
+                } else if kind == "session.execution.interrupted" {
+                    state.finish = None;
+                    state.step_error = None;
+                    None
+                } else {
+                    None
+                }
+            };
             runtime.set_busy(false);
             clear_tool_state(runtime);
-            vec![DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+            let mut events = Vec::new();
+            if let Some(reason) = turn_end {
+                events.push(DriverEvent::Event(UnifiedEventPayload::TurnEnded {
+                    reason,
+                }));
+            }
+            events.push(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
                 status: SessionStatus::Idle,
                 error_message: None,
-            })]
+            }));
+            events
         }
         "session.execution.failed" => {
-            let message = data
-                .pointer("/error/message")
-                .and_then(Value::as_str)
-                .unwrap_or("OpenCode execution failed")
-                .to_owned();
+            let error_type = data.pointer("/error/type").and_then(Value::as_str);
             if let Some(child) = subagent_id {
                 let (parent, depth, title) = child_info.map_or((None, 1, None), |info| {
                     (info.parent.clone(), info.depth, info.title.clone())
@@ -771,11 +862,26 @@ pub(super) fn map_event(
                     status: SubagentStatus::Failed,
                 })];
             }
+            let turn_end = {
+                let mut state = runtime.state.lock().expect("state poisoned");
+                let step_error = state.step_error.take();
+                state.finish = None;
+                turn_stop_reason(None, error_type.or(step_error.as_deref()))
+            };
             runtime.set_busy(false);
             clear_tool_state(runtime);
+            if let Some(reason) = turn_end {
+                return vec![
+                    DriverEvent::Event(UnifiedEventPayload::TurnEnded { reason }),
+                    DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+                        status: SessionStatus::Idle,
+                        error_message: None,
+                    }),
+                ];
+            }
             vec![DriverEvent::Event(UnifiedEventPayload::StatusChanged {
                 status: SessionStatus::Error,
-                error_message: Some(message),
+                error_message: Some(error_message(data, "OpenCode execution failed")),
             })]
         }
         "session.retry.scheduled" => {
@@ -803,11 +909,7 @@ pub(super) fn map_event(
                 })];
             }
             vec![DriverEvent::Failed {
-                message: data
-                    .pointer("/error/message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("OpenCode session error")
-                    .to_owned(),
+                message: error_message(data, "OpenCode session error"),
             }]
         }
         "session.compaction.started"
@@ -913,6 +1015,7 @@ pub(super) fn map_event(
             let kind = tool_kind(&name);
             let locations = tool_locations(&input);
             let diff = tool_diff(&name, &input);
+            let plan = todo_plan_entries(&name, &input);
             {
                 let mut state = runtime.state.lock().expect("state poisoned");
                 state
@@ -920,7 +1023,7 @@ pub(super) fn map_event(
                     .insert(tool_call_id.clone(), title.clone());
                 state.tool_inputs.insert(tool_call_id.clone(), input);
             }
-            vec![DriverEvent::Event(UnifiedEventPayload::ToolCall {
+            let mut events = vec![DriverEvent::Event(UnifiedEventPayload::ToolCall {
                 tool_call_id,
                 title,
                 kind,
@@ -928,8 +1031,15 @@ pub(super) fn map_event(
                 locations,
                 diff,
                 raw_output: None,
-                subagent_id: scope,
-            })]
+                subagent_id: scope.clone(),
+            })];
+            if let Some(entries) = plan {
+                events.push(DriverEvent::Event(UnifiedEventPayload::PlanUpdate {
+                    entries,
+                    subagent_id: scope,
+                }));
+            }
+            events
         }
         "session.tool.progress" => {
             // Progress is ephemeral. Emitting a persisted `ToolCall` for every
@@ -980,7 +1090,24 @@ pub(super) fn map_event(
                 subagent_id: scope,
             })]
         }
-        "session.step.ended" | "session.step.failed" => step_usage_events(runtime, data, scope),
+        "session.step.ended" | "session.step.failed" => {
+            if scope.is_none() {
+                let mut state = runtime.state.lock().expect("state poisoned");
+                if kind == "session.step.ended" {
+                    state.finish = data
+                        .get("finish")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    state.step_error = None;
+                } else {
+                    state.step_error = data
+                        .pointer("/error/type")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                }
+            }
+            step_usage_events(runtime, data, scope)
+        }
         "session.usage.updated" => {
             // `session.usage.updated` carries cumulative session totals. It is
             // not the current context, so reuse the last step's prompt +
@@ -1172,6 +1299,62 @@ pub(super) fn reasoning_id(data: &Value) -> String {
         .unwrap_or("reasoning");
     let ordinal = data.get("ordinal").and_then(Value::as_u64).unwrap_or(0);
     format!("{message}:reasoning:{ordinal}")
+}
+
+/// Extracts the plan from a `todowrite` tool call.
+///
+/// OpenCode v2 sends the full todo list as the tool input (and an empty list
+/// clears it). Providers occasionally encode the input as a JSON string, so
+/// both shapes are accepted.
+fn todo_plan_entries(name: &str, input: &Value) -> Option<Vec<PlanEntry>> {
+    if name != "todowrite" {
+        return None;
+    }
+    let todos = match input.get("todos") {
+        Some(Value::Array(todos)) => todos.clone(),
+        Some(Value::String(encoded)) => {
+            let parsed: Value = match serde_json::from_str(encoded) {
+                Ok(value) => value,
+                Err(_) => return None,
+            };
+            match parsed {
+                Value::Array(todos) => todos,
+                other => other.get("todos")?.as_array()?.clone(),
+            }
+        }
+        _ => return None,
+    };
+    Some(
+        todos
+            .iter()
+            .enumerate()
+            .filter_map(|(index, todo)| {
+                let title = todo
+                    .get("content")
+                    .or_else(|| todo.get("title"))
+                    .or_else(|| todo.get("text"))
+                    .and_then(Value::as_str)?;
+                let id = todo
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("plan-{index}"));
+                Some(PlanEntry {
+                    id,
+                    title: title.to_owned(),
+                    status: plan_status(todo.get("status").and_then(Value::as_str)),
+                })
+            })
+            .collect(),
+    )
+}
+
+fn plan_status(status: Option<&str>) -> PlanEntryStatus {
+    match status {
+        Some("in_progress") => PlanEntryStatus::InProgress,
+        Some("completed") => PlanEntryStatus::Completed,
+        _ => PlanEntryStatus::Pending,
+    }
 }
 
 pub(super) fn tool_kind(name: &str) -> ToolCallKind {
@@ -1765,6 +1948,12 @@ pub(super) fn emit_history(runtime: &SessionRuntime, messages: &[Value]) {
                                 raw_output,
                                 subagent_id: None,
                             });
+                            if let Some(entries) = todo_plan_entries(&name, &input) {
+                                runtime.emit_event(UnifiedEventPayload::PlanUpdate {
+                                    entries,
+                                    subagent_id: None,
+                                });
+                            }
                         }
                         _ => {}
                     }
@@ -1772,5 +1961,78 @@ pub(super) fn emit_history(runtime: &SessionRuntime, messages: &[Value]) {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_todowrite_input_to_plan_entries() {
+        let input = json!({
+            "todos": [
+                {"content": "Write code", "status": "in_progress"},
+                {"id": "todo-2", "content": "Run tests", "status": "completed"},
+                {"content": "Ship", "status": "cancelled"}
+            ]
+        });
+        let entries = todo_plan_entries("todowrite", &input).expect("plan");
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].id, "plan-0");
+        assert_eq!(entries[0].title, "Write code");
+        assert_eq!(entries[0].status, PlanEntryStatus::InProgress);
+        assert_eq!(entries[1].id, "todo-2");
+        assert_eq!(entries[1].status, PlanEntryStatus::Completed);
+        assert_eq!(entries[2].status, PlanEntryStatus::Pending);
+    }
+
+    #[test]
+    fn accepts_todowrite_input_encoded_as_a_json_string() {
+        let input = json!({
+            "todos": "[{\"content\":\"Write code\",\"status\":\"pending\"}]"
+        });
+        let entries = todo_plan_entries("todowrite", &input).expect("plan");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].title, "Write code");
+    }
+
+    #[test]
+    fn an_empty_todo_list_clears_the_plan() {
+        let entries = todo_plan_entries("todowrite", &json!({"todos": []})).expect("plan");
+        assert!(entries.is_empty());
+        assert!(todo_plan_entries("read", &json!({"todos": []})).is_none());
+    }
+
+    #[test]
+    fn maps_finish_reasons_to_turn_stop_reasons() {
+        assert_eq!(
+            turn_stop_reason(Some("length"), None),
+            Some(TurnStopReason::MaxTokens)
+        );
+        assert_eq!(
+            turn_stop_reason(Some("content-filter"), None),
+            Some(TurnStopReason::Refusal)
+        );
+        assert_eq!(
+            turn_stop_reason(None, Some("provider.content-filter")),
+            Some(TurnStopReason::Refusal)
+        );
+        assert_eq!(
+            turn_stop_reason(Some("max-turns"), None),
+            Some(TurnStopReason::MaxTurnRequests)
+        );
+        assert_eq!(turn_stop_reason(Some("stop"), None), None);
+        assert_eq!(turn_stop_reason(None, Some("provider.auth")), None);
+    }
+
+    #[test]
+    fn provider_auth_errors_carry_a_login_hint() {
+        let message = error_message(
+            &json!({"error": {"type": "provider.auth", "message": "no credential"}}),
+            "fallback",
+        );
+        assert!(message.contains("opencode auth login"));
+        assert!(message.contains("fxg agents login opencode"));
     }
 }

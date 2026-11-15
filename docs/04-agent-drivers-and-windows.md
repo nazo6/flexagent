@@ -65,9 +65,17 @@ Tier 3 (`impl AgentDriver`) を持ち、`opencode` は Tier 3
   更新と、権限要求への子 ID 付与) を担当する。
 - `opencode` (Tier 3) は OpenCode v2 の HTTP + SSE を一次インターフェースとし、
   ACP では表現できない revert、メッセージ境界 fork、実行中入力 (steer)、
-  compact、provider / MCP / skill / command の管理を提供する。実装は
-  `crates/fxg-agent/src/opencode_native/`。セッションは OpenCode 側の
-  ストアを一次ソースとし、fxg は正規化イベントを `node.db` に記録する。
+  compact、provider / MCP / skill / command の管理を提供する。ACP 経路との
+  パリティとして、`todowrite` を `PlanUpdate` に、`finish` / `provider.auth`
+  を `TurnEnded` / ログイン案内に変換し、ターン終了時にコマンドカタログを
+  再取得する。実装は `crates/fxg-agent/src/opencode_native/`。セッションは
+  OpenCode 側のストアを一次ソースとし、fxg は正規化イベントを `node.db` に
+  記録する。
+- ネイティブドライバの認証は `AgentProvider::auth()` が terminal の
+  login / logout コマンドを宣言し、`fxg agents login/logout` は ACP
+  `initialize` の代わりにそれを使う。custom 定義は従来どおり ACP の
+  認証方法を使う。ACP の `effort` は native では `model` の `#variant` に
+  統合する。
 - `UserMessage.agent_message_id` はネイティブドライバが発行するメッセージ ID
   で、`SessionControlAction::Revert` とメッセージ境界 fork の対象解決に使う。
 - `CapabilitiesUpdated.native_features` はドライバが実装する追加操作

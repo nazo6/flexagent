@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use fxg_protocol::client_api::AgentBackendKind;
+use fxg_protocol::common::AgentAuthMethodInfo;
 
 use crate::driver::AgentDriver;
 use crate::extension::AgentExtension;
@@ -35,6 +36,29 @@ pub struct LaunchPreset {
     pub program: &'static str,
     /// Arguments that start the CLI's ACP server
     pub args: &'static [&'static str],
+}
+
+/// An interactive command owned by an agent (native login / logout).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentCommand {
+    /// Executable name on `PATH`
+    pub program: &'static str,
+    /// Command arguments
+    pub args: &'static [&'static str],
+}
+
+/// Authentication surface of a native agent.
+///
+/// ACP agents discover their methods from `initialize`; native drivers have no
+/// handshake, so they declare the same terminal login / logout commands here.
+#[derive(Debug, Clone)]
+pub struct AgentAuth {
+    /// Methods shown by `fxg agents login`
+    pub methods: Vec<AgentAuthMethodInfo>,
+    /// Interactive login command
+    pub login: Option<AgentCommand>,
+    /// Interactive logout command
+    pub logout: Option<AgentCommand>,
 }
 
 /// How an agent is implemented at runtime.
@@ -94,6 +118,11 @@ pub trait AgentProvider: Send + Sync {
             AgentBackend::Acp | AgentBackend::AcpExtended { .. } => None,
         }
     }
+
+    /// Native authentication surface (`None` = discover ACP auth methods).
+    fn auth(&self) -> Option<&AgentAuth> {
+        None
+    }
 }
 
 /// A provider built from static data.
@@ -101,6 +130,7 @@ pub struct StaticProvider {
     definition: AgentDefinition,
     preset: Option<LaunchPreset>,
     backend: AgentBackend,
+    auth: Option<AgentAuth>,
 }
 
 impl StaticProvider {
@@ -110,6 +140,7 @@ impl StaticProvider {
             definition,
             preset,
             backend: AgentBackend::Acp,
+            auth: None,
         }
     }
 
@@ -134,6 +165,12 @@ impl StaticProvider {
         };
         self
     }
+
+    /// Declares native authentication (terminal login / logout).
+    pub fn with_auth(mut self, auth: AgentAuth) -> Self {
+        self.auth = Some(auth);
+        self
+    }
 }
 
 impl AgentProvider for StaticProvider {
@@ -147,5 +184,9 @@ impl AgentProvider for StaticProvider {
 
     fn backend(&self) -> AgentBackend {
         self.backend.clone()
+    }
+
+    fn auth(&self) -> Option<&AgentAuth> {
+        self.auth.as_ref()
     }
 }

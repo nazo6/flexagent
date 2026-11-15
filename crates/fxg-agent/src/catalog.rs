@@ -20,7 +20,7 @@ use crate::builtin;
 use crate::driver::{AgentDriver, AgentLaunchSpec, DriverKind};
 use crate::extended::ExtendedAcpDriver;
 use crate::extension::AgentExtension;
-use crate::provider::{AgentBackend, AgentDefinition, AgentProvider, LaunchPreset};
+use crate::provider::{AgentAuth, AgentBackend, AgentDefinition, AgentProvider, LaunchPreset};
 use crate::registry::{AcpRegistry, AgentListEntry, LocalSource, RegistryIndex};
 
 /// Agent catalog used by the node session manager and the CLI.
@@ -90,6 +90,17 @@ impl AgentCatalog {
             return None;
         }
         self.providers.get(agent_id)?.management()
+    }
+
+    /// Returns the native authentication surface of a built-in provider.
+    ///
+    /// Custom definitions resolve through ACP, so they keep using
+    /// `initialize` instead of a provider-declared command.
+    pub fn native_auth(&self, agent_id: &str) -> Option<&AgentAuth> {
+        if self.registry.custom_agent(agent_id).is_some() {
+            return None;
+        }
+        self.providers.get(agent_id)?.auth()
     }
 
     /// The underlying ACP Registry (catalog fetch / cache).
@@ -1006,6 +1017,35 @@ mod tests {
             "the ACP fallback has no out-of-session management"
         );
         assert!(catalog.management("unknown").is_none());
+    }
+
+    #[test]
+    fn native_auth_is_available_only_for_the_builtin_driver() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let catalog = catalog(dir.path());
+        let auth = catalog.native_auth(builtin::OPENCODE).expect("native auth");
+        assert_eq!(auth.methods.len(), 1);
+        assert_eq!(auth.methods[0].id, "opencode-login");
+        assert!(
+            catalog.native_auth(builtin::OPENCODE_ACP).is_none(),
+            "the ACP fallback discovers auth through initialize"
+        );
+
+        // A custom definition shadows the builtin and must keep using ACP.
+        let mut custom = custom_agents();
+        custom.insert(
+            builtin::OPENCODE.to_owned(),
+            CustomAgentConfig {
+                command: "opencode".to_owned(),
+                ..Default::default()
+            },
+        );
+        let shadowed = AgentCatalog::new(AcpRegistry::new(
+            portable_paths(dir.path()),
+            &settings(),
+            custom,
+        ));
+        assert!(shadowed.native_auth(builtin::OPENCODE).is_none());
     }
 
     #[test]

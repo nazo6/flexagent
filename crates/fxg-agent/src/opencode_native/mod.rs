@@ -44,8 +44,9 @@ use fxg_protocol::common::{
     ConfigOptionValue, ElicitationAction, ElicitationArrayItems, ElicitationContent,
     ElicitationOption, ElicitationProperty, ElicitationPropertyKind, ElicitationSchema,
     ElicitationSchemaType, ElicitationValue, ForkScope, InitialConfig, ModeInfo,
-    NativeSessionFeature, PermissionOption, PermissionOptionKind, PromptInput, RawJson,
-    SessionStatus, StreamDeltaPayload, ToolCallKind, ToolCallStatus, UsageCost,
+    NativeSessionFeature, PermissionOption, PermissionOptionKind, PlanEntry, PlanEntryStatus,
+    PromptInput, RawJson, SessionStatus, StreamDeltaPayload, ToolCallKind, ToolCallStatus,
+    TurnStopReason, UsageCost,
 };
 use fxg_protocol::events::{SubagentStatus, UnifiedEventPayload};
 use fxg_protocol::util::uuid_v7;
@@ -115,11 +116,13 @@ fn env_var(name: &str) -> Option<String> {
 ///
 /// Responses are parsed at this boundary; the driver converts them to fxg's
 /// normalized types immediately.
+mod auth;
 mod client;
 mod driver;
 mod mapping;
 mod server;
 
+pub use auth::auth;
 pub use client::OpenCodeClient;
 pub use server::OpenCodeNativeDriver;
 
