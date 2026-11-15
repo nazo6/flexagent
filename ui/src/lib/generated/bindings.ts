@@ -623,13 +623,13 @@ export type DatabaseStats = {
 
 /**  `GET /api/v1/diagnostics` response. */
 export type DiagnosticsResponse = {
-	/**  Endpoint identifier (`local-node` / `central-server`) */
+	/**  Endpoint identifier (`<node_id>` / `hub`) */
 	node_id: string,
 	/**  Generation time (Unix epoch ms) */
 	generated_at: number,
 	/**  Per-agent stderr tails */
 	agents: AgentDiagnostics[],
-	/**  Daemon log path (local node only) */
+	/**  Node log path (local node only) */
 	node_log: string | null,
 	/**  Component health and delivery counters */
 	health: SystemStatus,
@@ -1077,74 +1077,6 @@ export type HubSettingsSnapshot = {
 	/**  Hub-owned settings */
 	hub: HubSettings,
 };
-
-/**  Endpoint -> Client (`/api/v1/client/ws`) message. */
-export type HubWsMessage =
-/**
- *  A batch of incremental events (the replay right after connecting and the
- *  realtime delivery afterwards).
- */
-{ op: "event_batch";
-/**  Events (ascending `node_seq`) */
-events: SessionEventEnvelope[];
-/**  Cursor of the source store (passed as `since_cursor` when reconnecting) */
-cursor: number } |
-/**  An ephemeral chunk produced while streaming (never persisted). */
-{ op: "live_stream_delta";
-/**  Target session ID */
-session_id: SessionId;
-/**  The delta body */
-delta: StreamDeltaPayload } |
-/**
- *  A progress log line of ephemeral VM provisioning (`stderr`) (ephemeral).
- *
- *  Provisioning happens before the ephemeral node's `node.db` exists, so it is
- *  streamed directly from the hub instead of being persisted in the
- *  event log.
- */
-{ op: "provisioning_log";
-/**  Target session ID */
-session_id: SessionId;
-/**  A single log line */
-line: string } |
-/**
- *  A progress log line of ephemeral VM provisioning (`stderr`) (ephemeral).
- *
- *  Provisioning happens before the ephemeral node's `node.db` exists, so it is
- *  streamed directly from the hub instead of being persisted in the
- *  event log.
- */
-{ op: "bootstrap_log";
-/**  Target session ID */
-session_id: SessionId;
-/**  A single log line */
-line: string } |
-/**  Result of a command (correlated back to the requesting client). */
-{ op: "command_result";
-/**  Correlation ID */
-command_id: CommandId;
-/**  Whether it succeeded */
-success: boolean;
-/**  Structured error on failure */
-error?: ErrorInfo | null;
-/**  Target session ID (optional) */
-session_id: SessionId | null } |
-/**  Synchronization state notification (drives the sync badge in the UI). */
-{ op: "system_status";
-/**  Node ⇔ hub link state (when connected to a local node) */
-hub_link: HubLinkStatus;
-/**  Number of unsynced outbox events */
-unsynced_event_count: number;
-/**  Last synchronization time (Unix epoch ms) */
-last_synced_at: number | null } |
-/**  Error notification. */
-{ op: "error";
-/**  Structured error */
-error: ErrorInfo } |
-/**  Response to `Ping` */
-{ op: "pong" } |
-/**  Project list or node bindings changed (triggers a `GET /api/v1/projects` refresh). */
-{ op: "projects_updated" };
 
 /**  `POST /api/v1/nodes/{node_id}/agents/registry/{agent_id}/import` request. */
 export type ImportRegistryAgentRequest = {
@@ -1746,7 +1678,7 @@ node_id: NodeId;
 path: string;
 /**  Session that opened the terminal (origin, not ownership) */
 session_id: SessionId | null;
-/**  Terminal tab identity inside the workspace (`None` = legacy single terminal) */
+/**  Terminal tab identity inside the workspace (`None` = default workspace terminal) */
 terminal_id?: string | null;
 /**  Number of columns */
 cols: number;
@@ -2041,6 +1973,62 @@ export type SendPromptRequest = {
 	/**  Source (`cli` / `web` / `android`) */
 	client_source: string,
 };
+
+/**  Endpoint -> Client (`/api/v1/client/ws`) message. */
+export type ServerWsMessage =
+/**
+ *  A batch of incremental events (the replay right after connecting and the
+ *  realtime delivery afterwards).
+ */
+{ op: "event_batch";
+/**  Events (ascending `node_seq`) */
+events: SessionEventEnvelope[];
+/**  Cursor of the source store (passed as `since_cursor` when reconnecting) */
+cursor: number } |
+/**  An ephemeral chunk produced while streaming (never persisted). */
+{ op: "live_stream_delta";
+/**  Target session ID */
+session_id: SessionId;
+/**  The delta body */
+delta: StreamDeltaPayload } |
+/**
+ *  A progress log line of ephemeral VM provisioning (`stderr`) (ephemeral).
+ *
+ *  Provisioning happens before the ephemeral node's `node.db` exists, so it is
+ *  streamed directly from the hub instead of being persisted in the
+ *  event log.
+ */
+{ op: "provisioning_log";
+/**  Target session ID */
+session_id: SessionId;
+/**  A single log line */
+line: string } |
+/**  Result of a command (correlated back to the requesting client). */
+{ op: "command_result";
+/**  Correlation ID */
+command_id: CommandId;
+/**  Whether it succeeded */
+success: boolean;
+/**  Structured error on failure */
+error?: ErrorInfo | null;
+/**  Target session ID (optional) */
+session_id: SessionId | null } |
+/**  Synchronization state notification (drives the sync badge in the UI). */
+{ op: "system_status";
+/**  Node ⇔ hub link state (when connected to a local node) */
+hub_link: HubLinkStatus;
+/**  Number of unsynced outbox events */
+unsynced_event_count: number;
+/**  Last synchronization time (Unix epoch ms) */
+last_synced_at: number | null } |
+/**  Error notification. */
+{ op: "error";
+/**  Structured error */
+error: ErrorInfo } |
+/**  Response to `Ping` */
+{ op: "pong" } |
+/**  Project list or node bindings changed (triggers a `GET /api/v1/projects` refresh). */
+{ op: "projects_updated" };
 
 /**
  *  `POST /api/v1/sessions/:id/archive` request.
@@ -2781,11 +2769,6 @@ export type UnifiedEventPayload =
 	/**  A single log line */
 	line: string,
 } } |
-/**  A progress log line of ephemeral VM provisioning (`stderr`). */
-{ type: "bootstrap_log"; data: {
-	/**  A single log line */
-	line: string,
-} } |
 /**
  *  An update of the context usage and accumulated cost (the `usage_update` of
  *  ACP `session/update`). The update source of the hub-side `sessions.usage_json`
@@ -2936,7 +2919,7 @@ export type UpdatePairingRequest = {
 	expected_revision: number,
 };
 
-/**  `PUT /api/v1/{nodes/{node_id}/|server/}secrets/{secret_id}` request (write-only). */
+/**  `PUT /api/v1/{nodes/{node_id}/|hub/}secrets/{secret_id}` request (write-only). */
 export type UpsertSecretRequest = {
 	/**  Optional description or note */
 	description: string | null,

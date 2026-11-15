@@ -13,7 +13,7 @@ export interface ConnectionTarget {
   url: string;
 }
 
-const TARGETS_KEY = "fxg.connection.targets";
+const TARGETS_KEY = "fxg:connection_targets";
 
 interface StoredTargets {
   version: 1;
