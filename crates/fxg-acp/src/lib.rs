@@ -22,6 +22,7 @@ pub mod acp;
 pub mod agent;
 pub mod auth;
 pub mod driver;
+pub mod management;
 pub mod registry;
 mod warm;
 
@@ -29,7 +30,8 @@ pub use acp::AcpDriver;
 pub use agent::AgentCatalog;
 pub use driver::{
     ActiveSessionHandle, AgentAuthRequired, AgentDriver, AgentLaunchSpec, AgentSessionInfo,
-    AgentSessionList, DriverEvent, DriverKind, ExternalSessionsUnsupported,
-    HistoryCaptureUnavailable, NativeForkUnavailable, NativeResumeUnavailable, ResumeRequest,
-    StartSessionRequest, StartedSession,
+    AgentSessionList, DriverEvent, DriverKind, DriverSessionCapabilities,
+    ExternalSessionsUnsupported, HistoryCaptureUnavailable, NativeForkUnavailable,
+    NativeResumeUnavailable, NativeRevertUnavailable, ResumeRequest, StartSessionRequest,
+    StartedSession,
 };

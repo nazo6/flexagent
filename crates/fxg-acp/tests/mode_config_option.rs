@@ -75,8 +75,8 @@ async fn modes_come_from_config_options_and_set_mode_uses_set_config() {
         initial_mode: Some("plan".to_owned()),
         resume: None,
         fork_from: None,
+        fork_before_message_id: None,
         initial_config: Vec::new(),
-        acp_parser: None,
     };
 
     // The initial mode must go through `set_config_option`: the mock rejects

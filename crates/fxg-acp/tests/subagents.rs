@@ -29,8 +29,8 @@ fn request(mode: &str, mut launch: AgentLaunchSpec, cwd: &Path) -> StartSessionR
         initial_mode: None,
         resume: None,
         fork_from: None,
+        fork_before_message_id: None,
         initial_config: Vec::new(),
-        acp_parser: None,
     }
 }
 

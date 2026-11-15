@@ -11,7 +11,7 @@ use std::sync::Arc;
 use super::opencode::OpenCodeExtension;
 use super::provider::{AgentDefinition, AgentProvider, LaunchPreset, StaticProvider};
 
-/// OpenCode CLI (`opencode acp`) with the OpenCode extension.
+/// OpenCode native driver (Tier 3, OpenCode v2 HTTP + SSE).
 pub const OPENCODE: &str = "opencode";
 /// Extension ID applied to [`OPENCODE`].
 pub const OPENCODE_EXTENSION: &str = "opencode";

@@ -9,11 +9,14 @@
 //! handled centrally by the session manager (event bus).
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use async_trait::async_trait;
+use fxg_protocol::client_api::AgentCapabilitiesPreview;
 use fxg_protocol::common::{
-    ConfigOptionValue, ElicitationAction, ElicitationContent, PromptInput, StreamDeltaPayload,
+    ConfigOptionValue, ElicitationAction, ElicitationContent, InitialConfig, NativeSessionFeature,
+    PromptInput, StreamDeltaPayload,
 };
 use fxg_protocol::events::UnifiedEventPayload;
 use tokio::sync::mpsc;
@@ -121,6 +124,11 @@ pub struct AgentAuthRequired(pub Vec<fxg_protocol::common::AgentAuthMethodInfo>)
 #[error("native session fork is not available: {0}")]
 pub struct NativeForkUnavailable(pub String);
 
+/// Native revert cannot be applied in the current agent state (e.g. target message missing or busy).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("native revert is not available: {0}")]
+pub struct NativeRevertUnavailable(pub String);
+
 /// History capture was requested but the agent cannot replay it (`session/load`).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("agent cannot replay session history: {0}")]
@@ -146,10 +154,11 @@ pub struct StartSessionRequest {
     pub resume: Option<ResumeRequest>,
     /// Source ACP session ID for a native `session/fork` (`None` = no fork)
     pub fork_from: Option<String>,
+    /// Native drivers: fork before this agent-side message (exclusive).
+    /// `None` copies the full history.
+    pub fork_before_message_id: Option<String>,
     /// Initial configuration applied after `session/new`
     pub initial_config: Vec<fxg_protocol::common::InitialConfig>,
-    /// ACP-only: parser for vendor subagent notifications (set by the extension layer).
-    pub acp_parser: Option<std::sync::Arc<dyn crate::agent::extension::AcpNotificationParser>>,
 }
 
 /// Result of [`AgentDriver::start_session`].
@@ -260,6 +269,44 @@ pub trait AgentDriver: Send + Sync {
     fn stderr_snapshot(&self) -> BTreeMap<String, Vec<String>> {
         BTreeMap::new()
     }
+
+    /// Agent-native out-of-session management interface, if supported.
+    fn management(&self) -> Option<Arc<dyn crate::management::AgentManagement>> {
+        None
+    }
+
+    /// Probes selectable modes and config options without creating a session.
+    ///
+    /// Returning `Ok(None)` instructs the caller to fall back to a short-lived
+    /// temporary session.
+    async fn probe_capabilities(
+        &self,
+        _launch: &AgentLaunchSpec,
+        _cwd: &Path,
+        _initial_config: &[InitialConfig],
+    ) -> anyhow::Result<Option<AgentCapabilitiesPreview>> {
+        Ok(None)
+    }
+}
+
+/// Static session-level capabilities declared by an active session handle.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DriverSessionCapabilities {
+    /// Whether the node assigns `PromptInput.agent_message_id` before sending.
+    ///
+    /// Native drivers that target individual messages (revert / fork) set this
+    /// to `true`; the node then records the same ID on `UserMessage`.
+    pub assigns_message_ids: bool,
+    /// Native session features (`revert`, `steer`, `compact`) implemented by this handle.
+    pub native_features: Vec<NativeSessionFeature>,
+}
+
+impl DriverSessionCapabilities {
+    /// Returns whether the handle implements `feature`.
+    #[must_use]
+    pub fn supports(&self, feature: NativeSessionFeature) -> bool {
+        self.native_features.contains(&feature)
+    }
 }
 
 /// One session that already exists on the agent side.
@@ -292,6 +339,20 @@ pub struct ExternalSessionsUnsupported;
 /// Operation handle for a started session.
 #[async_trait]
 pub trait ActiveSessionHandle: Send + Sync {
+    /// Session-level capabilities implemented by this handle.
+    fn session_capabilities(&self) -> DriverSessionCapabilities {
+        DriverSessionCapabilities::default()
+    }
+    /// Whether the node should assign `PromptInput.agent_message_id` for this
+    /// specific prompt.
+    ///
+    /// Native drivers that route slash commands through an API which does not
+    /// accept a message ID return `false` for those commands. Assigning an ID
+    /// there would create a revert / fork target that does not exist on the
+    /// agent side.
+    fn assigns_message_id_for(&self, _input: &PromptInput) -> bool {
+        self.session_capabilities().assigns_message_ids
+    }
     /// Send a prompt (including slash commands and attachments).
     async fn send_prompt(&self, input: PromptInput) -> anyhow::Result<()>;
     /// Respond to a permission request (`ALREADY_RESOLVED` detection is handled by the manager).
@@ -316,6 +377,16 @@ pub trait ActiveSessionHandle: Send + Sync {
     async fn set_mode(&self, mode_id: String) -> anyhow::Result<()>;
     /// Change configuration (model selection, etc.).
     async fn set_config(&self, key: String, value: ConfigOptionValue) -> anyhow::Result<()>;
+    /// Revert the agent-side conversation to before `agent_message_id`.
+    ///
+    /// The default implementation reports that native revert is unavailable.
+    async fn revert_to_message(&self, _agent_message_id: &str, _files: bool) -> anyhow::Result<()> {
+        anyhow::bail!("revert is not supported by this driver")
+    }
+    /// Start a manual context compaction.
+    async fn compact_context(&self) -> anyhow::Result<()> {
+        anyhow::bail!("compaction is not supported by this driver")
+    }
     /// Cancel the current turn.
     async fn cancel_turn(&self) -> anyhow::Result<()>;
     /// Fully terminates the session process (including the process tree).
@@ -423,8 +494,8 @@ mod tests {
                     initial_mode: None,
                     resume: None,
                     fork_from: None,
+                    fork_before_message_id: None,
                     initial_config: Vec::new(),
-                    acp_parser: None,
                 },
                 tx,
             )

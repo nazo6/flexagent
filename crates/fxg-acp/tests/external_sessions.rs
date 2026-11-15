@@ -37,8 +37,8 @@ fn request(cwd: &Path, resume: ResumeRequest, mode: &str) -> StartSessionRequest
         initial_mode: None,
         resume: Some(resume),
         fork_from: None,
+        fork_before_message_id: None,
         initial_config: Vec::new(),
-        acp_parser: None,
     }
 }
 
