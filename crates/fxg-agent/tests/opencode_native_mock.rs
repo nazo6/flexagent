@@ -23,11 +23,11 @@ use axum::response::Json;
 use axum::response::sse::{Event, Sse};
 use axum::routing::{get, post};
 use futures_util::StreamExt;
-use fxg_acp::agent::extension::AcpExtensionOptions;
-use fxg_acp::driver::{
+use fxg_agent::driver::{
     AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind, ResumeRequest, StartSessionRequest,
 };
-use fxg_acp::opencode_native::OpenCodeNativeDriver;
+use fxg_agent::extension::AcpExtensionOptions;
+use fxg_agent::opencode_native::OpenCodeNativeDriver;
 use fxg_protocol::common::{
     ElicitationAction, ElicitationContent, ElicitationValue, PromptInput, StreamDeltaPayload,
 };

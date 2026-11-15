@@ -1,8 +1,8 @@
 //! `fxg agents` commands (ACP agent authentication).
 
 use anyhow::{Context, Result, bail};
-use fxg_acp::agent::AgentCatalog;
-use fxg_acp::registry::AcpRegistry;
+use fxg_agent::AgentCatalog;
+use fxg_agent::registry::AcpRegistry;
 use fxg_protocol::common::AgentAuthMethodKind;
 use usage::{Args, Subcommands};
 
@@ -53,7 +53,7 @@ pub struct AgentsLoginArgs {
 async fn resolve_agent_launch_spec(
     catalog: &AgentCatalog,
     id: &str,
-) -> Result<fxg_acp::AgentLaunchSpec> {
+) -> Result<fxg_agent::AgentLaunchSpec> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     catalog
         .launch_spec(id, &cwd, &[])
@@ -106,7 +106,7 @@ impl usage::RunAsync for AgentsLoginArgs {
         let catalog = agent_catalog().await?;
         let id = catalog.resolve_alias(&self.id);
         let spec = resolve_agent_launch_spec(&catalog, &id).await?;
-        let methods = fxg_acp::auth::discover_auth_methods(&spec)
+        let methods = fxg_agent::auth::discover_auth_methods(&spec)
             .await
             .with_context(|| format!("failed to query authentication methods for {id}"))?;
         if methods.is_empty() {
@@ -117,10 +117,10 @@ impl usage::RunAsync for AgentsLoginArgs {
         println!("using {} ({})", method.name, method.id);
         match method.kind {
             AgentAuthMethodKind::Terminal => {
-                fxg_acp::auth::run_terminal_login(&spec, &method).await?;
+                fxg_agent::auth::run_terminal_login(&spec, &method).await?;
             }
             AgentAuthMethodKind::Agent => {
-                fxg_acp::auth::authenticate(&spec, &method.id).await?;
+                fxg_agent::auth::authenticate(&spec, &method.id).await?;
             }
             _ => bail!("unsupported authentication method kind: {}", method.kind),
         }
@@ -143,7 +143,7 @@ impl usage::RunAsync for AgentsLogoutArgs {
         let catalog = agent_catalog().await?;
         let id = catalog.resolve_alias(&self.id);
         let spec = resolve_agent_launch_spec(&catalog, &id).await?;
-        fxg_acp::auth::logout(&spec)
+        fxg_agent::auth::logout(&spec)
             .await
             .with_context(|| format!("failed to log out from {id}"))?;
         println!("logged out of {id}");

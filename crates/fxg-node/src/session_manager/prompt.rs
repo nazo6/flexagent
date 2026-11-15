@@ -310,7 +310,7 @@ impl SessionManager {
                             "failed to revert session: {err:#}"
                         );
                         if let Some(unavailable) =
-                            err.downcast_ref::<fxg_acp::NativeRevertUnavailable>()
+                            err.downcast_ref::<fxg_agent::NativeRevertUnavailable>()
                         {
                             return NodeError::InvalidState(unavailable.0.clone());
                         }

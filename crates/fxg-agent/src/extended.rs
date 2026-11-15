@@ -16,13 +16,13 @@ use fxg_protocol::common::{ConfigOptionValue, ElicitationAction, ElicitationCont
 use fxg_protocol::events::UnifiedEventPayload;
 use tokio::sync::mpsc;
 
-use super::extension::{
-    AgentExtension, CapabilitiesSnapshot, EventDisposition, Hook, SessionContext, SessionExtension,
-};
 use crate::acp::AcpDriver;
 use crate::driver::{
     ActiveSessionHandle, AgentDriver, DriverEvent, DriverKind, DriverSessionCapabilities,
     StartSessionRequest, StartedSession,
+};
+use crate::extension::{
+    AgentExtension, CapabilitiesSnapshot, EventDisposition, Hook, SessionContext, SessionExtension,
 };
 
 enum ExtendedBase {
@@ -350,8 +350,8 @@ mod tests {
         ConfigOptionValue::Choice(ConfigOptionChoice::from_value(value))
     }
 
-    use crate::agent::extension::{CapabilityOverlay, ConfigOptionPatch};
     use crate::driver::{AgentLaunchSpec, DriverKind};
+    use crate::extension::{CapabilityOverlay, ConfigOptionPatch};
 
     fn launch() -> AgentLaunchSpec {
         AgentLaunchSpec {

@@ -14,7 +14,7 @@ base64 = { workspace = true }
 dirs = { workspace = true }
 dunce = { workspace = true }
 futures-util = { workspace = true }
-fxg-acp = { workspace = true }
+fxg-agent = { workspace = true }
 fxg-db = { workspace = true }
 fxg-hub = { workspace = true }
 fxg-protocol = { workspace = true }

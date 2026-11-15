@@ -16,8 +16,8 @@ mod stdio;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 
-use fxg_acp::agent::AgentCatalog;
-use fxg_acp::registry::AcpRegistry;
+use fxg_agent::AgentCatalog;
+use fxg_agent::registry::AcpRegistry;
 use fxg_db::Db;
 use fxg_hub::api::ClientEvent;
 use fxg_hub::push::{PushService, RunningTurns};

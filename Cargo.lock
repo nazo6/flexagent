@@ -1592,7 +1592,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fxg-acp"
+name = "fxg-agent"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
@@ -1627,7 +1627,7 @@ dependencies = [
  "dirs 7.0.0",
  "dunce",
  "futures-util",
- "fxg-acp",
+ "fxg-agent",
  "fxg-db",
  "fxg-hub",
  "fxg-node",
@@ -1705,7 +1705,7 @@ dependencies = [
  "dirs 7.0.0",
  "dunce",
  "futures-util",
- "fxg-acp",
+ "fxg-agent",
  "fxg-db",
  "fxg-hub",
  "fxg-protocol",

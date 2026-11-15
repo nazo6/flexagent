@@ -82,7 +82,7 @@ mod tests {
     use axum::http::Request as HttpRequest;
     use axum::http::{StatusCode, header};
     use axum::response::Response;
-    use fxg_acp::AgentSessionInfo;
+    use fxg_agent::AgentSessionInfo;
     use fxg_protocol::client_api::ServerWsMessage;
     use fxg_protocol::common::ErrorCode;
     use fxg_protocol::paths::{Paths, Role};

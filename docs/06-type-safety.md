@@ -1,7 +1,7 @@
 # 型安全性ガイド (`serde_json::Value` / 文字列判定の禁止)
 
 - **日付**: 2026-11-08
-- **対象**: `fxg-protocol`, `fxg-db`, `fxg-acp`, `fxg-node`, `fxg-hub`,
+- **対象**: `fxg-protocol`, `fxg-db`, `fxg-agent`, `fxg-node`, `fxg-hub`,
   `fxg-cli`, `ui`
 - **関連**: [`docs/proposals/2026-11-08-type-safety-plan.md`](./proposals/2026-11-08-type-safety-plan.md)
 
@@ -107,7 +107,7 @@ pub struct RawJson(pub serde_json::Value);
 
 | 境界                            | 変換する場所                     | ルール                                                                          |
 | :------------------------------ | :------------------------------- | :------------------------------------------------------------------------------ |
-| ACP SDK → `UnifiedEventPayload` | `fxg-acp` の変換関数             | SDK の enum を必ず enum へ写す。`_ =>` の既定値丸め禁止                         |
+| ACP SDK → `UnifiedEventPayload` | `fxg-agent` の変換関数           | SDK の enum を必ず enum へ写す。`_ =>` の既定値丸め禁止                         |
 | DB TEXT → Rust                  | `fxg-protocol` の `sqlx` feature | row struct のフィールドを直接 enum にする。閉じた enum の未知値は decode エラー |
 | JSON → Rust                     | `serde`                          | `Unknown` を持つ open enum。同期 payload に `deny_unknown_fields` を付けない    |
 | DB TEXT → Rust                  | `fxg-db` の row 変換             | `FromStr` / `TryFrom` を境界で1回だけ呼ぶ                                       |

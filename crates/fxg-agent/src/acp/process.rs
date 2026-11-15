@@ -158,7 +158,7 @@ pub(super) fn spawn_agent_process(
     agent: AcpAgent,
     agent_id: String,
     stderr: StderrRegistry,
-    acp: crate::agent::extension::AcpExtensionOptions,
+    acp: crate::extension::AcpExtensionOptions,
 ) -> (Arc<ProcessHandle>, oneshot::Receiver<anyhow::Result<()>>) {
     let (control_tx, control_rx) = mpsc::unbounded_channel();
     let (ready_tx, ready_rx) = oneshot::channel();

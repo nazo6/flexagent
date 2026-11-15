@@ -42,7 +42,7 @@ pub async fn discover_auth_methods(spec: &AgentLaunchSpec) -> Result<Vec<AgentAu
                     .send_request(
                         InitializeRequest::new(ProtocolVersion::V1)
                             .client_capabilities(client_capabilities(
-                                &crate::agent::extension::AcpExtensionOptions::default(),
+                                &crate::extension::AcpExtensionOptions::default(),
                             ))
                             .client_info(Implementation::new("fxg", env!("CARGO_PKG_VERSION"))),
                     )
@@ -83,7 +83,7 @@ pub async fn authenticate(spec: &AgentLaunchSpec, method_id: &str) -> Result<()>
                     .send_request(
                         InitializeRequest::new(ProtocolVersion::V1)
                             .client_capabilities(client_capabilities(
-                                &crate::agent::extension::AcpExtensionOptions::default(),
+                                &crate::extension::AcpExtensionOptions::default(),
                             ))
                             .client_info(Implementation::new("fxg", env!("CARGO_PKG_VERSION"))),
                     )
@@ -121,7 +121,7 @@ pub async fn logout(spec: &AgentLaunchSpec) -> Result<()> {
                     .send_request(
                         InitializeRequest::new(ProtocolVersion::V1)
                             .client_capabilities(client_capabilities(
-                                &crate::agent::extension::AcpExtensionOptions::default(),
+                                &crate::extension::AcpExtensionOptions::default(),
                             ))
                             .client_info(Implementation::new("fxg", env!("CARGO_PKG_VERSION"))),
                     )

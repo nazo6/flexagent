@@ -2,14 +2,14 @@ use super::prompt::*;
 use super::replay::*;
 use super::*;
 use crate::testutil::MockAgent;
-use fxg_acp::AgentSessionInfo;
-use fxg_acp::DriverKind;
-use fxg_acp::agent::{
+use fxg_agent::AgentSessionInfo;
+use fxg_agent::DriverKind;
+use fxg_agent::registry::AcpRegistry;
+use fxg_agent::{
     AgentBackend, AgentCatalog, AgentDefinition, AgentExtension, CapabilitiesSnapshot,
     CapabilityOverlay, ConfigOptionPatch, ExtendedAcpDriver, LaunchPreset, SessionContext,
     StaticProvider,
 };
-use fxg_acp::registry::AcpRegistry;
 use fxg_db::Db;
 use fxg_db::queries::SessionFilter;
 use fxg_protocol::SessionId;

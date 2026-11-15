@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use fxg_acp::{
+use fxg_agent::{
     ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind,
     StartSessionRequest, StartedSession,
 };

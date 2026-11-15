@@ -126,7 +126,7 @@ ACP 標準の subagents RFD と opencode の独自拡張（child session updates
   `session_message_chunk`。
 - opencode: `opencode/session/child_update` 拡張通知。
 
-どちらも `crates/fxg-acp/src/acp/mapping.rs` で同じイベントへ変換します。
+どちらも `crates/fxg-agent/src/acp/mapping.rs` で同じイベントへ変換します。
 型の正は `crates/fxg-protocol/src/events.rs`、UI の型は生成済み
 `ui/src/lib/generated/bindings.ts` です。
 

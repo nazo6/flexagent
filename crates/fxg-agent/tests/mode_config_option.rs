@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use fxg_acp::{
+use fxg_agent::{
     AcpDriver, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind, StartSessionRequest,
 };
 use fxg_protocol::events::UnifiedEventPayload;

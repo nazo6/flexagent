@@ -2,7 +2,7 @@ use super::mapping::*;
 use super::subagent::map_state_update;
 use super::subagent::{ChildNotificationHandler, ChildSessions, SessionIngress};
 use super::*;
-use crate::agent::extension::{AcpCapability, AcpExtensionOptions};
+use crate::extension::{AcpCapability, AcpExtensionOptions};
 use fxg_protocol::events::SubagentStatus;
 
 use agent_client_protocol::v1::schema::SubagentCapabilities;

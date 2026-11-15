@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use fxg_acp::{
+use fxg_agent::{
     AcpDriver, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind, ExternalSessionsUnsupported,
     HistoryCaptureUnavailable, ResumeRequest, StartSessionRequest,
 };

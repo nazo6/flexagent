@@ -307,7 +307,7 @@ impl SessionManager {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let started = match driver
             .start_session(
-                fxg_acp::StartSessionRequest {
+                fxg_agent::StartSessionRequest {
                     session_id: params.session_id.to_owned(),
                     title: Some(params.title.to_owned()),
                     cwd: params.cwd.to_path_buf(),

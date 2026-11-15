@@ -8,9 +8,9 @@
 
 use std::sync::Arc;
 
-use super::opencode::OpenCodeExtension;
-use super::provider::{AgentBackend, AgentDefinition, AgentProvider, LaunchPreset, StaticProvider};
+use crate::opencode::OpenCodeExtension;
 use crate::opencode_native::OpenCodeNativeDriver;
+use crate::provider::{AgentBackend, AgentDefinition, AgentProvider, LaunchPreset, StaticProvider};
 
 /// OpenCode native driver (Tier 3, OpenCode v2 HTTP + SSE).
 pub const OPENCODE: &str = "opencode";

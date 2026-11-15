@@ -8,7 +8,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use fxg_acp::{AgentAuthRequired, DriverEvent, StartSessionRequest};
+use fxg_agent::{AgentAuthRequired, DriverEvent, StartSessionRequest};
 use fxg_protocol::client_api::AgentCapabilitiesPreview;
 use fxg_protocol::common::{ConfigOptionCategory, ConfigOptionInfo, InitialConfig, SessionStatus};
 use fxg_protocol::events::UnifiedEventPayload;

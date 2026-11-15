@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use fxg_acp::agent::AgentCatalog;
-use fxg_acp::{
+use fxg_agent::AgentCatalog;
+use fxg_agent::{
     ActiveSessionHandle, AgentAuthRequired, AgentDriver, AgentLaunchSpec, DriverEvent,
     HistoryCaptureUnavailable, NativeForkUnavailable, NativeResumeUnavailable, ResumeRequest,
 };

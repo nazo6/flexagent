@@ -61,7 +61,7 @@ impl LaunchKey {
                 .acp
                 .capabilities
                 .iter()
-                .map(crate::agent::extension::AcpCapability::as_str)
+                .map(crate::extension::AcpCapability::as_str)
                 .collect::<Vec<_>>(),
         })
         .to_string();

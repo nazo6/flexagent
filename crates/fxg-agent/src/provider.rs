@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use fxg_protocol::client_api::AgentBackendKind;
 
-use super::extension::AgentExtension;
 use crate::driver::AgentDriver;
+use crate::extension::AgentExtension;
 use crate::management::AgentManagement;
 
 /// Static information needed even when the agent is not running.

@@ -79,7 +79,7 @@ pub struct AgentLaunchSpec {
     pub env: Vec<(String, String)>,
     /// ACP connection options contributed by an extension (client capabilities,
     /// vendor notification methods). Kept as plain data for the warm-pool key.
-    pub acp: crate::agent::extension::AcpExtensionOptions,
+    pub acp: crate::extension::AcpExtensionOptions,
 }
 
 /// Resume selection from an existing agent session ([`StartSessionRequest::resume`]).

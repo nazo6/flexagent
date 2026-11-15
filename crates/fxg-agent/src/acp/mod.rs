@@ -268,7 +268,7 @@ struct SessionParams {
     /// Initial configuration applied after `session/new`
     initial_config: Vec<fxg_protocol::common::InitialConfig>,
     /// Parser for vendor subagent notifications (set by the extension layer).
-    acp_parser: Option<Arc<dyn crate::agent::extension::AcpNotificationParser>>,
+    acp_parser: Option<Arc<dyn crate::extension::AcpNotificationParser>>,
 }
 
 /// Per-session shared information (handlers look it up by the ACP session_id).
@@ -349,11 +349,11 @@ impl AgentDriver for AcpDriver {
 
 impl AcpDriver {
     /// Starts an ACP session with an optional vendor notification parser
-    /// contributed by an [`crate::agent::extension::AgentExtension`].
+    /// contributed by an [`crate::extension::AgentExtension`].
     pub(crate) async fn start_session_with_parser(
         &self,
         req: StartSessionRequest,
-        acp_parser: Option<Arc<dyn crate::agent::extension::AcpNotificationParser>>,
+        acp_parser: Option<Arc<dyn crate::extension::AcpNotificationParser>>,
         event_tx: mpsc::UnboundedSender<DriverEvent>,
     ) -> anyhow::Result<StartedSession> {
         match self.start_session_inner(req, acp_parser, &event_tx).await {
@@ -375,7 +375,7 @@ impl AcpDriver {
     async fn start_session_inner(
         &self,
         req: StartSessionRequest,
-        acp_parser: Option<Arc<dyn crate::agent::extension::AcpNotificationParser>>,
+        acp_parser: Option<Arc<dyn crate::extension::AcpNotificationParser>>,
         event_tx: &mpsc::UnboundedSender<DriverEvent>,
     ) -> anyhow::Result<StartedSession> {
         // Extension resolution for `npx` / `uvx` (Windows PATHEXT support)

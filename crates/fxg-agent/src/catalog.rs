@@ -15,12 +15,12 @@ use anyhow::anyhow;
 use fxg_protocol::client_api::AgentBackendKind;
 use fxg_protocol::settings::{AgentSettings, CustomAgentConfig};
 
-use super::builtin;
-use super::extended::ExtendedAcpDriver;
-use super::extension::AgentExtension;
-use super::provider::{AgentBackend, AgentDefinition, AgentProvider, LaunchPreset};
 use crate::acp::AcpDriver;
+use crate::builtin;
 use crate::driver::{AgentDriver, AgentLaunchSpec, DriverKind};
+use crate::extended::ExtendedAcpDriver;
+use crate::extension::AgentExtension;
+use crate::provider::{AgentBackend, AgentDefinition, AgentProvider, LaunchPreset};
 use crate::registry::{AcpRegistry, AgentListEntry, LocalSource, RegistryIndex};
 
 /// Agent catalog used by the node session manager and the CLI.
@@ -304,7 +304,7 @@ impl AgentCatalog {
         spec: &mut AgentLaunchSpec,
         capabilities: fxg_protocol::settings::AgentAcpCapabilities,
     ) {
-        use crate::agent::extension::AcpCapability;
+        use crate::extension::AcpCapability;
 
         if capabilities.subagents {
             spec.acp.capabilities.insert(AcpCapability::Subagents);
@@ -447,9 +447,9 @@ fn default_preset_lookup(preset: &LaunchPreset) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::extension::{AgentExtension, AgentMetadata};
-    use crate::agent::provider::StaticProvider;
     use crate::driver::{DriverEvent, StartSessionRequest, StartedSession};
+    use crate::extension::{AgentExtension, AgentMetadata};
+    use crate::provider::StaticProvider;
     use fxg_protocol::client_api::AgentBackendKind;
     use fxg_protocol::paths::{Paths, Role};
     use fxg_protocol::settings::CustomAgentConfig;
@@ -584,7 +584,7 @@ mod tests {
 
     #[test]
     fn per_agent_capabilities_apply_to_the_launch_spec() {
-        use crate::agent::extension::AcpCapability;
+        use crate::extension::AcpCapability;
         use fxg_protocol::settings::AgentAcpCapabilities;
 
         let dir = tempfile::tempdir().expect("tempdir");
@@ -672,8 +672,8 @@ mod tests {
 
     #[test]
     fn subagents_toggle_gates_vendor_child_notifications() {
-        use crate::agent::extension::AcpCapability;
-        use crate::agent::opencode::OpenCodeExtension;
+        use crate::extension::AcpCapability;
+        use crate::opencode::OpenCodeExtension;
         use fxg_protocol::settings::AgentAcpCapabilities;
 
         let dir = tempfile::tempdir().expect("tempdir");

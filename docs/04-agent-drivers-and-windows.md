@@ -1,6 +1,6 @@
-# 04. エージェントドライバ実装 (ACP一本化) と Windows 対応詳細
+# 04. エージェントドライバ実装 (ACP + ネイティブ API) と Windows 対応詳細
 
-`crates/fxg-acp` および `crates/fxg-pty`
+`crates/fxg-agent` および `crates/fxg-pty`
 におけるエージェント制御・プロセス管理の具体的な実装設計です。
 
 ---
@@ -8,7 +8,7 @@
 ## 1. `AgentDriver` トレイトによる抽象化
 
 すべてのアクション・対話は `AgentDriver` 非同期トレイトで統一します。
-型・メソッドの正は `crates/fxg-acp/src/driver.rs` です。
+型・メソッドの正は `crates/fxg-agent/src/driver.rs` です。
 
 - `AgentDriver::start_session(req, event_tx)` は `StartedSession` を返します。
   `StartedSession` は操作ハンドル、`context_restored`、`agent_session_id` を持ちます。
@@ -66,7 +66,7 @@ Tier 3 (`impl AgentDriver`) を持ち、`opencode` は Tier 3
 - `opencode` (Tier 3) は OpenCode v2 の HTTP + SSE を一次インターフェースとし、
   ACP では表現できない revert、メッセージ境界 fork、実行中入力 (steer)、
   compact、provider / MCP / skill / command の管理を提供する。実装は
-  `crates/fxg-acp/src/opencode_native/`。セッションは OpenCode 側の
+  `crates/fxg-agent/src/opencode_native/`。セッションは OpenCode 側の
   ストアを一次ソースとし、fxg は正規化イベントを `node.db` に記録する。
 - `UserMessage.agent_message_id` はネイティブドライバが発行するメッセージ ID
   で、`SessionControlAction::Revert` とメッセージ境界 fork の対象解決に使う。
@@ -160,7 +160,7 @@ Tier 3 (`impl AgentDriver`) を持ち、`opencode` は Tier 3
 ACPでは、エディタやオーケストレータ側が **`acp::Client` トレイト**
 を実装してサブプロセスの `stdin/stdout` に接続します。
 
-`fxg-acp` の ACP client handlers が処理する主要コールバック：
+`fxg-agent` の ACP client handlers が処理する主要コールバック：
 
 - **`session_update(notification)`**:
   - `AgentMessageChunk`, `AgentThoughtChunk` ➔
@@ -174,7 +174,7 @@ ACPでは、エディタやオーケストレータ側が **`acp::Client` トレ
     ACP は Session Modes を Session Config Options に置き換えつつあり、
     OpenCode のように `modes` を返さず `category = "mode"` の
     `configOption` だけでモードを提示するエージェントが存在する。
-    `fxg-acp` は両方を同じ `ModeInfo` / `current_mode` に正規化し
+    `fxg-agent` は両方を同じ `ModeInfo` / `current_mode` に正規化し
     (`session_capabilities`)、`set_mode` はモード用 `configOption` があれば
     `session/set_config_option`、無ければ従来の `session/set_mode` に振り分ける。
   - `UsageUpdate` ➔ コンテキスト使用量 (`used` / `size`) と累積コスト

@@ -11,7 +11,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use fxg_acp::{AgentAuthRequired, ExternalSessionsUnsupported};
+use fxg_agent::{AgentAuthRequired, ExternalSessionsUnsupported};
 use fxg_db::SessionFilter;
 use fxg_protocol::SessionId;
 use fxg_protocol::client_api::{

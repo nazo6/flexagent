@@ -12,11 +12,11 @@ use async_trait::async_trait;
 use fxg_protocol::common::RawJson;
 use fxg_protocol::events::{SubagentStatus, UnifiedEventPayload};
 
-use super::extension::{
+use crate::driver::DriverEvent;
+use crate::extension::{
     AcpChildUpdate, AcpExtensionOptions, AcpNotificationParser, AgentExtension, AgentMetadata,
     EventDisposition, SessionExtension,
 };
-use crate::driver::DriverEvent;
 
 /// OpenCode ACP extension.
 #[derive(Debug, Default)]
@@ -47,7 +47,7 @@ impl AgentExtension for OpenCodeExtension {
 
     async fn open_session(
         &self,
-        _ctx: &super::extension::SessionContext,
+        _ctx: &crate::extension::SessionContext,
     ) -> anyhow::Result<Option<Arc<dyn SessionExtension>>> {
         Ok(Some(Arc::new(OpenCodeSessionExtension)))
     }

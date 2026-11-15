@@ -6,7 +6,7 @@
 //! [`AgentManagement`] and register it on their [`AgentProvider`], so the node
 //! API and UI do not need agent-specific route names.
 //!
-//! [`AgentProvider`]: crate::agent::provider::AgentProvider
+//! [`AgentProvider`]: crate::provider::AgentProvider
 
 use async_trait::async_trait;
 use fxg_protocol::client_api::{AgentManagementSnapshot, AgentMcpAction, AgentMcpDefinition};

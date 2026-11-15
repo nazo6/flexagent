@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fxg_acp::{
+use fxg_agent::{
     AcpDriver, AgentDriver, AgentLaunchSpec, DriverKind, NativeForkUnavailable, StartSessionRequest,
 };
 

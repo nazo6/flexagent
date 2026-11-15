@@ -6,7 +6,7 @@
 //! Real OpenCode v2 integration test (ignored by default).
 //!
 //! Run with:
-//! `cargo test -p fxg-acp --test opencode_native_real -- --ignored`
+//! `cargo test -p fxg-agent --test opencode_native_real -- --ignored`
 //!
 //! It uses the running `opencode serve` service (or the
 //! `FXG_OPENCODE_URL` / `FXG_OPENCODE_PASSWORD` override) and creates a
@@ -15,9 +15,11 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use fxg_acp::agent::extension::AcpExtensionOptions;
-use fxg_acp::driver::{AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind, StartSessionRequest};
-use fxg_acp::opencode_native::OpenCodeNativeDriver;
+use fxg_agent::driver::{
+    AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind, StartSessionRequest,
+};
+use fxg_agent::extension::AcpExtensionOptions;
+use fxg_agent::opencode_native::OpenCodeNativeDriver;
 use fxg_protocol::common::{PromptInput, StreamDeltaPayload};
 use fxg_protocol::events::UnifiedEventPayload;
 use tokio::sync::mpsc;

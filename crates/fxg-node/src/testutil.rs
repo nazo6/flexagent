@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use fxg_acp::{
+use fxg_agent::{
     ActiveSessionHandle, AgentDriver, AgentLaunchSpec, AgentSessionInfo, AgentSessionList,
     DriverEvent, DriverKind, ResumeRequest, StartSessionRequest, StartedSession,
 };
@@ -319,7 +319,7 @@ impl AgentDriver for MockAgent {
             && !can_restore
         {
             return Err(
-                fxg_acp::NativeResumeUnavailable("mock resume unsupported".to_owned()).into(),
+                fxg_agent::NativeResumeUnavailable("mock resume unsupported".to_owned()).into(),
             );
         }
         let capturing_history = req
@@ -327,7 +327,7 @@ impl AgentDriver for MockAgent {
             .as_ref()
             .is_some_and(|resume| resume.capture_history);
         if capturing_history && self.inner.history_capture_fails.load(Ordering::SeqCst) {
-            return Err(fxg_acp::HistoryCaptureUnavailable(
+            return Err(fxg_agent::HistoryCaptureUnavailable(
                 "mock agent replayed no history".to_owned(),
             )
             .into());
@@ -426,12 +426,12 @@ impl AgentDriver for MockAgent {
 
 #[async_trait]
 impl ActiveSessionHandle for MockAgent {
-    fn session_capabilities(&self) -> fxg_acp::DriverSessionCapabilities {
+    fn session_capabilities(&self) -> fxg_agent::DriverSessionCapabilities {
         let mut native_features = Vec::new();
         if self.inner.steering.load(Ordering::SeqCst) {
             native_features.push(fxg_protocol::common::NativeSessionFeature::Steer);
         }
-        fxg_acp::DriverSessionCapabilities {
+        fxg_agent::DriverSessionCapabilities {
             assigns_message_ids: self.inner.assigns_message_ids.load(Ordering::SeqCst),
             native_features,
         }

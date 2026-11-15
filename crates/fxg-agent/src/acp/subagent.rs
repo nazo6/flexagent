@@ -18,7 +18,7 @@ use fxg_protocol::events::SubagentStatus;
 use tokio::sync::{mpsc, oneshot};
 
 use super::SessionContexts;
-use crate::agent::extension::{AcpChildUpdate, AcpNotificationParser};
+use crate::extension::{AcpChildUpdate, AcpNotificationParser};
 
 /// Work routed from a dynamic handler to the session turn loop.
 #[derive(Debug)]
