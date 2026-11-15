@@ -276,7 +276,7 @@ prune します。`sessions` は最大 1000 件で、超過時は
 
 #### エージェントネイティブ管理（ローカルノード専用）
 
-`AgentManagement` を実装するエージェントは、
+`AgentManagement` を実装するエージェント（現在は Tier 3 の `opencode`）は、
 セッションプロトコル外の設定情報を共通 API で公開する。ハブ経由の backend は
 明示エラーを返し、credential の値は決して返さない。
 
