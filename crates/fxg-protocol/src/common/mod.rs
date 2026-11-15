@@ -14,6 +14,7 @@ mod error;
 mod fixture;
 mod project;
 mod session;
+mod usage;
 
 pub use acp::*;
 pub use agent::*;
@@ -22,6 +23,7 @@ pub use diagnostics::*;
 pub use error::*;
 pub use project::*;
 pub use session::*;
+pub use usage::*;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;

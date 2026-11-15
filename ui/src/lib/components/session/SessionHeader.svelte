@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { untrack } from "svelte";
+  import { loadAgentCatalog } from "#lib/agents.ts";
+  import AgentUsage from "#lib/components/session/AgentUsage.svelte";
   import SessionInfo from "#lib/components/session/SessionInfo.svelte";
   import SessionActionsMenu from "#lib/components/session/SessionActionsMenu.svelte";
   import SessionStatusBadge from "#lib/components/SessionStatusBadge.svelte";
@@ -56,6 +59,45 @@
     sync.sessions.filter((s) => s.session_id !== session?.session_id && sessionNeedsAttention(s))
       .length,
   );
+
+  // The quota control is a single instance: in the top bar on desktop and in
+  // the compact context row on phones (where the top bar is already full).
+  let isDesktop = $state(typeof window !== "undefined" && window.innerWidth >= 768);
+  function updateDesktop(): void {
+    isDesktop = window.innerWidth >= 768;
+  }
+  $effect(() => {
+    window.addEventListener("resize", updateDesktop);
+    return () => window.removeEventListener("resize", updateDesktop);
+  });
+
+  // The usage control keeps the agent identity visible even before the agent
+  // reports limits, so the icon comes from the catalog, not the usage payload.
+  let agentIcon = $state<string | null>(null);
+  let iconRequest = 0;
+
+  async function loadAgentIcon(nodeId: string, agentId: string): Promise<void> {
+    const current = ++iconRequest;
+    try {
+      const catalog = await loadAgentCatalog(nodeId, () =>
+        sync.connection.client.nodeAgentCatalog(nodeId),
+      );
+      if (current !== iconRequest) return;
+      agentIcon = catalog.agents.find((agent) => agent.id === agentId)?.icon ?? null;
+    } catch {
+      if (current === iconRequest) agentIcon = null;
+    }
+  }
+
+  $effect(() => {
+    const nodeId = session?.node_id ?? "";
+    const agentId = session?.agent_id ?? "";
+    if (nodeId === "" || agentId === "") {
+      agentIcon = null;
+      return;
+    }
+    untrack(() => void loadAgentIcon(nodeId, agentId));
+  });
 </script>
 
 <header class="wco-titlebar bg-card/85 border-border shrink-0 border-b backdrop-blur">
@@ -109,7 +151,15 @@
       {/if}
     </div>
 
-    <div class="hidden min-w-0 md:flex">
+    <div class="hidden min-w-0 items-center gap-2 md:flex">
+      {#if isDesktop && session}
+        <AgentUsage
+          nodeId={session.node_id}
+          agentId={session.agent_id}
+          localPath={session.local_path}
+          icon={agentIcon}
+        />
+      {/if}
       <SessionInfo {session} {node} {status} {usage} {projectName} />
     </div>
 
@@ -176,7 +226,23 @@
   </div>
 
   <!-- Mobile: compact context row -->
-  <div class="flex px-3 pb-1.5 md:hidden">
-    <SessionInfo {session} {node} {status} {usage} {projectName} class="w-full justify-start" />
+  <div class="flex min-w-0 items-center gap-1 px-3 pb-1.5 md:hidden">
+    {#if !isDesktop && session}
+      <AgentUsage
+        nodeId={session.node_id}
+        agentId={session.agent_id}
+        localPath={session.local_path}
+        icon={agentIcon}
+        class="border-transparent"
+      />
+    {/if}
+    <SessionInfo
+      {session}
+      {node}
+      {status}
+      {usage}
+      {projectName}
+      class="min-w-0 flex-1 justify-start"
+    />
   </div>
 </header>

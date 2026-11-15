@@ -15,8 +15,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fxg_protocol::client_api::AgentCapabilitiesPreview;
 use fxg_protocol::common::{
-    ConfigOptionValue, ElicitationAction, ElicitationContent, InitialConfig, NativeSessionFeature,
-    PromptInput, StreamDeltaPayload,
+    AgentUsageLimits, ConfigOptionValue, ElicitationAction, ElicitationContent, InitialConfig,
+    NativeSessionFeature, PromptInput, StreamDeltaPayload,
 };
 use fxg_protocol::events::UnifiedEventPayload;
 use tokio::sync::mpsc;
@@ -318,6 +318,21 @@ pub trait AgentDriver: Send + Sync {
         _cwd: &Path,
         _initial_config: &[InitialConfig],
     ) -> anyhow::Result<Option<AgentCapabilitiesPreview>> {
+        Ok(None)
+    }
+
+    /// Reads the usage limits of the agent's subscription or account.
+    ///
+    /// This is an out-of-session, best-effort query: `Ok(None)` means the agent
+    /// (or its current authentication) does not expose limits, and callers
+    /// should hide the meter rather than treat it as an error. `force` bypasses
+    /// any driver-side cache for an explicit user refresh.
+    async fn usage_limits(
+        &self,
+        _launch: &AgentLaunchSpec,
+        _cwd: &Path,
+        _force: bool,
+    ) -> anyhow::Result<Option<AgentUsageLimits>> {
         Ok(None)
     }
 }

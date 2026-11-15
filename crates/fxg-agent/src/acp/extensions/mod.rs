@@ -8,14 +8,16 @@
 //! Design: `docs/04-agent-drivers-and-windows.md` §1.1.
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use fxg_protocol::common::RawJson;
+use async_trait::async_trait;
+use fxg_protocol::common::{AgentUsageLimits, RawJson};
 use fxg_protocol::events::SubagentStatus;
 
-use crate::driver::DriverEvent;
+use crate::driver::{AgentLaunchSpec, DriverEvent};
 
+pub mod antigravity;
 pub mod opencode;
 
 /// Display metadata that an extension may override.
@@ -174,6 +176,7 @@ pub trait AcpNotificationParser: Send + Sync + std::fmt::Debug {
 ///
 /// One extension instance is shared across sessions and agents of the same
 /// built-in extension ID.
+#[async_trait]
 pub trait AgentExtension: Send + Sync {
     /// Display overrides (name, icon, description).
     fn metadata(&self) -> AgentMetadata {
@@ -205,6 +208,19 @@ pub trait AgentExtension: Send + Sync {
     /// return it wrapped in [`EventDisposition::Emit`] when unchanged.
     fn transform_event(&self, event: DriverEvent) -> EventDisposition {
         EventDisposition::Emit(event)
+    }
+
+    /// Reads vendor usage limits outside a session (best-effort).
+    ///
+    /// Extensions that own a quota surface (for example a CLI `/usage`
+    /// command) override this. The default reports no limits.
+    async fn usage_limits(
+        &self,
+        _launch: &AgentLaunchSpec,
+        _cwd: &Path,
+        _force: bool,
+    ) -> anyhow::Result<Option<AgentUsageLimits>> {
+        Ok(None)
     }
 }
 

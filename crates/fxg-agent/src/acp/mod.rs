@@ -54,7 +54,7 @@ use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client};
 use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
 use fxg_protocol::common::{
-    AgentAuthMethodInfo, AgentAuthMethodKind, CommandInfo, ConfigOptionCategory,
+    AgentAuthMethodInfo, AgentAuthMethodKind, AgentUsageLimits, CommandInfo, ConfigOptionCategory,
     ConfigOptionChoice, ConfigOptionInfo, ConfigOptionValue, ElicitationContent,
     ElicitationMode as FxgElicitationMode, ElicitationPropertyKind, ElicitationSchema,
     ElicitationValue, FileDiff, ForkScope, ModeInfo, PermissionOption,
@@ -382,6 +382,18 @@ impl AgentDriver for AcpDriver {
         cwd: &Path,
     ) -> anyhow::Result<crate::driver::AgentSessionList> {
         list::list_sessions(launch, cwd).await
+    }
+
+    async fn usage_limits(
+        &self,
+        launch: &crate::driver::AgentLaunchSpec,
+        cwd: &Path,
+        force: bool,
+    ) -> anyhow::Result<Option<AgentUsageLimits>> {
+        match &self.extension {
+            Some(extension) => extension.usage_limits(launch, cwd, force).await,
+            None => Ok(None),
+        }
     }
 
     fn stderr_snapshot(&self) -> BTreeMap<String, Vec<String>> {

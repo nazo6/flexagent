@@ -14,9 +14,9 @@ use fxg_hub::api::{
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
     AgentDiagnostics, AgentManagementSnapshot, AgentMcpAction, AgentMcpDefinition, AgentOpResponse,
-    AgentsResponse, ConnectionRole, CreateSessionRequest, CreateSessionResponse,
-    CreateWorktreeRequest, DiagnosticsResponse, ExternalSessionListResponse, HubLinkState,
-    KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
+    AgentUsageResponse, AgentsResponse, ConnectionRole, CreateSessionRequest,
+    CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse, ExternalSessionListResponse,
+    HubLinkState, KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
     ProjectScanResponse, ProjectUnlinkRequest, ProjectUnlinkResponse, ProvisionersResponse,
     PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
     RespondElicitationRequest, RespondElicitationResponse, RespondPermissionRequest,
@@ -56,6 +56,14 @@ fn agent_management_unavailable(agent_id: &str) -> ApiError {
     ApiError::from_code(
         fxg_protocol::common::ErrorCode::InvalidState,
         format!("agent {agent_id} does not expose native management"),
+    )
+}
+
+/// Converts a usage-limit failure into an API error.
+fn agent_usage_error(err: anyhow::Error) -> ApiError {
+    ApiError::from_code(
+        fxg_protocol::common::ErrorCode::InvalidState,
+        format!("agent usage request failed: {err:#}"),
     )
 }
 
@@ -993,6 +1001,27 @@ impl ClientApiBackend for DaemonState {
             return Ok(AgentManagementSnapshot::unavailable(agent_id, agent_id));
         };
         management.snapshot().await.map_err(agent_management_error)
+    }
+
+    async fn agent_usage(
+        &self,
+        node_id: &str,
+        agent_id: &str,
+        local_path: Option<String>,
+        force: bool,
+    ) -> Result<AgentUsageResponse, ApiError> {
+        self.ensure_local_node(node_id)?;
+        let cwd = local_path
+            .map(PathBuf::from)
+            .filter(|path| path.is_dir())
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let usage = self
+            .session_manager()
+            .catalog()
+            .usage_limits(agent_id, &cwd, force)
+            .await
+            .map_err(agent_usage_error)?;
+        Ok(AgentUsageResponse { usage })
     }
 
     async fn agent_mcp_action(

@@ -5,6 +5,7 @@
 
 pub(super) mod admin;
 pub(super) mod agent_management;
+pub(super) mod agent_usage;
 pub(super) mod agents;
 pub(super) mod projects;
 pub(super) mod sessions;

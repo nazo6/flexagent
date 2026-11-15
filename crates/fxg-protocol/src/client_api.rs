@@ -1543,6 +1543,14 @@ impl AgentManagementSnapshot {
     }
 }
 
+/// `GET /api/v1/nodes/{node_id}/agents/{agent_id}/usage` response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct AgentUsageResponse {
+    /// Current limits, or `None` when the agent does not expose them.
+    pub usage: Option<crate::common::AgentUsageLimits>,
+}
+
 /// Write capabilities of an agent-native management integration.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[specta(collect)]

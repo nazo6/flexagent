@@ -7,16 +7,17 @@ use async_trait::async_trait;
 use fxg_db::Db;
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
-    AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest, CreateSessionResponse,
-    CreateWorktreeRequest, ExternalSessionListResponse, IssueNodeTokenRequest,
-    IssueNodeTokenResponse, KillSwitchResponse, NodeTokenSummary, NodeTokensResponse,
-    ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest, ProjectScanResponse,
-    ProjectUnlinkRequest, ProjectUnlinkResponse, ProvisionersResponse, PruneWorktreesRequest,
-    PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest, RespondElicitationRequest,
-    RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
-    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
-    SessionArchiveResponse, SessionImportRequest, SessionImportResponse, SessionRenameRequest,
-    SessionRenameResponse, SupportBundleConfig, WorktreeInfo, WorktreesResponse,
+    AgentOpResponse, AgentUsageResponse, AgentsResponse, ConnectionRole, CreateSessionRequest,
+    CreateSessionResponse, CreateWorktreeRequest, ExternalSessionListResponse,
+    IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse, NodeTokenSummary,
+    NodeTokensResponse, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
+    ProjectScanResponse, ProjectUnlinkRequest, ProjectUnlinkResponse, ProvisionersResponse,
+    PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
+    RespondElicitationRequest, RespondElicitationResponse, RespondPermissionRequest,
+    RespondPermissionResponse, ResumeSessionRequest, ResumeSessionResponse,
+    RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse, SessionImportRequest,
+    SessionImportResponse, SessionRenameRequest, SessionRenameResponse, SupportBundleConfig,
+    WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, ComponentHealth, ComponentName, DiffScope, ErrorCode,
@@ -345,6 +346,30 @@ impl ClientApiBackend for HubState {
                 .collect();
         }
         Ok(response)
+    }
+
+    async fn agent_usage(
+        &self,
+        node_id: &str,
+        agent_id: &str,
+        local_path: Option<String>,
+        force: bool,
+    ) -> Result<AgentUsageResponse, ApiError> {
+        let response = self
+            .execute_node_rpc(
+                &fxg_protocol::NodeId::from(node_id),
+                NodeRpcRequest::AgentUsage {
+                    agent_id: agent_id.to_owned(),
+                    local_path,
+                    force,
+                },
+                None,
+            )
+            .await?;
+        match response {
+            NodeRpcResponse::AgentUsage { usage } => Ok(AgentUsageResponse { usage }),
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
     }
 
     async fn manage_agent(

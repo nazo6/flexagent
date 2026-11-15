@@ -40,10 +40,10 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use fxg_protocol::client_api::AgentCapabilitiesPreview;
 use fxg_protocol::common::{
-    ClientSource, CommandInfo, ConfigOptionCategory, ConfigOptionChoice, ConfigOptionInfo,
-    ConfigOptionValue, ElicitationAction, ElicitationArrayItems, ElicitationContent,
-    ElicitationOption, ElicitationProperty, ElicitationPropertyKind, ElicitationSchema,
-    ElicitationSchemaType, ElicitationValue, ForkScope, InitialConfig, ModeInfo,
+    AgentUsageLimits, ClientSource, CommandInfo, ConfigOptionCategory, ConfigOptionChoice,
+    ConfigOptionInfo, ConfigOptionValue, ElicitationAction, ElicitationArrayItems,
+    ElicitationContent, ElicitationOption, ElicitationProperty, ElicitationPropertyKind,
+    ElicitationSchema, ElicitationSchemaType, ElicitationValue, ForkScope, InitialConfig, ModeInfo,
     NativeSessionFeature, PermissionOption, PermissionOptionKind, PlanEntry, PlanEntryStatus,
     PromptInput, RawJson, SessionStatus, StreamDeltaPayload, ToolCallKind, ToolCallStatus,
     TurnStopReason, UsageCost,

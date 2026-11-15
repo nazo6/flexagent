@@ -69,6 +69,16 @@ Tier 3 (`impl AgentDriver`) を持ち、`opencode` は Tier 3
 - 組み込みの `opencode` extension は `opencode-acp` の ACP 経路で使う。
   ACP では扱えない vendor 差分 (`opencode/session/child_update` の子セッション
   更新と、権限要求への子 ID 付与) を `transform_event` で担当する。
+- 利用上限 (`AgentExtension::usage_limits`) はセッション外の best-effort
+  読み取りで、上限を持たないエージェントは `None` を返す。組み込みの
+  `antigravity` extension は `agy -p /usage --output-format json` の
+  `command.data.groups` を読み、グループ（Gemini / Claude・GPT など）と
+  `5h` / `weekly` の残量を `AgentUsageLimits` に正規化する。プロファイル
+  (`--app-data-dir` / `--gemini-dir`) は ACP 起動と同じ値を通す。
+- OpenCode (Tier 3) の利用上限は `OpenCodeNativeDriver::usage_limits` が
+  ローカルサーバーの `/api/experimental/usage/limits` を優先し、データが
+  ない場合は保存済みの Go キーで `https://opencode.ai/zen/go/v1/usage` を
+  読む。キーはリクエスト内だけで使い、ログや DB には残さない。
 - `opencode` (Tier 3) は OpenCode v2 の HTTP + SSE を一次インターフェースとし、
   ACP では表現できない revert、メッセージ境界 fork、実行中入力 (steer)、
   compact、provider / MCP / skill / command の管理を提供する。ACP 経路との

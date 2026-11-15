@@ -4,9 +4,20 @@
 )]
 
 use super::*;
+use fxg_protocol::common::{
+    AgentUsageLimits, UsageGroup, UsageSource, UsageWindow, UsageWindowKind,
+};
+use fxg_protocol::util::now_ms;
 use time::OffsetDateTime;
 use time::format_description::FormatItem;
 use time::macros::format_description;
+
+use crate::usage::{rfc3339_to_epoch_ms, used_fraction_from_percent};
+
+/// Plan usage endpoint used by the OpenCode Go CLI / TUI.
+const GO_USAGE_URL: &str = "https://opencode.ai/zen/go/v1/usage";
+/// Integration ID of the OpenCode Go credential in the local server.
+const GO_INTEGRATION: &str = "opencode-go";
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum OpenCodeError {
@@ -756,6 +767,246 @@ impl OpenCodeClient {
         }
         messages.reverse();
         Ok(messages)
+    }
+
+    /// Reads the current plan / account usage limits.
+    ///
+    /// Prefers the local server's experimental endpoint, which needs no
+    /// credential handling. API-key-only installs return no data there, so
+    /// fall back to the OpenCode Go endpoint with the stored key.
+    pub async fn usage_limits(
+        &self,
+        cwd: Option<&Path>,
+        _force: bool,
+    ) -> anyhow::Result<Option<AgentUsageLimits>> {
+        if let Some(usage) = self.local_usage_limits(cwd).await {
+            return Ok(Some(usage));
+        }
+        let Some(key) = self.go_api_key().await? else {
+            return Ok(None);
+        };
+        self.go_usage_limits(&key).await
+    }
+
+    /// Reads the local OpenCode server's usage limits (Console / Go).
+    async fn local_usage_limits(&self, cwd: Option<&Path>) -> Option<AgentUsageLimits> {
+        let location = cwd
+            .map(|cwd| format!("?{}", location_query(cwd)))
+            .unwrap_or_default();
+        let path = format!("/api/experimental/usage/limits{location}");
+        let value = match self.get(&path).await {
+            Ok(value) => value,
+            Err(err) => {
+                debug!("optional OpenCode usage endpoint failed: {err}");
+                return None;
+            }
+        };
+        parse_local_usage(&value)
+    }
+
+    /// Returns the active OpenCode Go API key stored by the local server.
+    ///
+    /// The value is a secret: it is only used for the usage request and is
+    /// never logged or persisted by fxg.
+    async fn go_api_key(&self) -> anyhow::Result<Option<String>> {
+        let value = match self.get("/api/credential").await {
+            Ok(value) => value,
+            Err(err) => {
+                debug!("OpenCode credential listing failed: {err}");
+                return Ok(None);
+            }
+        };
+        let Some(entries) = value.get("data").and_then(Value::as_array) else {
+            return Ok(None);
+        };
+        for entry in entries {
+            if entry.get("integrationID").and_then(Value::as_str) != Some(GO_INTEGRATION) {
+                continue;
+            }
+            if entry.get("active").and_then(Value::as_bool) == Some(false) {
+                continue;
+            }
+            let value = entry.get("value");
+            if value
+                .and_then(|value| value.get("type"))
+                .and_then(Value::as_str)
+                != Some("key")
+            {
+                continue;
+            }
+            if let Some(key) = value
+                .and_then(|value| value.get("key"))
+                .and_then(Value::as_str)
+            {
+                return Ok(Some(key.to_owned()));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Reads the OpenCode Go plan allowance directly with `key`.
+    async fn go_usage_limits(&self, key: &str) -> anyhow::Result<Option<AgentUsageLimits>> {
+        let response = self
+            .http
+            .get(GO_USAGE_URL)
+            .bearer_auth(key)
+            .send()
+            .await
+            .context("OpenCode Go usage request failed")?;
+        let status = response.status();
+        if status == reqwest::StatusCode::FORBIDDEN {
+            // Signed out / no Go subscription: treat it as "not available".
+            return Ok(None);
+        }
+        let text = response
+            .text()
+            .await
+            .context("OpenCode Go usage response could not be read")?;
+        if !status.is_success() {
+            return Err(OpenCodeError::Status {
+                path: GO_USAGE_URL.to_owned(),
+                status,
+                body: text.chars().take(500).collect(),
+            }
+            .into());
+        }
+        let value: Value =
+            serde_json::from_str(&text).context("OpenCode Go usage returned invalid JSON")?;
+        Ok(parse_go_usage(&value))
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct LocalUsageEnvelope {
+    data: Option<LocalUsageData>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct LocalUsageData {
+    go: Option<LocalGoUsage>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalGoUsage {
+    rolling: LocalMeter,
+    weekly: LocalMeter,
+    monthly: LocalMeter,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalMeter {
+    percent: f64,
+    limited: bool,
+    resets_at: i64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct GoUsageEnvelope {
+    usage: GoUsage,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct GoUsage {
+    rolling: GoMeter,
+    weekly: GoMeter,
+    monthly: GoMeter,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GoMeter {
+    status: GoUsageStatus,
+    percent: f64,
+    resets_at: String,
+}
+
+/// Status of an OpenCode Go usage meter (vendor JSON value).
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum GoUsageStatus {
+    /// Under the limit.
+    Ok,
+    /// The window is currently blocking requests.
+    RateLimited,
+    /// A status added by a newer server.
+    #[serde(other)]
+    Other,
+}
+
+/// Parses the local server's `GET /api/experimental/usage/limits` payload.
+pub(super) fn parse_local_usage(value: &Value) -> Option<AgentUsageLimits> {
+    let envelope = match serde_json::from_value::<LocalUsageEnvelope>(value.clone()) {
+        Ok(envelope) => envelope,
+        Err(_) => return None,
+    };
+    let go = envelope.data?.go?;
+    Some(AgentUsageLimits {
+        source: go_source(),
+        groups: vec![go_group(vec![
+            local_window(UsageWindowKind::Rolling5h, go.rolling),
+            local_window(UsageWindowKind::Weekly, go.weekly),
+            local_window(UsageWindowKind::Monthly, go.monthly),
+        ])],
+        fetched_at: now_ms(),
+    })
+}
+
+/// Parses the OpenCode Go `GET /zen/go/v1/usage` payload.
+pub(super) fn parse_go_usage(value: &Value) -> Option<AgentUsageLimits> {
+    let envelope = match serde_json::from_value::<GoUsageEnvelope>(value.clone()) {
+        Ok(envelope) => envelope,
+        Err(_) => return None,
+    };
+    let usage = envelope.usage;
+    Some(AgentUsageLimits {
+        source: go_source(),
+        groups: vec![go_group(vec![
+            go_window(UsageWindowKind::Rolling5h, usage.rolling),
+            go_window(UsageWindowKind::Weekly, usage.weekly),
+            go_window(UsageWindowKind::Monthly, usage.monthly),
+        ])],
+        fetched_at: now_ms(),
+    })
+}
+
+fn go_source() -> UsageSource {
+    UsageSource {
+        id: GO_INTEGRATION.to_owned(),
+        label: "OpenCode Go".to_owned(),
+        plan: None,
+        account: None,
+        icon: Some("builtin:opencode".to_owned()),
+    }
+}
+
+fn go_group(windows: Vec<UsageWindow>) -> UsageGroup {
+    UsageGroup {
+        id: "go-allowance".to_owned(),
+        label: "Go allowance".to_owned(),
+        description: None,
+        windows,
+    }
+}
+
+fn local_window(kind: UsageWindowKind, meter: LocalMeter) -> UsageWindow {
+    UsageWindow {
+        kind,
+        label: None,
+        used_fraction: used_fraction_from_percent(meter.percent),
+        resets_at: (meter.resets_at > 0).then_some(meter.resets_at),
+        limited: meter.limited,
+    }
+}
+
+fn go_window(kind: UsageWindowKind, meter: GoMeter) -> UsageWindow {
+    UsageWindow {
+        kind,
+        label: None,
+        used_fraction: used_fraction_from_percent(meter.percent),
+        resets_at: rfc3339_to_epoch_ms(&meter.resets_at),
+        limited: matches!(meter.status, GoUsageStatus::RateLimited),
     }
 }
 

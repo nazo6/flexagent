@@ -7,10 +7,10 @@ use axum::http::{HeaderMap, header};
 use fxg_db::Db;
 use fxg_protocol::client_api::{
     AgentCapabilitiesPreview, AgentDiagnostics, AgentManagementSnapshot, AgentMcpAction,
-    AgentMcpDefinition, AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest,
-    CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse, HubLinkStatus,
-    IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse, NodeTokensResponse,
-    ProbeAgentRequest, ProjectLinkRequest, ProjectLinkResponse, ProjectPreview,
+    AgentMcpDefinition, AgentOpResponse, AgentUsageResponse, AgentsResponse, ConnectionRole,
+    CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse,
+    HubLinkStatus, IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse,
+    NodeTokensResponse, ProbeAgentRequest, ProjectLinkRequest, ProjectLinkResponse, ProjectPreview,
     ProjectPreviewRequest, ProjectScanRequest, ProjectScanResponse, ProjectUnlinkRequest,
     ProjectUnlinkResponse, ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest,
     PushSubscribeResponse, RemoveWorktreeRequest, RespondElicitationRequest,
@@ -683,6 +683,23 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
             "agent management is only available on the local node",
+        ))
+    }
+
+    /// `GET /api/v1/nodes/:node_id/agents/:agent_id/usage`.
+    ///
+    /// Reads the agent's subscription / account limits. Implementations that
+    /// cannot reach the node return an error; the UI hides the meter.
+    async fn agent_usage(
+        &self,
+        _node_id: &str,
+        _agent_id: &str,
+        _local_path: Option<String>,
+        _force: bool,
+    ) -> Result<AgentUsageResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "agent usage is only available on the local node",
         ))
     }
 

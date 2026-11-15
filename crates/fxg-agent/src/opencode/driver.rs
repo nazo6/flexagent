@@ -55,6 +55,18 @@ impl AgentDriver for OpenCodeNativeDriver {
         }))
     }
 
+    async fn usage_limits(
+        &self,
+        _launch: &AgentLaunchSpec,
+        cwd: &Path,
+        force: bool,
+    ) -> anyhow::Result<Option<AgentUsageLimits>> {
+        self.management_client()
+            .await?
+            .usage_limits(Some(cwd), force)
+            .await
+    }
+
     async fn start_session(
         &self,
         req: StartSessionRequest,

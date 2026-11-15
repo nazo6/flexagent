@@ -286,6 +286,29 @@ prune します。`sessions` は最大 1000 件で、超過時は
 | `PUT/DELETE /api/v1/nodes/:node_id/agents/:agent_id/management/mcp/:name`   | MCP 定義の追加・更新 / 削除。                           |
 | `POST /api/v1/nodes/:node_id/agents/:agent_id/management/mcp/:name/:action` | `connect` / `disconnect`。                              |
 
+#### エージェント利用上限
+
+`GET /api/v1/nodes/:node_id/agents/:agent_id/usage?local_path=<path>` は、
+エージェントの契約・アカウントに紐づく利用上限を返す。`force=true` は
+driver 側のキャッシュを無視する（UI の明示的な Refresh 用）。レスポンスは
+`AgentUsageResponse { usage: AgentUsageLimits | null }` で、未対応・未ログイン・
+取得失敗時は `usage: null` とする（UI はメーターを隠す）。
+
+`AgentUsageLimits` は **source → group → window** の3層で、何の上限かを
+常に識別できるようにする。
+
+- `source`: 契約・プラン（例: `OpenCode Go`, `Antigravity`）。`id` / `label` /
+  `plan` / `account` / `icon` を持ち、`plan` は取得できた場合だけ入れる。
+- `group`: 対象範囲（例: `Go allowance`, `Gemini Models`）。`label` は
+  エージェントが返す表示名をそのまま保持する。
+- `window`: 期間。`UsageWindowKind` は `rolling_5h` / `5h` / `weekly` /
+  `monthly` / `budget` と未知値を持つ。未知値は `label` で表示する。
+  `used_fraction` は使用率（0.0–1.0）に正規化し、残量は UI 側で
+  `1 - used_fraction` として導出する。
+
+ハブ経由の場合は `NodeRpcRequest::AgentUsage` でノードに中継する。ローカル
+ノードの API は同じ経路を in-process で実行する。
+
 #### プロビジョナー
 
 | Method / Path                          | 内容                                      |

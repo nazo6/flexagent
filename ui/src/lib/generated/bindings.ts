@@ -255,6 +255,22 @@ export type AgentSummary = {
 	installed_nodes: string[],
 };
 
+/**  Usage limits reported by an agent integration. */
+export type AgentUsageLimits = {
+	/**  Where the limits come from (contract, plan, account). */
+	source: UsageSource,
+	/**  Scopes covered by the limits (one entry per model group / allowance). */
+	groups: UsageGroup[],
+	/**  When the snapshot was fetched (Unix epoch ms). */
+	fetched_at: number,
+};
+
+/**  `GET /api/v1/nodes/{node_id}/agents/{agent_id}/usage` response. */
+export type AgentUsageResponse = {
+	/**  Current limits, or `None` when the agent does not expose them. */
+	usage: AgentUsageLimits | null,
+};
+
 /**  `GET /api/v1/agents` response (available agents plus import candidates). */
 export type AgentsResponse = {
 	/**  Built-in and custom agents available on this node */
@@ -2933,6 +2949,46 @@ export type UsageCost = {
 	amount: number,
 	/**  ISO 4217 currency code (e.g. `USD`) */
 	currency: string,
+};
+
+/**  One scope of a usage snapshot. */
+export type UsageGroup = {
+	/**  Stable group ID within the source. */
+	id: string,
+	/**  Display name from the agent (`Go allowance`, `Gemini Models`). */
+	label: string,
+	/**  Optional explanation (for example the models covered by the group). */
+	description: string | null,
+	/**  Time windows measured for this group. */
+	windows: UsageWindow[],
+};
+
+/**  A contract or account that owns a set of usage limits. */
+export type UsageSource = {
+	/**  Stable source ID (`opencode-go`, `opencode-console`, `antigravity`). */
+	id: string,
+	/**  Display name shown next to every meter (`OpenCode Go`, `Antigravity`). */
+	label: string,
+	/**  Plan name when the agent reports it (`Go Plus`, `Pro`). Never guessed. */
+	plan: string | null,
+	/**  Account / workspace identifier when the agent reports it. */
+	account: string | null,
+	/**  Icon URL or built-in asset key. */
+	icon: string | null,
+};
+
+/**  One time window of a usage group. */
+export type UsageWindow = {
+	/**  Period kind (`rolling_5h`, `weekly`, `monthly`, `budget`). */
+	kind: string,
+	/**  Agent-provided label when the kind is not enough (`Weekly Limit Remaining`). */
+	label: string | null,
+	/**  Fraction already used (`0.0` = nothing used, `1.0` = exhausted). */
+	used_fraction: number,
+	/**  When the window resets (Unix epoch ms), when the agent reports it. */
+	resets_at: number | null,
+	/**  Whether the window is currently blocking requests. */
+	limited: boolean,
 };
 
 /**  Non-fatal warning attached to a successful / partially successful response. */
