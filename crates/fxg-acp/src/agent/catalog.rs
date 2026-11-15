@@ -994,6 +994,21 @@ mod tests {
     }
 
     #[test]
+    fn native_management_is_registered_only_for_the_native_provider() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let catalog = catalog(dir.path());
+        let management = catalog
+            .management(builtin::OPENCODE)
+            .expect("native management");
+        assert_eq!(management.agent_id(), builtin::OPENCODE);
+        assert!(
+            catalog.management(builtin::OPENCODE_ACP).is_none(),
+            "the ACP fallback has no out-of-session management"
+        );
+        assert!(catalog.management("unknown").is_none());
+    }
+
+    #[test]
     fn builtin_providers_are_unique_and_use_acp_arguments() {
         let providers = builtin::providers();
         let mut ids = BTreeSet::new();

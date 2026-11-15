@@ -23,6 +23,7 @@ pub mod agent;
 pub mod auth;
 pub mod driver;
 pub mod management;
+pub mod opencode_native;
 pub mod registry;
 mod warm;
 
