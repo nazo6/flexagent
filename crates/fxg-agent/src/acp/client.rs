@@ -22,7 +22,7 @@ pub(super) struct AcpSessionHandle {
     /// Released on session end ([`ActiveSessionHandle::shutdown`]). If it were kept,
     /// the session manager's event pump could not detect that the driver ended and
     /// the session would remain in the active list.
-    events: Mutex<Option<mpsc::UnboundedSender<DriverEvent>>>,
+    events: Mutex<Option<EventSink>>,
     /// Latest modes / commands / config options (shared with the turn loop).
     capabilities: Arc<Mutex<SessionCapabilitiesState>>,
     /// PTY manager (for ACP terminal/*; shared per process)
@@ -296,7 +296,7 @@ pub(super) fn cancel_pending_permissions(permissions: &PermissionRegistry) {
 /// recorded by the manager, so this only records driver-side auto-resolution).
 pub(super) fn cancel_pending_elicitations(
     elicitations: &ElicitationRegistry,
-    events: Option<&mpsc::UnboundedSender<DriverEvent>>,
+    events: Option<&EventSink>,
 ) {
     let mut registry = elicitations.lock().expect("elicitation registry poisoned");
     for (elicitation_id, pending) in registry.drain() {

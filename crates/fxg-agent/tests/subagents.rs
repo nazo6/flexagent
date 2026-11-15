@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use fxg_agent::extended::ExtendedAcpDriver;
 use fxg_agent::extension::AgentExtension;
 use fxg_agent::opencode::OpenCodeExtension;
 use fxg_agent::{
@@ -162,10 +161,7 @@ async fn acp_child_updates_are_tagged_and_announced() {
 async fn opencode_child_notifications_are_parsed() {
     let extension = Arc::new(OpenCodeExtension);
     let options = extension.acp_options(&Default::default());
-    let driver = Arc::new(ExtendedAcpDriver::new(
-        Arc::new(AcpDriver::without_pool()),
-        extension,
-    ));
+    let driver = Arc::new(AcpDriver::without_pool_with_extension(extension));
     let events = run(
         "opencode-subagents",
         driver,

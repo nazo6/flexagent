@@ -3,9 +3,9 @@
 //! Design: `docs/04-agent-drivers-and-windows.md` §1.
 //!
 //! The `fxg-node` session manager depends only on this trait and hides the
-//! differences between ACP (`AcpDriver`), ACP + extension, and full custom drivers.
-//! Drivers emit normalized events ([`UnifiedEventPayload`] /
-//! [`StreamDeltaPayload`]) as [`DriverEvent`]; persistence and delivery are
+//! differences between ACP (`AcpDriver`, with or without an extension) and full
+//! custom drivers. Drivers emit normalized events ([`UnifiedEventPayload`] /
+//! [`StreamDeltaPayload`]) as `DriverEvent`; persistence and delivery are
 //! handled centrally by the session manager (event bus).
 
 use std::collections::BTreeMap;
@@ -26,7 +26,7 @@ use tokio::sync::mpsc;
 pub enum DriverKind {
     /// Standard ACP agent (`AcpDriver`)
     Acp,
-    /// ACP agent with fxg-side extensions (`ExtendedAcpDriver`)
+    /// ACP agent with an fxg-side extension (`AcpDriver` with an extension)
     AcpExtended,
     /// Fully custom driver (the agent ID is in [`AgentLaunchSpec::agent_id`])
     Custom,

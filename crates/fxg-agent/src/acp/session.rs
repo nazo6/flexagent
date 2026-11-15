@@ -35,7 +35,7 @@ pub(super) async fn build_session<'a>(
     cx: &ConnectionTo<Agent>,
     agent_capabilities: &AgentCapabilities,
     params: &SessionParams,
-    events: &'a mpsc::UnboundedSender<DriverEvent>,
+    events: &'a EventSink,
     contexts: &SessionContexts,
     ingress_tx: &mpsc::UnboundedSender<SessionIngress>,
     auth_methods: &[AgentAuthMethodInfo],
@@ -640,7 +640,7 @@ pub(super) async fn serve_session(
 
 /// Per-session state for the parent / child event streams.
 pub(super) struct SessionRuntime<'a> {
-    events: &'a mpsc::UnboundedSender<DriverEvent>,
+    events: &'a EventSink,
     capabilities: Arc<Mutex<SessionCapabilitiesState>>,
     ingress_tx: mpsc::UnboundedSender<SessionIngress>,
     accumulator: StreamingAccumulator,
@@ -651,7 +651,7 @@ pub(super) struct SessionRuntime<'a> {
 impl<'a> SessionRuntime<'a> {
     fn new(
         root_id: SessionId,
-        events: &'a mpsc::UnboundedSender<DriverEvent>,
+        events: &'a EventSink,
         capabilities: Arc<Mutex<SessionCapabilitiesState>>,
         contexts: SessionContexts,
         ingress_tx: mpsc::UnboundedSender<SessionIngress>,

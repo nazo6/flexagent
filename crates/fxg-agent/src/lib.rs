@@ -5,10 +5,9 @@
 //! - [`driver`]: [`AgentDriver`] / [`ActiveSessionHandle`] traits — the
 //!   abstraction for adding agents with custom protocols without changing
 //!   `fxg-node` itself
-//! - [`catalog`][]: agent definitions, built-in providers and the catalog used for
+//! - [`catalog`]: agent definitions, built-in providers and the catalog used for
 //!   launch resolution and driver selection
-//! - [`extension`][] / [`extended`][]: Tier 2 ACP extensions and the
-//!   `ExtendedAcpDriver` adapter
+//! - [`extension`]: Tier 2 ACP extensions applied by [`acp::AcpDriver`]
 //! - [`registry`]: fetching and caching the ACP Registry (`registry.json`),
 //!   plus custom agent management used by the Web UI
 //! - [`acp`][]: `AcpDriver` (standard ACP agent control via `agent-client-protocol`)
@@ -26,7 +25,6 @@ pub mod auth;
 pub mod builtin;
 pub mod catalog;
 pub mod driver;
-pub mod extended;
 pub mod extension;
 pub mod management;
 pub mod opencode;
@@ -44,11 +42,7 @@ pub use driver::{
     NativeResumeUnavailable, NativeRevertUnavailable, ResumeRequest, StartSessionRequest,
     StartedSession,
 };
-pub use extended::ExtendedAcpDriver;
-pub use extension::{
-    AgentExtension, AgentMetadata, CapabilitiesSnapshot, CapabilityOverlay, ConfigOptionPatch,
-    EventDisposition, Hook, SessionContext, SessionExtension,
-};
+pub use extension::{AgentExtension, AgentMetadata, EventDisposition};
 pub use provider::{
     AgentAuth, AgentBackend, AgentCommand, AgentDefinition, AgentProvider, LaunchPreset,
     StaticProvider,

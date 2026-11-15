@@ -18,7 +18,6 @@ use fxg_protocol::settings::{AgentSettings, CustomAgentConfig};
 use crate::acp::AcpDriver;
 use crate::builtin;
 use crate::driver::{AgentDriver, AgentLaunchSpec, DriverKind};
-use crate::extended::ExtendedAcpDriver;
 use crate::extension::AgentExtension;
 use crate::provider::{AgentAuth, AgentBackend, AgentDefinition, AgentProvider, LaunchPreset};
 use crate::registry::{AcpRegistry, AgentListEntry, LocalSource, RegistryIndex};
@@ -30,7 +29,8 @@ pub struct AgentCatalog {
     /// Built-in extensions keyed by their stable extension ID.
     extensions: BTreeMap<String, Arc<dyn AgentExtension>>,
     acp: Arc<AcpDriver>,
-    /// Tier 2 wrappers, cached so the driver identity stays stable per agent.
+    /// Tier 2 drivers (one per extension), cached so the driver identity stays
+    /// stable per agent.
     extended: Mutex<BTreeMap<String, Arc<dyn AgentDriver>>>,
     /// Preset executable lookup (injectable for tests).
     preset_lookup: fn(&LaunchPreset) -> Option<PathBuf>,
@@ -240,7 +240,7 @@ impl AgentCatalog {
     pub async fn launch_spec(
         &self,
         name: &str,
-        cwd: &Path,
+        _cwd: &Path,
         extra_args: &[String],
     ) -> anyhow::Result<AgentLaunchSpec> {
         let id = self.registry.resolve_alias(name);
@@ -256,7 +256,6 @@ impl AgentCatalog {
                 })?;
                 spec.driver_kind = DriverKind::AcpExtended;
                 spec.extension = Some(extension_id.to_owned());
-                extension.prepare_launch(cwd, &mut spec)?;
                 spec.acp = extension.acp_options(&capabilities);
                 if custom.name.is_none()
                     && let Some(name) = extension.metadata().name
@@ -296,7 +295,6 @@ impl AgentCatalog {
         } = &backend
         {
             spec.extension = Some((*extension_id).to_owned());
-            extension.prepare_launch(cwd, &mut spec)?;
             spec.acp = extension.acp_options(&capabilities);
             if let Some(name) = extension.metadata().name {
                 spec.display_name = name;
@@ -407,10 +405,8 @@ impl AgentCatalog {
             .extensions
             .get(extension_id)
             .ok_or_else(|| anyhow!("no extension is registered as {extension_id}"))?;
-        let driver: Arc<dyn AgentDriver> = Arc::new(ExtendedAcpDriver::new(
-            Arc::clone(&self.acp),
-            Arc::clone(extension),
-        ));
+        let driver: Arc<dyn AgentDriver> =
+            Arc::new(AcpDriver::with_extension(Arc::clone(extension)));
         cache.insert(extension_id.to_owned(), Arc::clone(&driver));
         Ok(driver)
     }
@@ -489,7 +485,6 @@ mod tests {
         }
     }
 
-    #[async_trait::async_trait]
     impl AgentExtension for DummyExtension {
         fn metadata(&self) -> AgentMetadata {
             AgentMetadata {
@@ -497,11 +492,6 @@ mod tests {
                 description: None,
                 icon: Some("builtin:extended".to_owned()),
             }
-        }
-
-        fn prepare_launch(&self, cwd: &Path, launch: &mut AgentLaunchSpec) -> anyhow::Result<()> {
-            launch.args.push(format!("--cwd={}", cwd.display()));
-            Ok(())
         }
     }
 
@@ -850,7 +840,7 @@ mod tests {
             .expect("extended spec");
         assert_eq!(spec.driver_kind, DriverKind::AcpExtended);
         assert_eq!(spec.display_name, "Extended (enriched)");
-        assert_eq!(spec.args, vec!["acp", "--cwd=."]);
+        assert_eq!(spec.args, vec!["acp"]);
 
         let driver = catalog.driver_for(&spec).expect("extended driver");
         assert_eq!(driver.driver_kind(), DriverKind::AcpExtended);

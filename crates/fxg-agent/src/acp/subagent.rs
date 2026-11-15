@@ -218,7 +218,7 @@ impl ChildSessions {
         &self,
         child: &str,
         cwd: PathBuf,
-        events: mpsc::UnboundedSender<super::DriverEvent>,
+        events: super::events::EventSink,
     ) {
         self.contexts
             .lock()

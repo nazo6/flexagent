@@ -14,7 +14,7 @@ impl ProcessHandle {
     pub(super) async fn new_session(
         &self,
         params: Box<SessionParams>,
-        events: mpsc::UnboundedSender<DriverEvent>,
+        events: EventSink,
         lease: Arc<ProcessLease>,
     ) -> anyhow::Result<(AcpSessionHandle, bool)> {
         let commands = mpsc::unbounded_channel();

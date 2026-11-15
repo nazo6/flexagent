@@ -160,7 +160,7 @@ impl TerminalRegistry {
 pub(super) async fn create_terminal(
     pty: Arc<fxg_pty::PtySessionManager>,
     terminals: Arc<TerminalRegistry>,
-    events: mpsc::UnboundedSender<DriverEvent>,
+    events: EventSink,
     subagent_id: Option<String>,
     request: CreateTerminalRequest,
     responder: agent_client_protocol::v1::Responder<CreateTerminalResponse>,
