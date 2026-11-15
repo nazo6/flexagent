@@ -3,7 +3,7 @@ name = "fxg-acp"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "FlexAgent agent drivers (ACP Registry / AcpDriver / OpenCode2Driver)"
+description = "FlexAgent agent drivers (ACP, extended ACP, and native OpenCode v2)"
 repository.workspace = true
 
 [lib]
@@ -20,6 +20,8 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
 diffy = { workspace = true }
+dirs = { workspace = true }
+eventsource-stream = { workspace = true }
 futures-util = { workspace = true }
 fxg-protocol = { workspace = true }
 fxg-pty = { workspace = true }
@@ -27,12 +29,18 @@ reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+time = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 which = { workspace = true }
 
 [dev-dependencies]
+axum.workspace = true
 tempfile = { workspace = true }
+tokio-stream = { version = "0.1.19", features = ["sync"] }
+
+[target."cfg(unix)".dependencies]
+libc = { workspace = true }
 
 [lints]
 workspace = true

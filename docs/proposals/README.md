@@ -32,3 +32,4 @@
 | [2026-11-13-data-directory-layout.md](./2026-11-13-data-directory-layout.md)                                             | データディレクトリ構成の刷新（OS 標準ルート + node/hub 分離） | `Implemented`           | `05` §2.1                                |
 | [2026-11-14-terminal-workspace-scope.md](./2026-11-14-terminal-workspace-scope.md)                                       | ターミナルの workspace スコープ化と寿命分離                   | `Partially Implemented` | `03` §3.3, `07` §4                       |
 | [2026-11-14-workspace-dock.md](./2026-11-14-workspace-dock.md)                                                           | 右ペインの Workspace Dock 化（タブ式ツールドック）            | `In Progress`           | `03`, `07`, `backlog.md`                 |
+| [2026-11-14-opencode-native-driver.md](./2026-11-14-opencode-native-driver.md)                                           | OpenCode v2 ネイティブドライバ (Tier 3)                       | `Implemented`           | `03`, `04`, `07`                         |
