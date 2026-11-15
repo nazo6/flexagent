@@ -17,10 +17,10 @@ use crate::api::{ApiError, ClientApiBackend, ClientApiState, ClientInfo};
 // Settings, secrets and project profiles
 // ----------------------------------------------------------------------
 
-pub(crate) async fn settings_server<B: ClientApiBackend>(
+pub(crate) async fn hub_settings<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
 ) -> Response {
-    match state.backend.settings_server().await {
+    match state.backend.hub_settings().await {
         Ok(snapshot) => Json(snapshot).into_response(),
         Err(err) => err.into_response(),
     }
@@ -255,23 +255,23 @@ pub(crate) async fn delete_node_secret<B: ClientApiBackend>(
     }
 }
 
-pub(crate) async fn server_secrets<B: ClientApiBackend>(
+pub(crate) async fn hub_secrets<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
 ) -> Response {
-    match state.backend.server_secrets().await {
+    match state.backend.hub_secrets().await {
         Ok(response) => Json(response).into_response(),
         Err(err) => err.into_response(),
     }
 }
 
-pub(crate) async fn upsert_server_secret<B: ClientApiBackend>(
+pub(crate) async fn upsert_hub_secret<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
     UrlPath(secret_id): UrlPath<String>,
     Json(request): Json<UpsertSecretRequest>,
 ) -> Response {
     match state
         .backend
-        .upsert_server_secret(&SecretId::new(secret_id), request)
+        .upsert_hub_secret(&SecretId::new(secret_id), request)
         .await
     {
         Ok(response) => Json(response).into_response(),
@@ -279,13 +279,13 @@ pub(crate) async fn upsert_server_secret<B: ClientApiBackend>(
     }
 }
 
-pub(crate) async fn delete_server_secret<B: ClientApiBackend>(
+pub(crate) async fn delete_hub_secret<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
     UrlPath(secret_id): UrlPath<String>,
 ) -> Response {
     match state
         .backend
-        .delete_server_secret(&SecretId::new(secret_id))
+        .delete_hub_secret(&SecretId::new(secret_id))
         .await
     {
         Ok(response) => Json(response).into_response(),

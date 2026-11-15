@@ -83,7 +83,7 @@ mod tests {
     use axum::http::{StatusCode, header};
     use axum::response::Response;
     use fxg_acp::AgentSessionInfo;
-    use fxg_protocol::client_api::HubWsMessage;
+    use fxg_protocol::client_api::ServerWsMessage;
     use fxg_protocol::common::ErrorCode;
     use fxg_protocol::paths::{Paths, Role};
     use http_body_util::BodyExt;
@@ -432,7 +432,7 @@ mod tests {
 
         let message = next_ws_message(&mut socket).await;
         match message {
-            HubWsMessage::EventBatch { events, cursor } => {
+            ServerWsMessage::EventBatch { events, cursor } => {
                 assert_eq!(events.len(), 1);
                 assert_eq!(events[0].session_id.as_str(), session_id);
                 assert_eq!(events[0].node_seq, 1);
@@ -455,7 +455,7 @@ mod tests {
             .await
             .expect("record");
         match next_ws_message(&mut socket).await {
-            HubWsMessage::EventBatch { events, .. } => {
+            ServerWsMessage::EventBatch { events, .. } => {
                 assert_eq!(events.len(), 1);
                 assert_eq!(events[0].node_seq, 2);
             }
@@ -472,7 +472,7 @@ mod tests {
             },
         );
         match next_ws_message(&mut socket).await {
-            HubWsMessage::LiveStreamDelta {
+            ServerWsMessage::LiveStreamDelta {
                 session_id: id,
                 delta,
             } => {
@@ -495,7 +495,7 @@ mod tests {
             .await
             .expect("send ping");
         match next_ws_message(&mut socket).await {
-            HubWsMessage::Pong => {}
+            ServerWsMessage::Pong => {}
             other => panic!("unexpected message: {other:?}"),
         }
 
@@ -555,7 +555,7 @@ mod tests {
             .expect("send subscribe");
 
         match next_ws_message(&mut socket).await {
-            HubWsMessage::EventBatch { events, cursor } => {
+            ServerWsMessage::EventBatch { events, cursor } => {
                 assert_eq!(events.len(), 1, "stale cursor must not skip events");
                 assert_eq!(events[0].session_id.as_str(), session_id);
                 assert_eq!(events[0].node_seq, 1);
@@ -598,7 +598,7 @@ mod tests {
             .await
             .expect("send prompt");
         match next_ws_message(&mut socket).await {
-            HubWsMessage::CommandResult {
+            ServerWsMessage::CommandResult {
                 command_id,
                 success,
                 error,
@@ -1033,8 +1033,8 @@ mod tests {
             .expect("stop");
     }
 
-    /// Receives the next `HubWsMessage` from the WS (with a timeout).
-    async fn next_ws_message<S>(socket: &mut S) -> HubWsMessage
+    /// Receives the next `ServerWsMessage` from the WS (with a timeout).
+    async fn next_ws_message<S>(socket: &mut S) -> ServerWsMessage
     where
         S: futures_util::Sink<tokio_tungstenite::tungstenite::Message>
             + futures_util::Stream<

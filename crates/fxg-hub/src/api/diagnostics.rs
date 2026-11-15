@@ -424,7 +424,7 @@ pub(crate) async fn build_diagnostics<B: ClientApiBackend>(
         node_id: backend
             .local_node_id()
             .map(|node_id| node_id.as_str().to_owned())
-            .unwrap_or_else(|| "central-server".to_owned()),
+            .unwrap_or_else(|| "hub".to_owned()),
         generated_at: now_ms(),
         agents,
         node_log,

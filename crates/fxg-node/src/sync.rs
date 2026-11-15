@@ -1,4 +1,4 @@
-//! Outbox sync worker (Node <-> Central Server).
+//! Outbox sync worker (Node <-> Hub).
 //!
 //! Design: `docs/01-architecture-and-sync.md` §2.2, `docs/03-protocol-and-api.md` §2.
 //!
@@ -25,6 +25,7 @@ use futures_util::{SinkExt, StreamExt};
 use fxg_db::SessionFilter;
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{HubLinkState, HubLinkStatus};
+use fxg_protocol::common::ErrorCode;
 use fxg_protocol::node_hub::{HubToNodeMsg, NodeToHubMsg, SessionSyncState};
 use tokio::sync::mpsc;
 use tokio::sync::watch;
@@ -204,12 +205,27 @@ async fn probe_connection(ws_url: &str, token: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("hub rejected node hello ({code:?}): {message}")]
+struct HelloRejectedError {
+    code: ErrorCode,
+    message: String,
+}
+
 /// Classifies a failed connection attempt for the UI.
 ///
 /// The hub rejects an unknown or revoked pairing token during the WebSocket
 /// handshake with HTTP 401 / 403, which is reported separately from a node that
 /// simply cannot reach the hub.
 pub fn classify_failure(err: &anyhow::Error) -> (HubLinkState, String) {
+    if let Some(rejected) = err.downcast_ref::<HelloRejectedError>() {
+        let state = if rejected.code == ErrorCode::Unauthorized {
+            HubLinkState::Unauthorized
+        } else {
+            HubLinkState::Failed
+        };
+        return (state, rejected.message.clone());
+    }
     if let Some(tokio_tungstenite::tungstenite::Error::Http(response)) =
         err.downcast_ref::<tokio_tungstenite::tungstenite::Error>()
     {
@@ -315,7 +331,8 @@ async fn connect_once(
             },
             incoming = receiver.next() => match incoming {
                 Some(Ok(WsMessage::Text(text))) => {
-                    handle_server_message(state, &text, &out_tx, &CommandContext::default()).await;
+                    handle_server_message(state, &text, &out_tx, &CommandContext::default())
+                        .await?;
                 }
                 Some(Ok(WsMessage::Ping(payload))) => {
                     sender.send(WsMessage::Pong(payload)).await?;
@@ -476,12 +493,12 @@ pub(crate) async fn handle_server_message(
     text: &str,
     out: &mpsc::Sender<NodeToHubMsg>,
     ctx: &CommandContext<'_>,
-) {
+) -> anyhow::Result<()> {
     let message: HubToNodeMsg = match serde_json::from_str(text) {
         Ok(message) => message,
         Err(err) => {
             tracing::warn!("invalid server message: {err}");
-            return;
+            return Ok(());
         }
     };
 
@@ -518,7 +535,7 @@ pub(crate) async fn handle_server_message(
                                 .await
                                 .is_err()
                             {
-                                return;
+                                return Ok(());
                             }
                         }
                     }
@@ -557,7 +574,7 @@ pub(crate) async fn handle_server_message(
             //  every path to also refresh `last_used_at`)
             if let Err(err) = state.resolve_and_register_project(&local_path).await {
                 send_command_result(out, command_id, Err(err)).await;
-                return;
+                return Ok(());
             }
 
             let result = state
@@ -791,6 +808,18 @@ pub(crate) async fn handle_server_message(
         HubToNodeMsg::DrainAndShutdown { reason } => {
             drain_and_shutdown(state, out, ctx, &reason).await;
         }
+        HubToNodeMsg::HelloRejected {
+            code,
+            message,
+            required_protocol_version,
+        } => {
+            tracing::error!(
+                ?code,
+                required_protocol_version,
+                "hub rejected node hello: {message}"
+            );
+            return Err(HelloRejectedError { code, message }.into());
+        }
         HubToNodeMsg::KillAllSessions { reason } => match state.kill_all_local(&reason).await {
             Ok((killed_sessions, killed_ptys)) => {
                 state
@@ -811,6 +840,7 @@ pub(crate) async fn handle_server_message(
             }
         },
     }
+    Ok(())
 }
 
 /// Handles a remote workspace-terminal open request (applies the
@@ -997,8 +1027,36 @@ async fn send_command_result(
         warnings: result.warnings,
         data_safety: result.data_safety,
     };
-    fxg_protocol::discard_with!(
-        out.send(message).await,
-        "send a message to a channel that may be closed"
-    );
+    fxg_protocol::discard_with!(out.send(message).await, "send a channel that may be closed");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_failure_maps_hello_rejected() {
+        let unauthorized: anyhow::Error = HelloRejectedError {
+            code: ErrorCode::Unauthorized,
+            message: "token owner mismatch".to_owned(),
+        }
+        .into();
+        assert_eq!(
+            classify_failure(&unauthorized),
+            (
+                HubLinkState::Unauthorized,
+                "token owner mismatch".to_owned()
+            )
+        );
+
+        let mismatch: anyhow::Error = HelloRejectedError {
+            code: ErrorCode::VersionMismatch,
+            message: "protocol mismatch".to_owned(),
+        }
+        .into();
+        assert_eq!(
+            classify_failure(&mismatch),
+            (HubLinkState::Failed, "protocol mismatch".to_owned())
+        );
+    }
 }

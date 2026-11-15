@@ -1,7 +1,7 @@
 //! `fxg hub start`: startup entry point for the hub.
 //!
 //! Router layout:
-//! - Client REST / Client WS / PTY WS (the shared router from `fxg-server::api`, using the
+//! - Client REST / Client WS / PTY WS (the shared router from `fxg-hub::api`, using the
 //!   same paths as the local node)
 //! - Node Hub (`/api/v1/node/ws`, authenticated with node pairing tokens)
 

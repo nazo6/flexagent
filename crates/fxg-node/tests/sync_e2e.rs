@@ -1713,3 +1713,78 @@ async fn hub_relays_workspace_terminal_and_replays_output() {
         .await
         .expect("server stop");
 }
+
+#[tokio::test]
+async fn node_hello_protocol_mismatch_receives_hello_rejected() {
+    use futures_util::{SinkExt, StreamExt};
+    use fxg_protocol::node_hub::{HubToNodeMsg, NodeToHubMsg, PROTOCOL_VERSION};
+    use tokio_tungstenite::tungstenite::Message as WsMessage;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let server_home = tmp.path().join("server");
+    let port = reserve_port();
+    let server = start_hub(&server_home, port).await;
+    let token = issue_node_token(&server_home, "node-mismatch").await;
+
+    let ws_url = format!(
+        "ws://127.0.0.1:{port}{}",
+        fxg_protocol::config::NODE_WS_PATH
+    );
+    let mut req = ws_url.into_client_request().expect("ws request");
+    req.headers_mut().insert(
+        "Authorization",
+        format!("Bearer {token}").parse().expect("header"),
+    );
+    let (mut socket, _) = tokio_tungstenite::connect_async(req)
+        .await
+        .expect("connect node ws");
+
+    let hello = NodeToHubMsg::NodeHello {
+        node_id: "node-mismatch".into(),
+        name: "Mismatch Node".to_owned(),
+        os: "linux".to_owned(),
+        arch: "x86_64".to_owned(),
+        version: "0.1.0".to_owned(),
+        protocol_version: PROTOCOL_VERSION + 1,
+        is_ephemeral: false,
+        installed_agents: Vec::new(),
+        projects: Vec::new(),
+        projects_complete: true,
+        state_revision: 0,
+        sessions: Vec::new(),
+        sessions_truncated: false,
+    };
+    socket
+        .send(WsMessage::Text(
+            serde_json::to_string(&hello).expect("json").into(),
+        ))
+        .await
+        .expect("send hello");
+
+    let reply = tokio::time::timeout(Duration::from_secs(5), socket.next())
+        .await
+        .expect("hello rejected timeout")
+        .expect("ws frame")
+        .expect("ws ok");
+    let WsMessage::Text(text) = reply else {
+        panic!("expected text frame, got {reply:?}");
+    };
+    let decoded: HubToNodeMsg = serde_json::from_str(text.as_str()).expect("decode HubToNodeMsg");
+    match decoded {
+        HubToNodeMsg::HelloRejected {
+            code,
+            required_protocol_version,
+            ..
+        } => {
+            assert_eq!(code, ErrorCode::VersionMismatch);
+            assert_eq!(required_protocol_version, Some(PROTOCOL_VERSION));
+        }
+        other => panic!("expected HelloRejected, got {other:?}"),
+    }
+
+    server.shutdown();
+    tokio::time::timeout(Duration::from_secs(10), server.wait())
+        .await
+        .expect("server stop");
+}

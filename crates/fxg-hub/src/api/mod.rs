@@ -36,7 +36,7 @@ use axum::http::{HeaderMap, header};
 use axum::middleware;
 use axum::routing::{delete, get, patch, post, put};
 use futures_util::SinkExt;
-use fxg_protocol::client_api::HubWsMessage;
+use fxg_protocol::client_api::ServerWsMessage;
 use fxg_protocol::events::SessionEventBatch;
 
 pub use backend::{ClientApiBackend, ClientCommand, ClientEvent, ClientInfo, SystemExtras};
@@ -71,10 +71,10 @@ use handlers::sessions::{
     resume_session, search, send_prompt, session_detail, session_diff, session_events,
 };
 use handlers::settings::{
-    browse_fs, clear_pairing, delete_node_secret, delete_server_secret, list_agents_node,
-    node_secrets, node_settings, server_secrets, settings_server, test_pairing,
-    update_agent_settings, update_hub_settings, update_node_settings, update_pairing,
-    upsert_node_secret, upsert_server_secret,
+    browse_fs, clear_pairing, delete_hub_secret, delete_node_secret, hub_secrets, hub_settings,
+    list_agents_node, node_secrets, node_settings, test_pairing, update_agent_settings,
+    update_hub_settings, update_node_settings, update_pairing, upsert_hub_secret,
+    upsert_node_secret,
 };
 use handlers::stream::{client_ws, pty_ws};
 use handlers::system::{
@@ -246,7 +246,7 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         )
         .route(
             "/api/v1/settings/hub",
-            get(settings_server::<B>).patch(update_hub_settings::<B>),
+            get(hub_settings::<B>).patch(update_hub_settings::<B>),
         )
         .route("/api/v1/nodes/{node_id}/settings", get(node_settings::<B>))
         .route(
@@ -265,10 +265,10 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
             "/api/v1/nodes/{node_id}/settings/pairing/test",
             post(test_pairing::<B>),
         )
-        .route("/api/v1/hub/secrets", get(server_secrets::<B>))
+        .route("/api/v1/hub/secrets", get(hub_secrets::<B>))
         .route(
             "/api/v1/hub/secrets/{secret_id}",
-            put(upsert_server_secret::<B>).delete(delete_server_secret::<B>),
+            put(upsert_hub_secret::<B>).delete(delete_hub_secret::<B>),
         )
         .route("/api/v1/nodes/{node_id}/secrets", get(node_secrets::<B>))
         .route(
@@ -394,7 +394,7 @@ pub(crate) async fn replay_events<B: ClientApiBackend>(
         *cursor = (*cursor).max(batch.cursor);
         send_ws_json(
             sender,
-            &HubWsMessage::EventBatch {
+            &ServerWsMessage::EventBatch {
                 events: batch.events,
                 cursor: batch.cursor,
             },

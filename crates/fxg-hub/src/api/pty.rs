@@ -112,7 +112,7 @@ pub struct PtyOpenParams {
     pub path: String,
     /// Session that opened the terminal (origin)
     pub session_id: Option<SessionId>,
-    /// Terminal tab identity inside the workspace (`None` = legacy single terminal)
+    /// Terminal tab identity inside the workspace (`None` = default workspace terminal)
     pub terminal_id: Option<String>,
     /// Number of columns
     pub cols: u16,

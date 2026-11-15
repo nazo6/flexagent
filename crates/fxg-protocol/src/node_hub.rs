@@ -18,7 +18,7 @@ use crate::client_api::{
     WorkspaceFileView, WorkspaceFsListResponse, WorkspaceGitStatusResponse, WorktreeInfo,
 };
 use crate::common::{
-    AgentAction, ClientSource, DataSafety, DiffScope, ElicitationContent, ErrorInfo,
+    AgentAction, ClientSource, DataSafety, DiffScope, ElicitationContent, ErrorCode, ErrorInfo,
     NodeProjectReport, PromptInput, ResolvedBy, SessionControlAction, WarningInfo,
     WorkspaceDiffResponse, WorktreeAction,
 };
@@ -29,12 +29,12 @@ use crate::settings::{
 };
 use crate::{CommandId, NodeId, ProjectId, SecretId, SessionId};
 
-/// Version of the node <-> server message set.
+/// Version of the node <-> hub message set.
 ///
 /// The node and the hub must come from the same `fxg` release. A node
-/// with an older protocol is rejected at `NodeHello`; backward compatibility
-/// shims are intentionally not provided.
-pub const PROTOCOL_VERSION: u32 = 4;
+/// with a mismatching protocol version is rejected at `NodeHello`; backward
+/// compatibility shims are intentionally not provided.
+pub const PROTOCOL_VERSION: u32 = 1;
 /// Synchronization state of a session held by the node (reported in `NodeHello`).
 ///
 /// The hub compares it with `last_node_seq` in its own DB and returns
@@ -453,8 +453,7 @@ pub enum NodeToHubMsg {
         arch: String,
         /// fxg binary version
         version: String,
-        /// Protocol version of the message set (missing on pre-version nodes = 0)
-        #[serde(default)]
+        /// Protocol version of the message set
         protocol_version: u32,
         /// Whether this is an ephemeral VM / container node
         is_ephemeral: bool,
@@ -695,7 +694,7 @@ pub enum HubToNodeMsg {
         path: String,
         /// Session that opened the terminal (origin)
         session_id: Option<SessionId>,
-        /// Terminal tab identity inside the workspace (`None` = legacy single terminal)
+        /// Terminal tab identity inside the workspace (`None` = default workspace terminal)
         #[serde(default, skip_serializing_if = "Option::is_none")]
         terminal_id: Option<String>,
         /// Number of columns
@@ -746,6 +745,17 @@ pub enum HubToNodeMsg {
     KillAllSessions {
         /// Reason for the action (for the audit log)
         reason: String,
+    },
+    /// Sent before closing the connection when `NodeHello` is rejected
+    /// (for example due to a protocol version mismatch).
+    HelloRejected {
+        /// Structured error code (`VERSION_MISMATCH` / `UNAUTHORIZED` etc.)
+        code: ErrorCode,
+        /// Human-readable English explanation
+        message: String,
+        /// Protocol version required by the hub (when `code == VERSION_MISMATCH`)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        required_protocol_version: Option<u32>,
     },
     /// Generic node operation (git, worktree, projects, agents, settings, secrets,
     /// and session lifecycle).
@@ -805,7 +815,7 @@ mod tests {
     }
 
     #[test]
-    fn node_hello_without_protocol_version_decodes_as_zero() {
+    fn node_hello_requires_protocol_version() {
         let msg = NodeToHubMsg::NodeHello {
             node_id: "home-win".into(),
             name: "Home Windows PC".into(),
@@ -823,18 +833,26 @@ mod tests {
         };
         let mut json = serde_json::to_value(&msg).unwrap();
         json.as_object_mut().unwrap().remove("protocol_version");
-        let decoded: NodeToHubMsg = serde_json::from_value(json).unwrap();
-        let NodeToHubMsg::NodeHello {
-            protocol_version, ..
-        } = decoded
-        else {
-            panic!("expected node hello");
-        };
-        assert_eq!(protocol_version, 0);
+        assert!(serde_json::from_value::<NodeToHubMsg>(json).is_err());
     }
 
     #[test]
-    fn server_to_node_control_session_shape() {
+    fn hello_rejected_shape() {
+        let msg = HubToNodeMsg::HelloRejected {
+            code: ErrorCode::VersionMismatch,
+            message: "protocol mismatch".into(),
+            required_protocol_version: Some(PROTOCOL_VERSION),
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["op"], "hello_rejected");
+        assert_eq!(json["code"], "VERSION_MISMATCH");
+        assert_eq!(json["required_protocol_version"], PROTOCOL_VERSION);
+        let decoded: HubToNodeMsg = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, msg);
+    }
+
+    #[test]
+    fn hub_to_node_control_session_shape() {
         let msg = HubToNodeMsg::ControlSession {
             command_id: "c1".into(),
             session_id: "s1".into(),

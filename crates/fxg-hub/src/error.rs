@@ -1,4 +1,4 @@
-//! Error types for `fxg-server`.
+//! Error types for `fxg-hub`.
 
 /// Hub startup and runtime errors.
 #[derive(Debug, thiserror::Error)]

@@ -6,7 +6,7 @@
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
-use fxg_protocol::client_api::{ClientWsMessage, HubLinkStatus, HubWsMessage};
+use fxg_protocol::client_api::{ClientWsMessage, HubLinkStatus, ServerWsMessage};
 use fxg_protocol::common::{ErrorCode, ErrorInfo, IncidentLevel, IncidentSource};
 use tokio::sync::{broadcast, watch};
 
@@ -86,7 +86,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                                 None,
                             )
                             .await;
-                            let error = HubWsMessage::Error { error };
+                            let error = ServerWsMessage::Error { error };
                             fxg_protocol::discard_with!(
                                 send_ws_json(&mut sender, &error).await,
                                 "notify the client that replay failed"
@@ -96,7 +96,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                         subscribed = true;
                     }
                     Ok(ClientWsMessage::Ping) => {
-                        if send_ws_json(&mut sender, &HubWsMessage::Pong)
+                        if send_ws_json(&mut sender, &ServerWsMessage::Pong)
                             .await
                             .is_err()
                         {
@@ -105,7 +105,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                     }
                     Ok(other) => {
                         let Some(command) = ClientCommand::from_message(&other) else {
-                            let response = HubWsMessage::Error {
+                            let response = ServerWsMessage::Error {
                                 error: ErrorInfo::new(
                                     ErrorCode::InvalidState,
                                     format!("unsupported client message: {other:?}"),
@@ -118,7 +118,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                         };
                         let result = backend.dispatch_command(command).await;
                         super::diagnostics::record_command_result(&backend, &result).await;
-                        let response = HubWsMessage::CommandResult {
+                        let response = ServerWsMessage::CommandResult {
                             command_id: result.command_id,
                             success: result.success,
                             error: result.error,
@@ -129,7 +129,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                         }
                     }
                     Err(err) => {
-                        let response = HubWsMessage::Error {
+                        let response = ServerWsMessage::Error {
                             error: ErrorInfo::new(
                                 ErrorCode::InvalidState,
                                 format!("invalid client message: {err}"),
@@ -160,7 +160,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                     cursor = event_cursor;
                     if send_ws_json(
                         &mut sender,
-                        &HubWsMessage::EventBatch {
+                        &ServerWsMessage::EventBatch {
                             events: vec![*event],
                             cursor: event_cursor,
                         },
@@ -174,7 +174,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                 Ok(ClientEvent::StreamDelta { session_id, delta }) => {
                     if send_ws_json(
                         &mut sender,
-                        &HubWsMessage::LiveStreamDelta { session_id, delta },
+                        &ServerWsMessage::LiveStreamDelta { session_id, delta },
                     )
                     .await
                     .is_err()
@@ -186,7 +186,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                     // Temporary VM bootstrap log (ephemeral; not persisted)
                     if send_ws_json(
                         &mut sender,
-                        &HubWsMessage::ProvisioningLog { session_id, line },
+                        &ServerWsMessage::ProvisioningLog { session_id, line },
                     )
                     .await
                     .is_err()
@@ -195,7 +195,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                     }
                 }
                 Ok(ClientEvent::ProjectsUpdated) => {
-                    if send_ws_json(&mut sender, &HubWsMessage::ProjectsUpdated)
+                    if send_ws_json(&mut sender, &ServerWsMessage::ProjectsUpdated)
                         .await
                         .is_err()
                     {
@@ -223,7 +223,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                             None,
                         )
                         .await;
-                        let error = HubWsMessage::Error { error };
+                        let error = ServerWsMessage::Error { error };
                         fxg_protocol::discard_with!(
                             send_ws_json(&mut sender, &error).await,
                             "notify the client that replay failed"
@@ -244,7 +244,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                         (0, None)
                     }
                 };
-                let message = HubWsMessage::SystemStatus {
+                let message = ServerWsMessage::SystemStatus {
                     hub_link: status,
                     unsynced_event_count,
                     last_synced_at,

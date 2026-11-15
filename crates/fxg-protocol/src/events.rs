@@ -337,7 +337,6 @@ pub enum UnifiedEventPayload {
         native_features: Vec<crate::common::NativeSessionFeature>,
     },
     /// A progress log line of ephemeral VM provisioning (`stderr`).
-    #[serde(alias = "bootstrap_log")]
     ProvisioningLog {
         /// A single log line
         line: String,
@@ -544,24 +543,6 @@ mod tests {
 
         let decoded: UnifiedEventPayload = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, payload);
-    }
-
-    #[test]
-    fn legacy_bootstrap_log_payload_decodes_as_provisioning_log() {
-        let legacy = serde_json::json!({
-            "type": "bootstrap_log",
-            "data": { "line": "installing toolchain" },
-        });
-        let decoded: UnifiedEventPayload = serde_json::from_value(legacy).unwrap();
-        assert_eq!(
-            decoded,
-            UnifiedEventPayload::ProvisioningLog {
-                line: "installing toolchain".to_owned(),
-            }
-        );
-        let json = serde_json::to_value(&decoded).unwrap();
-        assert_eq!(json["type"], "provisioning_log");
-        assert_eq!(decoded.event_type(), EventType::ProvisioningLog);
     }
 
     #[test]

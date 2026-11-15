@@ -117,13 +117,13 @@ pub struct AgentDiagnostics {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct DiagnosticsResponse {
-    /// Endpoint identifier (`local-node` / `central-server`)
+    /// Endpoint identifier (`<node_id>` / `hub`)
     pub node_id: String,
     /// Generation time (Unix epoch ms)
     pub generated_at: i64,
     /// Per-agent stderr tails
     pub agents: Vec<AgentDiagnostics>,
-    /// Daemon log path (local node only)
+    /// Node log path (local node only)
     pub node_log: Option<String>,
     /// Component health and delivery counters
     pub health: SystemStatus,
@@ -1057,7 +1057,7 @@ pub enum ClientWsMessage {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[specta(collect)]
-pub enum HubWsMessage {
+pub enum ServerWsMessage {
     /// A batch of incremental events (the replay right after connecting and the
     /// realtime delivery afterwards).
     EventBatch {
@@ -1078,7 +1078,6 @@ pub enum HubWsMessage {
     /// Provisioning happens before the ephemeral node's `node.db` exists, so it is
     /// streamed directly from the hub instead of being persisted in the
     /// event log.
-    #[serde(alias = "bootstrap_log")]
     ProvisioningLog {
         /// Target session ID
         session_id: SessionId,
@@ -1138,7 +1137,7 @@ pub enum PtyClientMessage {
         path: String,
         /// Session that opened the terminal (origin, not ownership)
         session_id: Option<SessionId>,
-        /// Terminal tab identity inside the workspace (`None` = legacy single terminal)
+        /// Terminal tab identity inside the workspace (`None` = default workspace terminal)
         #[serde(default, skip_serializing_if = "Option::is_none")]
         terminal_id: Option<String>,
         /// Number of columns
@@ -1251,9 +1250,9 @@ pub struct TerminalsQuery {
     pub node_id: NodeId,
 }
 
-/// Helper converting a `CommandResult` into `HubWsMessage::CommandResult`.
-pub fn command_result_ws(result: CommandResult) -> HubWsMessage {
-    HubWsMessage::CommandResult {
+/// Helper converting a `CommandResult` into `ServerWsMessage::CommandResult`.
+pub fn command_result_ws(result: CommandResult) -> ServerWsMessage {
+    ServerWsMessage::CommandResult {
         command_id: result.command_id,
         success: result.success,
         error: result.error,
@@ -1261,9 +1260,9 @@ pub fn command_result_ws(result: CommandResult) -> HubWsMessage {
     }
 }
 
-/// Helper converting a `SessionEventBatch` into `HubWsMessage::EventBatch`.
-pub fn event_batch_ws(batch: SessionEventBatch) -> HubWsMessage {
-    HubWsMessage::EventBatch {
+/// Helper converting a `SessionEventBatch` into `ServerWsMessage::EventBatch`.
+pub fn event_batch_ws(batch: SessionEventBatch) -> ServerWsMessage {
+    ServerWsMessage::EventBatch {
         events: batch.events,
         cursor: batch.cursor,
     }
@@ -1722,7 +1721,7 @@ mod tests {
 
     #[test]
     fn server_ws_error_shape() {
-        let msg = HubWsMessage::Error {
+        let msg = ServerWsMessage::Error {
             error: ErrorInfo::new(ErrorCode::NodeOffline, "node is offline"),
         };
         let json = serde_json::to_value(&msg).unwrap();
