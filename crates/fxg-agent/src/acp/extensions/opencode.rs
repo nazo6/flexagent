@@ -140,7 +140,7 @@ fn tag_permission_request(event: DriverEvent) -> EventDisposition {
         ..
     }) = &event
     else {
-        return EventDisposition::Emit(Box::new(event));
+        return EventDisposition::Emit(event);
     };
     let Some(child_id) = details
         .as_value()
@@ -149,7 +149,7 @@ fn tag_permission_request(event: DriverEvent) -> EventDisposition {
         .and_then(|child| child.get("id"))
         .and_then(|id| id.as_str())
     else {
-        return EventDisposition::Emit(Box::new(event));
+        return EventDisposition::Emit(event);
     };
     let child_id = child_id.to_owned();
     let DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
@@ -163,14 +163,12 @@ fn tag_permission_request(event: DriverEvent) -> EventDisposition {
     else {
         unreachable!("matched above");
     };
-    EventDisposition::Emit(Box::new(DriverEvent::Event(
-        UnifiedEventPayload::PermissionRequest {
-            request_id,
-            tool_name,
-            summary,
-            options,
-            details,
-            subagent_id: Some(child_id),
-        },
-    )))
+    EventDisposition::Emit(DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
+        request_id,
+        tool_name,
+        summary,
+        options,
+        details,
+        subagent_id: Some(child_id),
+    }))
 }

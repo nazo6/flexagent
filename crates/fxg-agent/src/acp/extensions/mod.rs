@@ -204,7 +204,7 @@ pub trait AgentExtension: Send + Sync {
     /// The event is passed by value so the common path does not clone it;
     /// return it wrapped in [`EventDisposition::Emit`] when unchanged.
     fn transform_event(&self, event: DriverEvent) -> EventDisposition {
-        EventDisposition::Emit(Box::new(event))
+        EventDisposition::Emit(event)
     }
 }
 
@@ -219,7 +219,7 @@ pub trait AgentExtension: Send + Sync {
 )]
 pub enum EventDisposition {
     /// Forward the event (unchanged, or rewritten).
-    Emit(Box<DriverEvent>),
+    Emit(DriverEvent),
     /// Replace the event with multiple events.
     EmitMany(Vec<DriverEvent>),
     /// Drop the event.

@@ -36,7 +36,7 @@ impl EventSink {
         match &self.extension {
             None => self.forward(event),
             Some(extension) => match extension.transform_event(event) {
-                EventDisposition::Emit(event) => self.forward(*event),
+                EventDisposition::Emit(event) => self.forward(event),
                 EventDisposition::EmitMany(events) => {
                     for event in events {
                         self.forward(event)?;
