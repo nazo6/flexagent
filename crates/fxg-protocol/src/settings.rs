@@ -564,67 +564,85 @@ mod tests {
     }
 
     #[test]
-    fn sourced_string_attributes_env_before_file() {
-        let env = env_from(&[(env_keys::LOG_LEVEL, "debug")]);
-        let value = sourced_string(
-            &env,
-            "debug".to_owned(),
-            env_keys::LOG_LEVEL,
-            Some("debug".to_owned()),
-            "log.level",
-            Some("info"),
-            Some("--log-level"),
-        );
-        assert_eq!(value.source, ConfigSource::Env);
-        assert_eq!(value.source_detail.as_deref(), Some(env_keys::LOG_LEVEL));
+    fn sourced_string_attributes_layers() {
+        let cases = [
+            (
+                Some("debug"),
+                "debug",
+                Some("debug"),
+                ConfigSource::Env,
+                Some(env_keys::LOG_LEVEL),
+            ),
+            (
+                Some("debug"),
+                "warn",
+                Some("warn"),
+                ConfigSource::ConfigFile,
+                Some("log.level"),
+            ),
+            (None, "info", None, ConfigSource::Default, None),
+            (None, "trace", None, ConfigSource::Cli, Some("--log-level")),
+        ];
+
+        for (env_val, effective, file_val, expected_source, expected_detail) in cases {
+            let pairs: Vec<(&str, &str)> = env_val
+                .into_iter()
+                .map(|value| (env_keys::LOG_LEVEL, value))
+                .collect();
+            let env = env_from(&pairs);
+            let value = sourced_string(
+                &env,
+                effective.to_owned(),
+                env_keys::LOG_LEVEL,
+                file_val.map(str::to_owned),
+                "log.level",
+                Some("info"),
+                Some("--log-level"),
+            );
+            assert_eq!(value.source, expected_source);
+            assert_eq!(value.source_detail.as_deref(), expected_detail);
+        }
     }
 
     #[test]
-    fn sourced_string_attributes_config_file() {
-        let env = env_from(&[(env_keys::LOG_LEVEL, "debug")]);
-        let value = sourced_string(
-            &env,
-            "warn".to_owned(),
-            env_keys::LOG_LEVEL,
-            Some("warn".to_owned()),
-            "log.level",
-            Some("info"),
-            Some("--log-level"),
-        );
-        assert_eq!(value.source, ConfigSource::ConfigFile);
-        assert_eq!(value.source_detail.as_deref(), Some("log.level"));
-    }
+    fn sourced_bool_attributes_layers() {
+        let cases = [
+            (
+                Some("true"),
+                true,
+                true,
+                ConfigSource::Env,
+                Some(env_keys::LOG_NO_COLOR),
+            ),
+            (
+                None,
+                true,
+                true,
+                ConfigSource::ConfigFile,
+                Some("log.no_color"),
+            ),
+            (None, false, false, ConfigSource::Default, None),
+            (None, true, false, ConfigSource::Cli, Some("--no-color")),
+        ];
 
-    #[test]
-    fn sourced_string_attributes_default_when_no_layer_is_set() {
-        let env = env_from(&[]);
-        let value = sourced_string(
-            &env,
-            "info".to_owned(),
-            env_keys::LOG_LEVEL,
-            None,
-            "log.level",
-            Some("info"),
-            Some("--log-level"),
-        );
-        assert_eq!(value.source, ConfigSource::Default);
-        assert_eq!(value.source_detail, None);
-    }
-
-    #[test]
-    fn sourced_string_falls_back_to_cli() {
-        let env = env_from(&[]);
-        let value = sourced_string(
-            &env,
-            "trace".to_owned(),
-            env_keys::LOG_LEVEL,
-            None,
-            "log.level",
-            Some("info"),
-            Some("--log-level"),
-        );
-        assert_eq!(value.source, ConfigSource::Cli);
-        assert_eq!(value.source_detail.as_deref(), Some("--log-level"));
+        for (env_val, effective, file_val, expected_source, expected_detail) in cases {
+            let pairs: Vec<(&str, &str)> = env_val
+                .into_iter()
+                .map(|value| (env_keys::LOG_NO_COLOR, value))
+                .collect();
+            let env = env_from(&pairs);
+            let value = sourced_bool(
+                &env,
+                effective,
+                env_keys::LOG_NO_COLOR,
+                file_val,
+                "log.no_color",
+                false,
+                Some("--no-color"),
+            );
+            assert_eq!(value.source, expected_source);
+            assert_eq!(value.source_detail.as_deref(), expected_detail);
+        }
     }
 
     #[test]

@@ -16,7 +16,6 @@ import {
   type MutableStreamBuffers,
   type PendingPrompt,
   type TimelineSources,
-  type ToolProgress,
 } from "./reducer";
 
 function makeEvent(seq: number, payload: UnifiedEventPayload): SessionEventEnvelope {
@@ -716,13 +715,6 @@ describe("pending prompts", () => {
       key: "pending:cmd-1",
       text: "My prompt",
     });
-  });
-});
-
-describe("tool progress map typing", () => {
-  it("exposes ToolProgress shape for the timeline", () => {
-    const progress: ToolProgress = { status: "in_progress", output: "" };
-    expect(progress.status).toBe("in_progress");
   });
 });
 

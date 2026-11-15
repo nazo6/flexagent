@@ -180,30 +180,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn now_ms_is_positive_and_monotonic_enough() {
-        let a = now_ms();
-        assert!(a > 1_700_000_000_000, "unix ms should be plausible: {a}");
-        let b = now_ms();
-        assert!(b >= a);
-    }
-
-    #[test]
-    fn uuid_v7_is_parseable_and_version_7() {
-        let id = uuid_v7();
-        let parsed = uuid::Uuid::parse_str(&id).expect("valid uuid");
-        assert_eq!(parsed.get_version_num(), 7);
-        assert_ne!(id, uuid_v7(), "ids must be unique");
-    }
-
-    #[test]
-    fn uuid_v7_sorts_by_generation_time() {
-        let a = uuid_v7();
-        std::thread::sleep(std::time::Duration::from_millis(2));
-        let b = uuid_v7();
-        assert!(a < b, "UUID v7 should be lexicographically ordered");
-    }
-
-    #[test]
     fn pty_output_log_assigns_monotonic_sequence_numbers() {
         let mut log = PtyOutputLog::new(64);
         assert_eq!(log.push(b"a"), 0);

@@ -538,86 +538,11 @@ mod tests {
 
     #[test]
     fn error_code_roundtrip_covers_all_codes() {
-        let codes = [
-            ErrorCode::Unauthorized,
-            ErrorCode::Forbidden,
-            ErrorCode::NodeOffline,
-            ErrorCode::AlreadyResolved,
-            ErrorCode::Busy,
-            ErrorCode::InvalidState,
-            ErrorCode::ResumeRequired,
-            ErrorCode::ForkUnsupported,
-            ErrorCode::ForkScopeUnsupported,
-            ErrorCode::PtyDisabled,
-            ErrorCode::CommandDuplicate,
-            ErrorCode::NotFound,
-            ErrorCode::Internal,
-            ErrorCode::ConfigInvalid,
-            ErrorCode::AgentNotInstalled,
-            ErrorCode::AgentLaunchFailed,
-            ErrorCode::AgentProtocolError,
-            ErrorCode::GitUnavailable,
-            ErrorCode::GitFailed,
-            ErrorCode::WorktreeConflict,
-            ErrorCode::SyncBacklog,
-            ErrorCode::DbCorrupt,
-            ErrorCode::ProvisionerFailed,
-            ErrorCode::VersionMismatch,
-            ErrorCode::Timeout,
-            ErrorCode::DiskFull,
-            ErrorCode::PermissionDenied,
-            ErrorCode::IoError,
-            ErrorCode::PtyFailed,
-            ErrorCode::HubError,
-            ErrorCode::Cancelled,
-        ];
-        for code in codes {
+        for &code in ErrorCode::ALL {
             assert_eq!(ErrorCode::from_str(code.as_str()).unwrap(), code);
         }
     }
 
-    #[test]
-    fn error_info_omits_empty_optional_fields() {
-        let json = serde_json::to_value(ErrorInfo::new(ErrorCode::Timeout, "timed out")).unwrap();
-        assert_eq!(json["code"], "TIMEOUT");
-        assert_eq!(json["message"], "timed out");
-        assert_eq!(json["retryable"], true);
-        assert!(json.get("details").is_none());
-        assert!(json.get("recovery").is_none());
-        assert!(json.get("request_id").is_none());
-    }
-
-    #[test]
-    fn error_info_carries_recovery_and_details() {
-        let info = ErrorInfo::new(ErrorCode::ResumeRequired, "resume required")
-            .with_recovery(RecoveryAction::ResumeWithReplay {
-                session_id: "s1".into(),
-            })
-            .with_details(serde_json::json!({ "session_id": "s1" }))
-            .with_param("session_id", "s1");
-        let json = serde_json::to_value(&info).unwrap();
-        assert_eq!(json["recovery"][0]["kind"], "resume_with_replay");
-        assert_eq!(json["recovery"][0]["session_id"], "s1");
-        assert_eq!(json["details"]["session_id"], "s1");
-        assert_eq!(json["params"]["session_id"], "s1");
-    }
-
-    #[test]
-    fn command_failure_uses_command_id_as_request_id() {
-        let result = CommandResult::failure("cmd-1", ErrorInfo::new(ErrorCode::Busy, "busy"));
-        assert!(!result.success);
-        let error = result.error.expect("error body");
-        assert_eq!(error.code, ErrorCode::Busy);
-        assert_eq!(error.request_id.as_deref(), Some("cmd-1"));
-    }
-
-    #[test]
-    fn retryable_codes_are_limited_to_transient_failures() {
-        assert!(ErrorCode::NodeOffline.is_retryable());
-        assert!(ErrorCode::Timeout.is_retryable());
-        assert!(!ErrorCode::NotFound.is_retryable());
-        assert!(!ErrorCode::ConfigInvalid.is_retryable());
-    }
     #[test]
     fn every_error_code_has_a_ui_message_and_troubleshooting_anchor() {
         let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

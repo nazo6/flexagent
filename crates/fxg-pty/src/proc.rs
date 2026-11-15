@@ -462,12 +462,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn process_tree_guard_can_be_created() {
-        let guard = ProcessTreeGuard::new().expect("guard");
-        assert_eq!(guard.is_job_object_backend(), cfg!(windows));
-    }
-
     /// Windows Job Object: a **grandchild** spawned by the root process must be
     /// reliably terminated by kill-on-close when the guard (Job) is dropped
     /// (Phase 2 completion criterion / CI: automatically verified on

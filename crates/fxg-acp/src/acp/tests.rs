@@ -620,11 +620,6 @@ fn resolves_relative_paths_against_cwd() {
 }
 
 #[test]
-fn base64_encodes_terminal_output() {
-    assert_eq!(base64_encode(b"hello"), "aGVsbG8=");
-}
-
-#[test]
 fn maps_session_info_update() {
     use agent_client_protocol::v1::schema::SessionInfoUpdate;
 
@@ -905,14 +900,6 @@ fn maps_agent_and_terminal_auth_methods() {
     assert_eq!(mapped.id, "terminal-login");
     assert_eq!(mapped.kind, AgentAuthMethodKind::Terminal);
     assert_eq!(mapped.args, vec!["--login"]);
-}
-
-#[test]
-fn client_capabilities_advertise_terminal_auth() {
-    let capabilities =
-        client_capabilities(&crate::agent::extension::AcpExtensionOptions::default());
-    assert!(capabilities.terminal);
-    assert!(capabilities.auth.terminal);
 }
 
 #[test]

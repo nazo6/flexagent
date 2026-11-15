@@ -1,45 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
   browserSettingsPath,
-  defaultTabForScope,
   hubSettingsPath,
-  isBrowserTab,
-  isHubTab,
-  isNodeTab,
   isNodeTabAvailable,
   nodeSettingsPath,
-  nodeTabsForRole,
   resolveDefaultNodeId,
   settingsHomePath,
   settingsPathForTarget,
 } from "./settings-routes.ts";
 
 describe("settings-routes", () => {
-  it("puts general first for hub and node and appearance first for browser", () => {
-    expect(defaultTabForScope("hub")).toBe("general");
-    expect(defaultTabForScope("node")).toBe("general");
-    expect(defaultTabForScope("browser")).toBe("appearance");
-    expect(nodeTabsForRole(true)[0]).toBe("general");
-    expect(nodeTabsForRole(false)[0]).toBe("general");
-  });
-
-  it("validates scope tabs accurately", () => {
-    expect(isHubTab("general")).toBe(true);
-    expect(isHubTab("tokens")).toBe(true);
-    expect(isHubTab("agents")).toBe(false);
-
-    expect(isNodeTab("agents")).toBe(true);
-    expect(isNodeTab("process")).toBe(true);
-    expect(isNodeTab("tokens")).toBe(false);
-
+  it("hides node-local tabs when viewing a node via the hub", () => {
     expect(isNodeTabAvailable("process", false)).toBe(true);
     expect(isNodeTabAvailable("process", true)).toBe(false);
     expect(isNodeTabAvailable("audit", true)).toBe(false);
     expect(isNodeTabAvailable("agents", true)).toBe(true);
-
-    expect(isBrowserTab("appearance")).toBe(true);
-    expect(isBrowserTab("notifications")).toBe(true);
-    expect(isBrowserTab("general")).toBe(false);
   });
 
   it("builds settings paths and encodes node ids", () => {

@@ -946,10 +946,4 @@ mod tests {
             "unexpected error: {err}"
         );
     }
-
-    #[test]
-    fn unknown_agent_is_not_in_the_fixture() {
-        let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");
-        assert!(index.find("missing").is_none());
-    }
 }

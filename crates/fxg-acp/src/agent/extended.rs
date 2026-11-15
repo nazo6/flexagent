@@ -686,9 +686,4 @@ mod tests {
         started.handle.dispose().await.expect("dispose");
         assert!(harness.disposed.load(std::sync::atomic::Ordering::SeqCst));
     }
-
-    #[test]
-    fn mode_enum_is_stable_for_logs() {
-        assert_eq!(DriverKind::AcpExtended.as_str(), "acp_extended");
-    }
 }

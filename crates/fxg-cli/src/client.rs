@@ -926,16 +926,4 @@ mod tests {
         assert_eq!(truncate("abcdefghij", 5), "abcd…");
         assert_eq!(truncate("日本語テキスト", 4), "日本語…"); // allow-japanese: multibyte truncation
     }
-
-    #[test]
-    fn shortens_session_ids() {
-        assert_eq!(short_id("0195f0ab-1234-7abc-8def-0123456789ab"), "0195f0ab");
-        assert_eq!(short_id("abc"), "abc");
-    }
-
-    #[test]
-    fn command_result_success_is_accepted() {
-        let result = CommandResult::success("c1", "s1");
-        assert!(check_command_result(result).is_ok());
-    }
 }

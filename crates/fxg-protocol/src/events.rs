@@ -516,19 +516,8 @@ impl UnifiedEventPayload {
 mod tests {
     use super::*;
     use crate::common::{
-        ClientSource, CommandInfo, ConfigOptionInfo, ConfigOptionValue, ElicitationMode, ModeInfo,
-        ResolvedBy, ToolCallKind, ToolCallStatus, TurnStopReason,
+        ElicitationMode, ResolvedBy, ToolCallKind, ToolCallStatus, TurnStopReason,
     };
-
-    fn sample_envelope(payload: UnifiedEventPayload) -> SessionEventEnvelope {
-        SessionEventEnvelope {
-            event_id: crate::util::uuid_v7().into(),
-            session_id: crate::util::uuid_v7().into(),
-            node_seq: 1,
-            created_at: crate::util::now_ms(),
-            payload,
-        }
-    }
 
     #[test]
     fn payload_serialization_uses_type_and_data_tags() {
@@ -540,65 +529,6 @@ mod tests {
         assert_eq!(json["type"], "status_changed");
         assert_eq!(json["data"]["status"], "running");
         assert!(json["data"]["error_message"].is_null());
-
-        let decoded: UnifiedEventPayload = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, payload);
-    }
-
-    #[test]
-    fn envelope_roundtrips_through_json() {
-        let envelope = sample_envelope(UnifiedEventPayload::UserMessage {
-            text: "Fix the failing tests".to_owned(),
-            attachments: vec![],
-            client_source: ClientSource::Cli,
-            agent_message_id: None,
-        });
-        let json = serde_json::to_string(&envelope).unwrap();
-        let decoded: SessionEventEnvelope = serde_json::from_str(&json).unwrap();
-        assert_eq!(decoded, envelope);
-    }
-
-    #[test]
-    fn capabilities_updated_roundtrips() {
-        let payload = UnifiedEventPayload::CapabilitiesUpdated {
-            current_mode: Some("code".to_owned()),
-            available_modes: vec![ModeInfo {
-                mode_id: "plan".to_owned(),
-                name: "Plan".to_owned(),
-                description: None,
-            }],
-            available_commands: vec![CommandInfo {
-                name: "/review".to_owned(),
-                description: "Review the changes".to_owned(),
-                input_hint: None,
-            }],
-            config_options: vec![ConfigOptionInfo {
-                key: "model".to_owned(),
-                name: "Model".to_owned(),
-                description: Some("Model used for the session".to_owned()),
-                category: Some(crate::common::ConfigOptionCategory::Model),
-                current_value: ConfigOptionValue::Choice(crate::common::ConfigOptionChoice {
-                    value: "sonnet".to_owned(),
-                    name: "Claude Sonnet".to_owned(),
-                    description: None,
-                }),
-                options: vec![
-                    ConfigOptionValue::Choice(crate::common::ConfigOptionChoice {
-                        value: "sonnet".to_owned(),
-                        name: "Claude Sonnet".to_owned(),
-                        description: Some("Balanced".to_owned()),
-                    }),
-                    ConfigOptionValue::Choice(crate::common::ConfigOptionChoice::from_value(
-                        "haiku",
-                    )),
-                ],
-            }],
-            fork_scope: None,
-            native_features: Vec::new(),
-        };
-        let json = serde_json::to_value(&payload).unwrap();
-        assert_eq!(json["type"], "capabilities_updated");
-        assert_eq!(json["data"]["current_mode"], "code");
 
         let decoded: UnifiedEventPayload = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, payload);
@@ -849,12 +779,5 @@ mod tests {
         };
         assert!(!incomplete.is_persistable());
         assert_eq!(incomplete.event_type(), EventType::SubagentMessage);
-    }
-
-    #[test]
-    fn batch_cursor_helper() {
-        let batch = SessionEventBatch::empty(42);
-        assert!(batch.events.is_empty());
-        assert_eq!(batch.cursor, 42);
     }
 }

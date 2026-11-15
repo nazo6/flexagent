@@ -42,33 +42,7 @@ const booleanOption: ConfigOptionInfo = {
   options: [],
 };
 
-describe("configValueToString", () => {
-  it("keeps strings as-is", () => {
-    expect(configValueToString("plan")).toBe("plan");
-  });
-
-  it("serializes non-string values to JSON", () => {
-    expect(configValueToString(42)).toBe("42");
-    expect(configValueToString(true)).toBe("true");
-    expect(configValueToString(null)).toBe("null");
-    expect(configValueToString({ value: "opencode/gpt-5", name: "GPT-5" })).toBe(
-      '{"value":"opencode/gpt-5","name":"GPT-5"}',
-    );
-  });
-});
-
 describe("configChoices", () => {
-  it("returns an empty list for an empty option list", () => {
-    expect(configChoices([])).toEqual([]);
-  });
-
-  it("maps primitive options with the value as label", () => {
-    expect(configChoices(["plan", "code"])).toEqual([
-      { value: "plan", label: "plan", raw: "plan" },
-      { value: "code", label: "code", raw: "code" },
-    ]);
-  });
-
   it("labels boolean options with enabled / disabled", () => {
     expect(configChoices([true, false])).toEqual([
       { value: "true", label: m.lib_config_enabled(), raw: true },

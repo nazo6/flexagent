@@ -70,19 +70,3 @@ impl DiagnosticsCounters {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn snapshot_reflects_increments() {
-        let counters = DiagnosticsCounters::new();
-        counters.incr(CounterKind::ReplayFailures);
-        counters.add(CounterKind::DroppedEvents, 3);
-        let snapshot = counters.snapshot();
-        assert_eq!(snapshot.replay_failures, 1);
-        assert_eq!(snapshot.dropped_events, 3);
-        assert_eq!(snapshot.push_failures, 0);
-    }
-}

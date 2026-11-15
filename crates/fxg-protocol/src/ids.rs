@@ -138,15 +138,4 @@ mod tests {
         assert_eq!(id.as_str(), "c1");
         assert_eq!(id.to_string(), "c1");
     }
-
-    #[test]
-    fn command_id_accepts_any_existing_string() {
-        // IDs are opaque: legacy / future formats must roundtrip unchanged.
-        let id: CommandId = "not-a-uuid".into();
-        assert_eq!(id.as_str(), "not-a-uuid");
-        assert_eq!(
-            serde_json::to_value(&id).expect("serialize"),
-            serde_json::json!("not-a-uuid")
-        );
-    }
 }

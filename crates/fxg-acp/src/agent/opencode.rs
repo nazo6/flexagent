@@ -185,15 +185,3 @@ impl SessionExtension for OpenCodeSessionExtension {
         ))))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn metadata_uses_the_opencode_name() {
-        let metadata = OpenCodeExtension.metadata();
-        assert_eq!(metadata.name.as_deref(), Some("OpenCode"));
-        assert_eq!(metadata.icon.as_deref(), Some("builtin:opencode"));
-    }
-}

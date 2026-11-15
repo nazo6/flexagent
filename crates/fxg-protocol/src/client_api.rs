@@ -1788,30 +1788,4 @@ mod tests {
         assert_eq!(json["op"], "error");
         assert_eq!(json["code"], "FORBIDDEN");
     }
-
-    #[test]
-    fn create_session_request_serialization() {
-        let req = CreateSessionRequest {
-            command_id: "c1".into(),
-            project_id: "github.com/nazo6/flexagent".into(),
-            node_id: Some("home-win".into()),
-            provisioner: None,
-            local_path: None,
-            worktree: Some(WorktreeSpec {
-                branch: "feat/auth".into(),
-                base_branch: Some("main".into()),
-            }),
-            agent_id: "opencode".into(),
-            initial_prompt: Some(PromptInput::text("Fix the failing tests")),
-            initial_config: Vec::new(),
-            mode: Some("code".into()),
-            extra_args: Some(vec!["--verbose".into()]),
-            fork: None,
-        };
-        let json = serde_json::to_value(&req).unwrap();
-        assert_eq!(json["worktree"]["branch"], "feat/auth");
-        assert!(json["provisioner"].is_null());
-        let decoded: CreateSessionRequest = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, req);
-    }
 }

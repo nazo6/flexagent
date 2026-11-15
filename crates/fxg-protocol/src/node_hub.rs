@@ -773,45 +773,198 @@ mod tests {
     use crate::common::{DiffScope, SessionControlAction};
 
     #[test]
-    fn event_batch_push_shape() {
-        let msg = NodeToHubMsg::EventBatchPush {
-            events: vec![],
-            resync: false,
-        };
-        let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["op"], "event_batch_push");
-        assert!(json["events"].as_array().unwrap().is_empty());
-        let decoded: NodeToHubMsg = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, msg);
+    fn node_to_hub_wire_tags_and_roundtrip() {
+        let cases: &[(&str, NodeToHubMsg)] = &[
+            (
+                "node_hello",
+                NodeToHubMsg::NodeHello {
+                    node_id: "home-win".into(),
+                    name: "Home Windows PC".into(),
+                    os: "windows".into(),
+                    arch: "x86_64".into(),
+                    version: "0.1.0".into(),
+                    protocol_version: PROTOCOL_VERSION,
+                    is_ephemeral: false,
+                    installed_agents: vec!["opencode2".into()],
+                    projects: vec![],
+                    projects_complete: true,
+                    state_revision: 0,
+                    sessions: vec![SessionSyncState {
+                        session_id: "s1".into(),
+                        project_id: "p1".into(),
+                        last_node_seq: 3,
+                    }],
+                    sessions_truncated: false,
+                },
+            ),
+            (
+                "event_batch_push",
+                NodeToHubMsg::EventBatchPush {
+                    events: vec![],
+                    resync: false,
+                },
+            ),
+            (
+                "pty_opened",
+                NodeToHubMsg::PtyOpened {
+                    request_id: "c1".into(),
+                    pty_id: "p1".into(),
+                    path: "/home/u/repo".into(),
+                    cols: 80,
+                    rows: 24,
+                    attached: true,
+                    snapshot_b64: "aGk=".into(),
+                },
+            ),
+            (
+                "node_rpc_result",
+                NodeToHubMsg::NodeRpcResult {
+                    request_id: "c1".into(),
+                    outcome: NodeRpcOutcome::Ok {
+                        response: NodeRpcResponse::Resume {
+                            context_restored: false,
+                        },
+                    },
+                },
+            ),
+            (
+                "node_rpc_result",
+                NodeToHubMsg::NodeRpcResult {
+                    request_id: "c1".into(),
+                    outcome: NodeRpcOutcome::Err {
+                        error: ErrorInfo::new(
+                            crate::common::ErrorCode::NotFound,
+                            "session not found",
+                        )
+                        .with_param("session_id", "s1"),
+                    },
+                },
+            ),
+            (
+                "node_rpc_result",
+                NodeToHubMsg::NodeRpcResult {
+                    request_id: "r1".into(),
+                    outcome: NodeRpcOutcome::Ok {
+                        response: NodeRpcResponse::AgentOp {
+                            message: Some("refreshed catalog".into()),
+                        },
+                    },
+                },
+            ),
+        ];
+
+        for (expected_op, msg) in cases {
+            let json = serde_json::to_value(msg).unwrap();
+            assert_eq!(json["op"], *expected_op);
+            let decoded: NodeToHubMsg = serde_json::from_value(json).unwrap();
+            assert_eq!(&decoded, msg);
+        }
     }
 
     #[test]
-    fn node_hello_shape() {
-        let msg = NodeToHubMsg::NodeHello {
-            node_id: "home-win".into(),
-            name: "Home Windows PC".into(),
-            os: "windows".into(),
-            arch: "x86_64".into(),
-            version: "0.1.0".into(),
-            protocol_version: PROTOCOL_VERSION,
-            is_ephemeral: false,
-            installed_agents: vec!["opencode2".into()],
-            projects: vec![],
-            projects_complete: true,
-            state_revision: 0,
-            sessions: vec![SessionSyncState {
-                session_id: "s1".into(),
-                project_id: "p1".into(),
-                last_node_seq: 3,
-            }],
-            sessions_truncated: false,
-        };
-        let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["op"], "node_hello");
-        assert_eq!(json["protocol_version"], PROTOCOL_VERSION);
-        assert_eq!(json["sessions"][0]["last_node_seq"], 3);
-        let decoded: NodeToHubMsg = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, msg);
+    fn hub_to_node_wire_tags_and_roundtrip() {
+        let cases: &[(&str, HubToNodeMsg)] = &[
+            (
+                "hello_rejected",
+                HubToNodeMsg::HelloRejected {
+                    code: ErrorCode::VersionMismatch,
+                    message: "protocol mismatch".into(),
+                    required_protocol_version: Some(PROTOCOL_VERSION),
+                },
+            ),
+            (
+                "control_session",
+                HubToNodeMsg::ControlSession {
+                    command_id: "c1".into(),
+                    session_id: "s1".into(),
+                    action: SessionControlAction::SetMode {
+                        mode_id: "plan".into(),
+                    },
+                },
+            ),
+            (
+                "pty_spawn",
+                HubToNodeMsg::PtySpawn {
+                    request_id: "c1".into(),
+                    pty_id: "p1".into(),
+                    path: "/home/u/repo".into(),
+                    session_id: Some("s1".into()),
+                    terminal_id: Some("tab-1".into()),
+                    cols: 80,
+                    rows: 24,
+                    new: false,
+                },
+            ),
+            (
+                "node_rpc",
+                HubToNodeMsg::NodeRpc {
+                    request_id: "c1".into(),
+                    request: NodeRpcRequest::GetGitDiff {
+                        session_id: "s1".into(),
+                        scope: DiffScope::BranchBase,
+                        base_branch: Some("main".into()),
+                    },
+                },
+            ),
+            (
+                "node_rpc",
+                HubToNodeMsg::NodeRpc {
+                    request_id: "c1".into(),
+                    request: NodeRpcRequest::ImportSession {
+                        agent_id: "opencode2".into(),
+                        agent_session_id: "agent-9".into(),
+                        cwd: "/tmp/repo".into(),
+                        title: Some("Imported".into()),
+                        mirror_history: true,
+                    },
+                },
+            ),
+            (
+                "node_rpc",
+                HubToNodeMsg::NodeRpc {
+                    request_id: "r1".into(),
+                    request: NodeRpcRequest::ProjectScan {
+                        dir: Some("D:/ghq".into()),
+                    },
+                },
+            ),
+            (
+                "node_rpc",
+                HubToNodeMsg::NodeRpc {
+                    request_id: "r2".into(),
+                    request: NodeRpcRequest::ProjectLink {
+                        project_id: "github.com/nazo6/flexagent".into(),
+                        local_path: "D:/ghq/github.com/nazo6/flexagent".into(),
+                    },
+                },
+            ),
+            (
+                "node_rpc",
+                HubToNodeMsg::NodeRpc {
+                    request_id: "c1".into(),
+                    request: NodeRpcRequest::ManageWorktree {
+                        project_id: "p1".into(),
+                        action: WorktreeAction::Prune,
+                    },
+                },
+            ),
+            (
+                "node_rpc",
+                HubToNodeMsg::NodeRpc {
+                    request_id: "r1".into(),
+                    request: NodeRpcRequest::ManageAgent {
+                        action: AgentAction::RefreshCatalog,
+                    },
+                },
+            ),
+        ];
+
+        for (expected_op, msg) in cases {
+            let json = serde_json::to_value(msg).unwrap();
+            assert_eq!(json["op"], *expected_op);
+            let decoded: HubToNodeMsg = serde_json::from_value(json).unwrap();
+            assert_eq!(&decoded, msg);
+        }
     }
 
     #[test]
@@ -834,161 +987,6 @@ mod tests {
         let mut json = serde_json::to_value(&msg).unwrap();
         json.as_object_mut().unwrap().remove("protocol_version");
         assert!(serde_json::from_value::<NodeToHubMsg>(json).is_err());
-    }
-
-    #[test]
-    fn hello_rejected_shape() {
-        let msg = HubToNodeMsg::HelloRejected {
-            code: ErrorCode::VersionMismatch,
-            message: "protocol mismatch".into(),
-            required_protocol_version: Some(PROTOCOL_VERSION),
-        };
-        let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["op"], "hello_rejected");
-        assert_eq!(json["code"], "VERSION_MISMATCH");
-        assert_eq!(json["required_protocol_version"], PROTOCOL_VERSION);
-        let decoded: HubToNodeMsg = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, msg);
-    }
-
-    #[test]
-    fn hub_to_node_control_session_shape() {
-        let msg = HubToNodeMsg::ControlSession {
-            command_id: "c1".into(),
-            session_id: "s1".into(),
-            action: SessionControlAction::SetMode {
-                mode_id: "plan".into(),
-            },
-        };
-        let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["op"], "control_session");
-        assert_eq!(json["action"]["action"], "set_mode");
-        assert_eq!(json["action"]["mode_id"], "plan");
-        let decoded: HubToNodeMsg = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, msg);
-    }
-
-    #[test]
-    fn node_rpc_envelope_shape() {
-        let msg = HubToNodeMsg::NodeRpc {
-            request_id: "c1".into(),
-            request: NodeRpcRequest::GetGitDiff {
-                session_id: "s1".into(),
-                scope: DiffScope::BranchBase,
-                base_branch: Some("main".into()),
-            },
-        };
-        let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["op"], "node_rpc");
-        assert_eq!(json["request_id"], "c1");
-        assert_eq!(json["request"]["type"], "get_git_diff");
-        assert_eq!(json["request"]["scope"], "branch_base");
-        let decoded: HubToNodeMsg = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, msg);
-    }
-
-    #[test]
-    fn node_rpc_result_shape() {
-        let msg = NodeToHubMsg::NodeRpcResult {
-            request_id: "c1".into(),
-            outcome: NodeRpcOutcome::Ok {
-                response: NodeRpcResponse::Resume {
-                    context_restored: false,
-                },
-            },
-        };
-        let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["op"], "node_rpc_result");
-        assert_eq!(json["outcome"]["status"], "ok");
-        assert_eq!(json["outcome"]["response"]["type"], "resume");
-        assert_eq!(json["outcome"]["response"]["context_restored"], false);
-        let decoded: NodeToHubMsg = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, msg);
-    }
-
-    #[test]
-    fn pty_open_envelope_shape() {
-        let spawn = HubToNodeMsg::PtySpawn {
-            request_id: "c1".into(),
-            pty_id: "p1".into(),
-            path: "/home/u/repo".into(),
-            session_id: Some("s1".into()),
-            terminal_id: Some("tab-1".into()),
-            cols: 80,
-            rows: 24,
-            new: false,
-        };
-        let json = serde_json::to_value(&spawn).unwrap();
-        assert_eq!(json["op"], "pty_spawn");
-        assert_eq!(json["request_id"], "c1");
-        assert_eq!(json["path"], "/home/u/repo");
-        assert_eq!(json["terminal_id"], "tab-1");
-        assert_eq!(serde_json::from_value::<HubToNodeMsg>(json).unwrap(), spawn);
-
-        let opened = NodeToHubMsg::PtyOpened {
-            request_id: "c1".into(),
-            pty_id: "p1".into(),
-            path: "/home/u/repo".into(),
-            cols: 80,
-            rows: 24,
-            attached: true,
-            snapshot_b64: "aGk=".into(),
-        };
-        let json = serde_json::to_value(&opened).unwrap();
-        assert_eq!(json["op"], "pty_opened");
-        assert_eq!(json["attached"], true);
-        assert_eq!(json["snapshot_b64"], "aGk=");
-        assert_eq!(
-            serde_json::from_value::<NodeToHubMsg>(json).unwrap(),
-            opened
-        );
-    }
-
-    #[test]
-    fn import_session_rpc_shape() {
-        let msg = HubToNodeMsg::NodeRpc {
-            request_id: "c1".into(),
-            request: NodeRpcRequest::ImportSession {
-                agent_id: "opencode2".into(),
-                agent_session_id: "agent-9".into(),
-                cwd: "/tmp/repo".into(),
-                title: Some("Imported".into()),
-                mirror_history: true,
-            },
-        };
-        let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["request"]["type"], "import_session");
-        assert_eq!(json["request"]["agent_session_id"], "agent-9");
-        let decoded: HubToNodeMsg = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, msg);
-
-        let result = NodeRpcResponse::SessionImported {
-            session_id: "s1".into(),
-        };
-        let json = serde_json::to_value(&result).unwrap();
-        assert_eq!(json["type"], "session_imported");
-        assert_eq!(json["session_id"], "s1");
-        assert_eq!(
-            serde_json::from_value::<NodeRpcResponse>(json).unwrap(),
-            result
-        );
-    }
-
-    #[test]
-    fn node_rpc_error_keeps_structured_info() {
-        let msg = NodeToHubMsg::NodeRpcResult {
-            request_id: "c1".into(),
-            outcome: NodeRpcOutcome::Err {
-                error: ErrorInfo::new(crate::common::ErrorCode::NotFound, "session not found")
-                    .with_param("session_id", "s1"),
-            },
-        };
-        let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["outcome"]["status"], "err");
-        assert_eq!(json["outcome"]["error"]["code"], "NOT_FOUND");
-        assert_eq!(json["outcome"]["error"]["params"]["session_id"], "s1");
-        let decoded: NodeToHubMsg = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, msg);
     }
 
     #[test]
@@ -1032,107 +1030,6 @@ mod tests {
             }
             .timeout(),
             Duration::from_secs(600)
-        );
-    }
-
-    #[test]
-    fn project_scan_and_link_shape() {
-        let scan = HubToNodeMsg::NodeRpc {
-            request_id: "r1".into(),
-            request: NodeRpcRequest::ProjectScan {
-                dir: Some("D:/ghq".into()),
-            },
-        };
-        let json = serde_json::to_value(&scan).unwrap();
-        assert_eq!(json["request"]["type"], "project_scan");
-        assert_eq!(json["request"]["dir"], "D:/ghq");
-        assert_eq!(serde_json::from_value::<HubToNodeMsg>(json).unwrap(), scan);
-
-        let link = HubToNodeMsg::NodeRpc {
-            request_id: "r2".into(),
-            request: NodeRpcRequest::ProjectLink {
-                project_id: "github.com/nazo6/flexagent".into(),
-                local_path: "D:/ghq/github.com/nazo6/flexagent".into(),
-            },
-        };
-        let json = serde_json::to_value(&link).unwrap();
-        assert_eq!(json["request"]["type"], "project_link");
-        assert_eq!(serde_json::from_value::<HubToNodeMsg>(json).unwrap(), link);
-
-        let link_result = NodeToHubMsg::NodeRpcResult {
-            request_id: "r2".into(),
-            outcome: NodeRpcOutcome::Ok {
-                response: NodeRpcResponse::ProjectLink {
-                    response: crate::client_api::ProjectLinkResponse {
-                        project_id: "github.com/nazo6/flexagent".into(),
-                        local_path: "D:/ghq/github.com/nazo6/flexagent".into(),
-                    },
-                },
-            },
-        };
-        let json = serde_json::to_value(&link_result).unwrap();
-        assert_eq!(json["op"], "node_rpc_result");
-        assert_eq!(
-            serde_json::from_value::<NodeToHubMsg>(json).unwrap(),
-            link_result
-        );
-    }
-
-    #[test]
-    fn worktree_prune_action_shape() {
-        let msg = HubToNodeMsg::NodeRpc {
-            request_id: "c1".into(),
-            request: NodeRpcRequest::ManageWorktree {
-                project_id: "p1".into(),
-                action: WorktreeAction::Prune,
-            },
-        };
-        let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["request"]["action"]["action"], "prune");
-        let decoded: HubToNodeMsg = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, msg);
-    }
-
-    #[test]
-    fn manage_agent_shape() {
-        let refresh = HubToNodeMsg::NodeRpc {
-            request_id: "r1".into(),
-            request: NodeRpcRequest::ManageAgent {
-                action: AgentAction::RefreshCatalog,
-            },
-        };
-        let json = serde_json::to_value(&refresh).unwrap();
-        assert_eq!(json["request"]["type"], "manage_agent");
-        assert_eq!(json["request"]["action"]["action"], "refresh_catalog");
-        assert_eq!(
-            serde_json::from_value::<HubToNodeMsg>(json).unwrap(),
-            refresh
-        );
-
-        let import = NodeRpcRequest::ManageAgent {
-            action: AgentAction::ImportRegistryAgent {
-                agent_id: "qwen-code".into(),
-                extension: Some("opencode".into()),
-            },
-        };
-        let json = serde_json::to_value(&import).unwrap();
-        assert_eq!(json["action"]["action"], "import_registry_agent");
-        assert_eq!(json["action"]["agent_id"], "qwen-code");
-        assert_eq!(json["action"]["extension"], "opencode");
-
-        let result = NodeToHubMsg::NodeRpcResult {
-            request_id: "r1".into(),
-            outcome: NodeRpcOutcome::Ok {
-                response: NodeRpcResponse::AgentOp {
-                    message: Some("refreshed catalog".into()),
-                },
-            },
-        };
-        let json = serde_json::to_value(&result).unwrap();
-        assert_eq!(json["op"], "node_rpc_result");
-        assert_eq!(
-            serde_json::from_value::<NodeToHubMsg>(json).unwrap(),
-            result
         );
     }
 }

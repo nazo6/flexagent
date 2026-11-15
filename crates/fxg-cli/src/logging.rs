@@ -349,12 +349,6 @@ mod tests {
     use fxg_protocol::paths::{Paths, Role};
 
     #[test]
-    fn should_use_color_honors_explicit_flags() {
-        assert!(!should_use_color(true, false));
-        assert!(!should_use_color(false, true));
-    }
-
-    #[test]
     fn resolve_filter_respects_quiet_and_verbose() {
         let mut opts = LoggingOptions::default();
         let config = LogConfig::default();

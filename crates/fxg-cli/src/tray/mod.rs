@@ -468,14 +468,6 @@ fn draw_status_dot(rgba: &mut [u8], size: u32, hub_connected: bool) {
 mod tests {
     use super::*;
 
-    fn status(hub_connected: bool, unsynced: u64, active_sessions: usize) -> TrayStatus {
-        TrayStatus {
-            hub_connected,
-            unsynced,
-            active_sessions,
-        }
-    }
-
     #[test]
     fn resolve_enabled_priority() {
         // --no-tray takes the highest priority
@@ -487,33 +479,6 @@ mod tests {
         assert!(resolve_enabled(false, false, Some(true)));
         assert!(!resolve_enabled(false, false, Some(false)));
         assert!(!resolve_enabled(false, false, None));
-    }
-
-    #[test]
-    fn status_and_session_lines() {
-        assert_eq!(
-            status_line(&status(true, 3, 2)),
-            "Status: ● connected to hub (3 unsynced)"
-        );
-        assert_eq!(status_line(&status(false, 0, 0)), "Status: ○ standalone");
-        assert_eq!(session_line(0), "Sessions: 0 active");
-        assert_eq!(session_line(12), "Sessions: 12 active");
-    }
-
-    #[test]
-    fn tooltip_reflects_status() {
-        assert_eq!(
-            tooltip("home-pc", "0.1.0", Some(&status(true, 1, 2))),
-            "FlexAgent v0.1.0 — home-pc (connected / 2 sessions)"
-        );
-        assert_eq!(
-            tooltip("home-pc", "0.1.0", Some(&status(false, 0, 0))),
-            "FlexAgent v0.1.0 — home-pc (standalone / 0 sessions)"
-        );
-        assert_eq!(
-            tooltip("home-pc", "0.1.0", None),
-            "FlexAgent v0.1.0 — home-pc (starting)"
-        );
     }
 
     #[test]

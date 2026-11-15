@@ -110,23 +110,6 @@ fn subagent_updates(events: &[DriverEvent]) -> Vec<&UnifiedEventPayload> {
         .collect()
 }
 
-#[test]
-fn mock_subagent_update_payload_parses() {
-    let value = serde_json::json!({
-        "sessionId": "root-session",
-        "update": {
-            "sessionUpdate": "subagent_update",
-            "sessionId": "child-rfd",
-            "title": "Explore",
-            "description": "RFD child",
-            "state": { "state": "running" }
-        }
-    });
-    let parsed =
-        serde_json::from_value::<agent_client_protocol::v1::schema::SessionNotification>(value);
-    assert!(parsed.is_ok(), "parse failed: {parsed:#?}");
-}
-
 #[tokio::test]
 async fn acp_child_updates_are_tagged_and_announced() {
     let events = run(

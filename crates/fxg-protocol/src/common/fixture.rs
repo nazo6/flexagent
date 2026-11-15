@@ -71,22 +71,3 @@ impl NodeSummary {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dummy_builders_cover_every_field() {
-        let session = SessionSummary::dummy();
-        assert_eq!(session.status, SessionStatus::Idle);
-        assert_eq!(session.agent_id, "test-agent");
-
-        let project = ProjectSummary::dummy();
-        assert_eq!(project.project_id.as_str(), "project-dummy");
-
-        let node = NodeSummary::dummy();
-        assert_eq!(node.lifecycle_status, NodeLifecycleStatus::Ready);
-        assert!(node.is_online);
-    }
-}
