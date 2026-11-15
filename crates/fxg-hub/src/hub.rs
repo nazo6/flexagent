@@ -104,7 +104,7 @@ struct PtyRoute {
     node_id: NodeId,
     /// Canonical workspace path
     path: String,
-    /// Terminal tab identity inside the workspace (`None` = legacy single terminal)
+    /// Terminal tab identity inside the workspace (`None` = default workspace terminal)
     terminal_id: Option<String>,
     /// Number of columns at the last known size
     cols: u16,
@@ -826,25 +826,36 @@ async fn handle_node_connection(state: HubState, token_owner: String, socket: We
     }
 
     // Reject nodes from a different protocol generation before sending any RPC.
-    if protocol_version < fxg_protocol::node_hub::PROTOCOL_VERSION {
+    let required_version = fxg_protocol::node_hub::PROTOCOL_VERSION;
+    if protocol_version != required_version {
+        let message = format!(
+            "node protocol version {protocol_version} does not match hub protocol version {required_version}; align fxg versions across node and hub"
+        );
         tracing::error!(
             node_id = node_id.as_str(),
             protocol_version,
-            required = fxg_protocol::node_hub::PROTOCOL_VERSION,
-            "node protocol version is too old; upgrade fxg on the node"
+            required = required_version,
+            "{message}"
         );
-        fxg_protocol::discard_with!(sender.close().await, "close the node websocket");
+        reject_hello(
+            &mut sender,
+            ErrorCode::VersionMismatch,
+            message,
+            Some(required_version),
+        )
+        .await;
         return;
     }
 
     // Reject impersonation: NodeHello.node_id must match the token owner
     if node_id.as_str() != token_owner {
+        let message = "node hello node_id does not match pairing token owner".to_owned();
         tracing::warn!(
             node_id = node_id.as_str(),
             token_owner,
             "node hello node_id does not match token owner; rejecting"
         );
-        fxg_protocol::discard_with!(sender.close().await, "close the node websocket");
+        reject_hello(&mut sender, ErrorCode::Unauthorized, message, None).await;
         return;
     }
 
@@ -966,6 +977,25 @@ async fn handle_node_connection(state: HubState, token_owner: String, socket: We
     tracing::info!(node_id = node_id.as_str(), "node disconnected");
 }
 
+/// Sends `HelloRejected` and closes the node WebSocket cleanly.
+async fn reject_hello(
+    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    code: ErrorCode,
+    message: String,
+    required_protocol_version: Option<u32>,
+) {
+    let payload = HubToNodeMsg::HelloRejected {
+        code,
+        message,
+        required_protocol_version,
+    };
+    fxg_protocol::discard_with!(
+        send_ws_json(sender, &payload).await,
+        "notify the node why NodeHello was rejected"
+    );
+    fxg_protocol::discard_with!(sender.close().await, "close the node websocket");
+}
+
 /// Handles a message from a node.
 async fn handle_node_message(state: &HubState, node_id: &NodeId, text: &str) {
     let message: NodeToHubMsg = match serde_json::from_str(text) {
@@ -1005,12 +1035,12 @@ async fn handle_node_message_value(state: &HubState, node_id: &NodeId, message: 
                 );
                 return;
             }
-            if protocol_version < fxg_protocol::node_hub::PROTOCOL_VERSION {
+            if protocol_version != fxg_protocol::node_hub::PROTOCOL_VERSION {
                 tracing::error!(
                     node_id = node_id.as_str(),
                     protocol_version,
                     required = fxg_protocol::node_hub::PROTOCOL_VERSION,
-                    "node protocol version is too old; ignoring hello"
+                    "node protocol version mismatch; ignoring hello"
                 );
                 return;
             }

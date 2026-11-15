@@ -166,7 +166,12 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
                     if line.trim().is_empty() {
                         continue;
                     }
-                    crate::sync::handle_server_message(&state, &line, &out_tx, &ctx).await;
+                    if let Err(err) =
+                        crate::sync::handle_server_message(&state, &line, &out_tx, &ctx).await
+                    {
+                        tracing::error!("{err:#}; shutting down");
+                        break;
+                    }
                 }
                 Some(StdinEvent::Eof) => {
                     tracing::info!("stdin closed; shutting down");

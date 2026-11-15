@@ -106,7 +106,7 @@ pub struct PtySpawnRequest {
     pub workspace: Option<PathBuf>,
     /// Client-side terminal tab identity inside the workspace.
     ///
-    /// `None` is the legacy single terminal. Two requests with the same
+    /// `None` opens the default workspace terminal. Two requests with the same
     /// workspace and terminal ID reuse one shell; different IDs create
     /// separate shells.
     pub terminal_id: Option<String>,
@@ -186,7 +186,7 @@ struct State {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct WorkspaceTerminalKey {
     workspace: PathBuf,
-    /// Client-side tab identity (`None` is the legacy single terminal)
+    /// Client-side tab identity (`None` is the default workspace terminal)
     terminal_id: Option<String>,
 }
 

@@ -3,7 +3,7 @@
 //! Design: `docs/proposals/2026-11-09-settings-consolidation-and-project-identity.md`.
 //!
 //! Settings are never sent as a generic key/value container. Each owner (node,
-//! server, bootstrap file, browser) exposes its own typed snapshot, and the Web UI
+//! hub, bootstrap file, browser) exposes its own typed snapshot, and the Web UI
 //! renders a searchable catalog over those values. Secret values never appear in
 //! these types: only metadata (`SecretSummary`) is exposed, and writes go through
 //! a write-only request.
@@ -470,7 +470,7 @@ pub struct SecretSummary {
     pub used_by: Vec<String>,
 }
 
-/// `PUT /api/v1/{nodes/{node_id}/|server/}secrets/{secret_id}` request (write-only).
+/// `PUT /api/v1/{nodes/{node_id}/|hub/}secrets/{secret_id}` request (write-only).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct UpsertSecretRequest {

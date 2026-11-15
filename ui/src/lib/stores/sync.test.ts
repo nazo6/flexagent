@@ -239,7 +239,7 @@ describe("SyncStore unread tracking", () => {
   });
 
   it("ignores replayed messages at or below the read watermark", async () => {
-    localStorage.setItem("fxg.session_read", JSON.stringify({ read: { "sess-1": 5 }, unread: [] }));
+    localStorage.setItem("fxg:session_read", JSON.stringify({ read: { "sess-1": 5 }, unread: [] }));
     const { store, setSessions } = createStore();
     setSessions([makeSessionSummary("sess-1", 5)]);
     store.start();

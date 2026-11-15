@@ -1,4 +1,4 @@
-//! FlexAgent hub crate (`fxg-server`).
+//! FlexAgent hub crate (`fxg-hub`).
 //!
 //! Contains the Axum Node Hub (`/api/v1/node/ws`), the client REST/WS API (`:8080`), event
 //! projection application, VAPID Web Push delivery, and temporary VM provisioner management.

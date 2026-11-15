@@ -1,7 +1,7 @@
 //! Client API backend implementation for the local node (`fxg node start`).
 //!
 //! Supplies the daemon's `SessionManager` / `PtySessionManager` / Git operations
-//! to the shared router of `fxg-server` ([`fxg_hub::api::client_router`])
+//! to the shared router of `fxg-hub` ([`fxg_hub::api::client_router`])
 //! (design: `docs/03-protocol-and-api.md` §3).
 
 use std::path::{Path, PathBuf};

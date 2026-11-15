@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result, bail};
 use futures_util::{SinkExt, StreamExt};
-use fxg_protocol::client_api::{ClientWsMessage, HubWsMessage};
+use fxg_protocol::client_api::{ClientWsMessage, ServerWsMessage};
 use fxg_protocol::common::{ClientSource, SessionControlAction, SessionStatus};
 use fxg_protocol::events::UnifiedEventPayload;
 use usage::Args;
@@ -445,10 +445,10 @@ async fn wait_for_turn(
             .context("failed to read a session event")?;
         match message {
             tokio_tungstenite::tungstenite::Message::Text(text) => {
-                let message: HubWsMessage = serde_json::from_str(text.as_str())
+                let message: ServerWsMessage = serde_json::from_str(text.as_str())
                     .context("failed to decode a session event")?;
                 match message {
-                    HubWsMessage::EventBatch { events, .. } => {
+                    ServerWsMessage::EventBatch { events, .. } => {
                         for event in events {
                             if event.session_id.as_str() != session_id
                                 || event.node_seq <= baseline_seq
@@ -460,10 +460,10 @@ async fn wait_for_turn(
                             }
                         }
                     }
-                    HubWsMessage::Error { error } => {
+                    ServerWsMessage::Error { error } => {
                         bail!("{}: {}", error.code, error.message);
                     }
-                    HubWsMessage::Pong => {}
+                    ServerWsMessage::Pong => {}
                     _ => {}
                 }
             }

@@ -765,7 +765,7 @@ impl ClientApiBackend for HubState {
         crate::provisioner::provisioner_test(self, name).await
     }
 
-    async fn settings_server(&self) -> Result<HubSettingsSnapshot, ApiError> {
+    async fn hub_settings(&self) -> Result<HubSettingsSnapshot, ApiError> {
         self.hub_settings_snapshot()
             .await
             .map_err(ApiError::internal)
@@ -790,27 +790,24 @@ impl ClientApiBackend for HubState {
         self.inner.hub.rpc(node_id, &request_id, request).await
     }
 
-    async fn server_secrets(&self) -> Result<SecretsResponse, ApiError> {
-        HubState::server_secrets(self)
+    async fn hub_secrets(&self) -> Result<SecretsResponse, ApiError> {
+        HubState::hub_secrets(self)
             .await
             .map_err(ApiError::internal)
     }
 
-    async fn upsert_server_secret(
+    async fn upsert_hub_secret(
         &self,
         secret_id: &SecretId,
         request: UpsertSecretRequest,
     ) -> Result<SecretsResponse, ApiError> {
-        HubState::upsert_server_secret(self, secret_id, &request)
+        HubState::upsert_hub_secret(self, secret_id, &request)
             .await
             .map_err(secret_error)
     }
 
-    async fn delete_server_secret(
-        &self,
-        secret_id: &SecretId,
-    ) -> Result<SecretsResponse, ApiError> {
-        HubState::delete_server_secret(self, secret_id)
+    async fn delete_hub_secret(&self, secret_id: &SecretId) -> Result<SecretsResponse, ApiError> {
+        HubState::delete_hub_secret(self, secret_id)
             .await
             .map_err(secret_error)
     }

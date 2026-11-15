@@ -204,14 +204,14 @@ impl HubState {
     }
 
     /// Lists hub-owned secret metadata.
-    pub async fn server_secrets(&self) -> Result<SecretsResponse, HubError> {
+    pub async fn hub_secrets(&self) -> Result<SecretsResponse, HubError> {
         Ok(SecretsResponse {
             secrets: fxg_db::secrets::list_secrets(self.db(), &self.inner.options.paths).await?,
         })
     }
 
     /// Stores a hub-owned secret.
-    pub async fn upsert_server_secret(
+    pub async fn upsert_hub_secret(
         &self,
         id: &SecretId,
         request: &UpsertSecretRequest,
@@ -228,7 +228,7 @@ impl HubState {
     }
 
     /// Deletes a hub-owned secret.
-    pub async fn delete_server_secret(&self, id: &SecretId) -> Result<SecretsResponse, HubError> {
+    pub async fn delete_hub_secret(&self, id: &SecretId) -> Result<SecretsResponse, HubError> {
         Ok(SecretsResponse {
             secrets: fxg_db::secrets::delete_secret(self.db(), &self.inner.options.paths, id)
                 .await?,

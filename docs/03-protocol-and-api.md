@@ -146,8 +146,8 @@ JSON Lines）は、トランスポートだけが異なり、同じ `NodeToHubMs
   トークン発行対象と一致することを検証する。
 - **Stdio**: ハブが子プロセスとして起動したプロビジョナーの `stdin` / `stdout`
   で JSON Lines をやり取りする。初期化ログは `stderr` に出す。
-- `NodeHello.protocol_version` は `PROTOCOL_VERSION`。ハブは最小バージョン未満の
-  ノードを拒否する。ノードとハブは同一 `fxg` リリースで同時に更新する。
+- `NodeHello.protocol_version` は `PROTOCOL_VERSION`。ハブはバージョンが一致しない
+  ノードに対して `HelloRejected` を返して接続を拒否する。ノードとハブは同一 `fxg` リリースで同時に更新する。
 
 ### 2.2 メッセージの分類
 
@@ -347,8 +347,8 @@ prune します。`sessions` は最大 1000 件で、超過時は
 - サーバー: `opened` / `output` / `exit` / `error`。
 - `open` は冪等です。同じ workspace + `terminal_id` に既存のシェルがあれば
   attach し、`opened` の `attached = true` で返します。`terminal_id` が違えば
-  同じ workspace でも別のシェルになります（`terminal_id` 省略時は従来の
-  単一ターミナル）。パスはノードに登録済みのプロジェクト binding（または
+  同じ workspace でも別のシェルになります（`terminal_id` 省略時は既定の
+  ワークスペースターミナル）。パスはノードに登録済みのプロジェクト binding（または
   既存セッションの `local_path`）と**完全一致**する必要があり、サブディレクトリは
   開けません。
 - socket を閉じても PTY は kill されません（detach）。無操作 TTL（既定 30 分）の

@@ -620,7 +620,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     }
 
     /// `GET /api/v1/settings/hub` (hub only).
-    async fn settings_server(&self) -> Result<HubSettingsSnapshot, ApiError> {
+    async fn hub_settings(&self) -> Result<HubSettingsSnapshot, ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
             "hub settings are only available on the hub",
@@ -639,33 +639,30 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     }
 
     /// `GET /api/v1/hub/secrets` (hub-owned secret metadata).
-    async fn server_secrets(&self) -> Result<SecretsResponse, ApiError> {
+    async fn hub_secrets(&self) -> Result<SecretsResponse, ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
-            "server secrets are only available on the hub",
+            "hub secrets are only available on the hub",
         ))
     }
 
     /// `PUT /api/v1/hub/secrets/:secret_id` (write-only).
-    async fn upsert_server_secret(
+    async fn upsert_hub_secret(
         &self,
         _secret_id: &SecretId,
         _request: UpsertSecretRequest,
     ) -> Result<SecretsResponse, ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
-            "server secrets are only available on the hub",
+            "hub secrets are only available on the hub",
         ))
     }
 
     /// `DELETE /api/v1/hub/secrets/:secret_id`.
-    async fn delete_server_secret(
-        &self,
-        _secret_id: &SecretId,
-    ) -> Result<SecretsResponse, ApiError> {
+    async fn delete_hub_secret(&self, _secret_id: &SecretId) -> Result<SecretsResponse, ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
-            "server secrets are only available on the hub",
+            "hub secrets are only available on the hub",
         ))
     }
 

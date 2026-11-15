@@ -18,8 +18,7 @@
 //! `ui/src/lib/generated/bindings.ts` automatically (internal types such as the
 //! configuration file schemas are not exported).
 
-// Protocol type definitions are the declared JSON boundary. Phase 2 replaces
-// the remaining raw fields with `RawJson`.
+// Protocol type definitions are the declared JSON boundary.
 #![allow(
     clippy::disallowed_types,
     clippy::wildcard_enum_match_arm,

@@ -13,7 +13,7 @@ import type {
   RespondPermissionResponse,
   ResumeSessionResponse,
   HubLinkStatus,
-  HubWsMessage,
+  ServerWsMessage,
   SessionArchiveResponse,
   SessionRenameResponse,
   SessionControlAction,
@@ -27,9 +27,9 @@ import { SessionTimeline } from "#lib/sync/timeline.svelte.ts";
 import type { PendingPrompt } from "#lib/sync/reducer.ts";
 import type { ConnectionStore } from "./connection.svelte";
 
-const CURSOR_KEY = "fxg.sync.cursor";
+const CURSOR_KEY = "fxg:sync_cursor";
 /** Per-device read / unread state for the sidebar. */
-const READ_STATE_KEY = "fxg.session_read";
+const READ_STATE_KEY = "fxg:session_read";
 /** Timeout for waiting on a `CommandResult`. */
 const COMMAND_TIMEOUT_MS = 30_000;
 /**
@@ -144,7 +144,7 @@ export class SyncStore {
    * Progress logs for ephemeral VM provisioning (ephemeral; not persisted).
    *
    * The server delivers `stderr` output from before the node's `node.db` exists
-   * as `HubWsMessage::ProvisioningLog`. It is not restored on reconnect.
+   * as `ServerWsMessage::ProvisioningLog`. It is not restored on reconnect.
    *
    * These (and `pendingPrompts`) are [`SvelteMap`]: Svelte 5 does not proxy
    * `Map` inside `$state`, so mutating one would not re-render its consumers.
@@ -662,9 +662,9 @@ export class SyncStore {
   // ------------------------------------------------------------------
 
   #handleMessage(raw: string): void {
-    let message: HubWsMessage;
+    let message: ServerWsMessage;
     try {
-      message = JSON.parse(raw) as HubWsMessage;
+      message = JSON.parse(raw) as ServerWsMessage;
     } catch (error) {
       console.error("[fxg] failed to parse client ws message", error, raw);
       return;
