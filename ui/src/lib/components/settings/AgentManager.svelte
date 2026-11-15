@@ -29,10 +29,14 @@
   import PlusIcon from "@lucide/svelte/icons/plus";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
   import SearchIcon from "@lucide/svelte/icons/search";
+  import Settings2Icon from "@lucide/svelte/icons/settings-2";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
+  import AgentManagementPanel from "./AgentManagementPanel.svelte";
 
   /** Target node passed by the settings page (catalog source and operation target). */
   let { nodeId = "" }: { nodeId?: string } = $props();
+  const isHub = $derived(sync.connection.role === "hub");
+  let managedAgent = $state<AgentSummary | null>(null);
 
   let agents = $state<AgentSummary[]>([]);
   let registryAgents = $state<RegistryAgentSummary[]>([]);
@@ -340,11 +344,13 @@
                   {m.settings_agent_extension()}: {agent.extension}
                 </Badge>
               {/if}
-              <Badge variant="outline" class="text-[11px]">
-                {agent.capabilities.subagents === false
-                  ? m.settings_agent_capabilities_subagents_off()
-                  : m.settings_agent_capabilities_subagents()}
-              </Badge>
+              {#if agent.backend !== "custom"}
+                <Badge variant="outline" class="text-[11px]">
+                  {agent.capabilities.subagents === false
+                    ? m.settings_agent_capabilities_subagents_off()
+                    : m.settings_agent_capabilities_subagents()}
+                </Badge>
+              {/if}
               {#each agent.sources as source (source)}
                 <Badge variant="outline" class="text-[11px]">{agentSourceLabel(source)}</Badge>
               {/each}
@@ -357,6 +363,18 @@
           </div>
 
           <div class="flex shrink-0 items-center gap-1.5">
+            {#if agent.has_management && !isHub}
+              <Button
+                variant={managedAgent?.id === agent.id ? "secondary" : "ghost"}
+                size="icon-sm"
+                disabled={busy || nodeId === ""}
+                onclick={() => (managedAgent = managedAgent?.id === agent.id ? null : agent)}
+                title={agent.name}
+              >
+                <Settings2Icon />
+                <span class="sr-only">{agent.name}</span>
+              </Button>
+            {/if}
             {#if agent.custom_config !== null}
               <Button
                 variant="ghost"
@@ -394,6 +412,32 @@
     {/each}
   {/if}
 </div>
+
+<!-- Agent runtime management dialog -->
+<Dialog.Root
+  open={managedAgent !== null && !isHub}
+  onOpenChange={(open) => !open && (managedAgent = null)}
+>
+  <Dialog.Content class="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-2xl">
+    {#if managedAgent !== null}
+      <Dialog.Header>
+        <Dialog.Title>{managedAgent.name}</Dialog.Title>
+        <Dialog.Description>{m.agent_management_description()}</Dialog.Description>
+      </Dialog.Header>
+      <div class="min-h-0 flex-1 overflow-y-auto pr-1">
+        <AgentManagementPanel
+          {nodeId}
+          agentId={managedAgent.id}
+          agentName={managedAgent.name}
+          embedded
+        />
+      </div>
+      <Dialog.Footer class="shrink-0">
+        <Dialog.Close>{m.common_close()}</Dialog.Close>
+      </Dialog.Footer>
+    {/if}
+  </Dialog.Content>
+</Dialog.Root>
 
 <!-- Agent removal confirmation -->
 <AlertDialog.Root

@@ -23,6 +23,9 @@ import type {
   NodeTokenSummary,
   NodeTokensResponse,
   NodesResponse,
+  AgentManagementSnapshot,
+  AgentMcpAction,
+  AgentMcpDefinition,
   ProjectLinkRequest,
   ProjectLinkResponse,
   ProjectPreview,
@@ -272,6 +275,50 @@ export class ApiClient {
   /** `POST /api/v1/diagnostics/incidents/:id/resolve`. */
   resolveIncident(id: number): Promise<void> {
     return this.#request("POST", `/api/v1/diagnostics/incidents/${id}/resolve`);
+  }
+
+  /** `GET /api/v1/nodes/:nodeId/agents/:agentId/management` (local node only). */
+  agentManagement(nodeId: string, agentId: string): Promise<AgentManagementSnapshot> {
+    return this.#request(
+      "GET",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/management`,
+    );
+  }
+
+  /** `POST .../agents/:agentId/management/mcp/:name/connect|disconnect`. */
+  agentMcpAction(
+    nodeId: string,
+    agentId: string,
+    name: string,
+    action: AgentMcpAction,
+  ): Promise<AgentManagementSnapshot> {
+    return this.#request(
+      "POST",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/management/mcp/${encodeURIComponent(name)}/${action}`,
+      { body: {} },
+    );
+  }
+
+  /** `PUT .../agents/:agentId/management/mcp/:name`. */
+  upsertAgentMcp(
+    nodeId: string,
+    agentId: string,
+    name: string,
+    definition: AgentMcpDefinition,
+  ): Promise<AgentManagementSnapshot> {
+    return this.#request(
+      "PUT",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/management/mcp/${encodeURIComponent(name)}`,
+      { body: definition },
+    );
+  }
+
+  /** `DELETE .../agents/:agentId/management/mcp/:name`. */
+  removeAgentMcp(nodeId: string, agentId: string, name: string): Promise<AgentManagementSnapshot> {
+    return this.#request(
+      "DELETE",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/management/mcp/${encodeURIComponent(name)}`,
+    );
   }
 
   /** `GET /api/v1/nodes/:id/fs/browse` */

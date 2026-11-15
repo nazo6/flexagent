@@ -40,7 +40,9 @@
     createdAt?: number | null;
   } = $props();
 
-  const properties = $derived(Object.entries(requestedSchema.properties ?? {}));
+  const allProperties = $derived(Object.entries(requestedSchema.properties ?? {}));
+  // OpenCode form fields can be hidden while still carrying a value/default.
+  const properties = $derived(allProperties.filter(([, property]) => property.hidden !== true));
   const required = $derived(new Set(requestedSchema.required ?? []));
 
   /** Seed the form from the schema (default / empty) for this elicitation. */
@@ -140,7 +142,8 @@
   /** Content sent with `accept` (empty optional fields are omitted). */
   function buildContent(): Record<string, ElicitationValue> {
     const content: Record<string, ElicitationValue> = {};
-    for (const [key] of properties) {
+    // Include hidden fields so their defaults reach agents that require them.
+    for (const [key] of allProperties) {
       const value = values[key];
       if (typeof value === "string") {
         if (value.trim() !== "") content[key] = value;

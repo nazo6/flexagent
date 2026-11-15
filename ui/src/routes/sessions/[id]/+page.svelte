@@ -87,6 +87,7 @@
     return null;
   });
   const capabilities = $derived(capabilitiesFromEvents(timeline.events));
+  const canRevert = $derived(capabilities?.nativeFeatures.includes("revert") ?? false);
   // Prefer the latest usage derived from events, and fall back to the session list (projection) value.
   const usage = $derived(latestUsageFromEvents(timeline.events) ?? session?.usage ?? null);
   // Merge persistent events (ProvisioningLog synced after a turn completes) with the
@@ -256,6 +257,7 @@
    * button via `RESUME_REQUIRED`).
    */
   let resumeRequired = $state(false);
+  let composerRef = $state<ReturnType<typeof Composer> | null>(null);
 
   /** Show Resume only for sessions where unsupported native restore was detected. */
   const canResume = $derived(resumeRequired && session !== null);
@@ -276,6 +278,28 @@
   /** Mobile header: open the tool, or close the dock when it is already active. */
   function handleToggleTool(tool: DockLauncherId): void {
     dock.toggleTool(tool);
+  }
+
+  /** Revert the native conversation to the selected message boundary. */
+  async function handleRevertItem(item: TimelineItem): Promise<void> {
+    if (!sessionId) return;
+    try {
+      const result = await sync.controlSession(sessionId, {
+        action: "revert",
+        up_to_node_seq: item.seq,
+        files: true,
+      });
+      if (result.success) {
+        if (item.kind === "user" && item.text !== "") {
+          composerRef?.restoreText(item.text);
+        }
+        toast.success(m.chat_action_reverted());
+      } else {
+        toast.error(commandErrorMessage(result.error) ?? m.chat_action_revert_failed());
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
   }
 
   function handleForkItem(item: TimelineItem): void {
@@ -457,6 +481,8 @@
               {forkFromTitle}
               {forkAfterSeq}
               onfork={handleForkItem}
+              {canRevert}
+              onrevert={handleRevertItem}
               onsubagent={(childSessionId) => (selectedSubagentId = childSessionId)}
             />
           </div>
@@ -490,6 +516,7 @@
         <div class="mx-auto max-w-[760px]">
           {#key sessionId}
             <Composer
+              bind:this={composerRef}
               {sessionId}
               {capabilities}
               node={sessionNode}
