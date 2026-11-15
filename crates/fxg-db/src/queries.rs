@@ -401,13 +401,9 @@ pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<ProjectSummary>, DbE
 
 /// Resolves the default execution directory path.
 ///
-/// # Resolution order
-///
-/// 1. Among the `(project_id, node_id)` bindings, the one **most recently used**
-///    (including Worktrees; see [`select_default_binding_path`])
-/// 2. If there is no binding, the `local_path` of the latest `(project_id, node_id)` session
-///    (fallback for sessions executed before binding registration on session start was
-///    implemented)
+/// Returns the **most recently used** `(project_id, node_id)` binding, including Worktrees
+/// (see [`select_default_binding_path`]). Sessions always register their binding when they
+/// start, so the binding table is the only source of a default path.
 ///
 /// Used as the default when `local_path` is omitted in a session start request, shared by both
 /// the node and the hub (design: docs/01-architecture-and-sync.md §4).
@@ -417,28 +413,10 @@ pub async fn resolve_default_local_path(
     node_id: &NodeId,
 ) -> Result<Option<String>, DbError> {
     let projects = list_projects(pool).await?;
-    if let Some(project) = projects
+    Ok(projects
         .iter()
         .find(|project| &project.project_id == project_id)
-        && let Some(path) = select_default_binding_path(&project.bindings, node_id)
-    {
-        return Ok(Some(path));
-    }
-
-    let sessions = list_sessions(
-        pool,
-        &SessionFilter {
-            project_id: Some(project_id.clone()),
-            node_id: Some(node_id.clone()),
-            limit: Some(1),
-            ..SessionFilter::default()
-        },
-    )
-    .await?;
-    Ok(sessions
-        .into_iter()
-        .next()
-        .map(|session| session.local_path))
+        .and_then(|project| select_default_binding_path(&project.bindings, node_id)))
 }
 
 /// Chooses the default path from a list of bindings.

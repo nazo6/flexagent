@@ -49,4 +49,7 @@ pub use extension::{
     AgentExtension, AgentMetadata, CapabilitiesSnapshot, CapabilityOverlay, ConfigOptionPatch,
     EventDisposition, Hook, SessionContext, SessionExtension,
 };
-pub use provider::{AgentBackend, AgentDefinition, AgentProvider, LaunchPreset, StaticProvider};
+pub use provider::{
+    AgentAuth, AgentBackend, AgentCommand, AgentDefinition, AgentProvider, LaunchPreset,
+    StaticProvider,
+};

@@ -295,7 +295,7 @@ impl Db {
         queries::find_session_by_agent_session(&self.pool, agent_id, agent_session_id).await
     }
 
-    /// Resolves the default execution directory path (binding first, then latest session).
+    /// Resolves the default execution directory path from the project bindings.
     pub async fn resolve_default_local_path(
         &self,
         project_id: &fxg_protocol::ProjectId,

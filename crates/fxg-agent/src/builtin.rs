@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use crate::opencode::OpenCodeExtension;
-use crate::opencode_native::OpenCodeNativeDriver;
+use crate::opencode_native::{OpenCodeNativeDriver, auth as opencode_auth};
 use crate::provider::{AgentBackend, AgentDefinition, AgentProvider, LaunchPreset, StaticProvider};
 
 /// OpenCode native driver (Tier 3, OpenCode v2 HTTP + SSE).
@@ -50,7 +50,8 @@ pub fn providers() -> Vec<Arc<dyn AgentProvider>> {
                     args: &["serve"],
                 }),
             )
-            .with_backend(AgentBackend::Custom(opencode)),
+            .with_backend(AgentBackend::Custom(opencode))
+            .with_auth(opencode_auth()),
         ),
         Arc::new(
             StaticProvider::new(
@@ -136,4 +137,36 @@ fn acp_provider(
         },
         Some(LaunchPreset { program, args }),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_opencode_declares_terminal_login() {
+        let providers = providers();
+        let opencode = providers
+            .iter()
+            .find(|provider| provider.definition().id == OPENCODE)
+            .expect("opencode provider");
+        let auth = opencode.auth().expect("native auth");
+        assert_eq!(auth.methods.len(), 1);
+        assert_eq!(
+            auth.methods[0].kind,
+            fxg_protocol::common::AgentAuthMethodKind::Terminal
+        );
+        assert_eq!(auth.login.expect("login").args, &["auth", "login"]);
+        assert_eq!(auth.logout.expect("logout").args, &["auth", "logout"]);
+    }
+
+    #[test]
+    fn acp_providers_have_no_native_auth() {
+        let providers = providers();
+        let acp = providers
+            .iter()
+            .find(|provider| provider.definition().id == OPENCODE_ACP)
+            .expect("opencode-acp provider");
+        assert!(acp.auth().is_none());
+    }
 }

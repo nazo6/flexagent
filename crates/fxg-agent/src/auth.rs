@@ -19,6 +19,7 @@ use tokio::sync::oneshot;
 
 use crate::acp::{client_capabilities, map_auth_method};
 use crate::driver::AgentLaunchSpec;
+use crate::provider::AgentCommand;
 
 /// Builds the spawn configuration from a resolved launch spec.
 fn agent_config(spec: &AgentLaunchSpec) -> Result<AcpAgentConfig> {
@@ -167,15 +168,34 @@ pub async fn run_terminal_login(
         .program
         .as_deref()
         .ok_or_else(|| anyhow!("agent {} has no executable configured", spec.agent_id))?;
-    let program = resolve_program(program_path)?;
     let mut args = spec.args.clone();
     args.extend(method.args.iter().cloned());
+    let mut env = spec.env.clone();
+    env.extend(
+        method
+            .env
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone())),
+    );
 
-    let mut command = terminal_command(&program, &args);
-    for (key, value) in &spec.env {
-        command.env(key, value);
-    }
-    for (key, value) in &method.env {
+    run_interactive(program_path, &args, &env).await
+}
+
+/// Runs a native provider's interactive login / logout command.
+pub async fn run_agent_command(command: &AgentCommand, env: &[(String, String)]) -> Result<()> {
+    let args = command
+        .args
+        .iter()
+        .map(|arg| (*arg).to_owned())
+        .collect::<Vec<_>>();
+    run_interactive(Path::new(command.program), &args, env).await
+}
+
+/// Runs an interactive child process with inherited stdio.
+async fn run_interactive(program: &Path, args: &[String], env: &[(String, String)]) -> Result<()> {
+    let program = resolve_program(program)?;
+    let mut command = terminal_command(&program, args);
+    for (key, value) in env {
         command.env(key, value);
     }
     command
@@ -188,7 +208,7 @@ pub async fn run_terminal_login(
         .await
         .with_context(|| format!("failed to run {}", program.display()))?;
     if !status.success() {
-        bail!("login command exited with {status}");
+        bail!("interactive command exited with {status}");
     }
     Ok(())
 }

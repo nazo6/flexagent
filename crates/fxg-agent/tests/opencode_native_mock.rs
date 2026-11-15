@@ -13,7 +13,7 @@
 
 use std::convert::Infallible;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -29,7 +29,8 @@ use fxg_agent::driver::{
 use fxg_agent::extension::AcpExtensionOptions;
 use fxg_agent::opencode_native::OpenCodeNativeDriver;
 use fxg_protocol::common::{
-    ElicitationAction, ElicitationContent, ElicitationValue, PromptInput, StreamDeltaPayload,
+    ElicitationAction, ElicitationContent, ElicitationValue, PlanEntryStatus, PromptInput,
+    StreamDeltaPayload, TurnStopReason,
 };
 use fxg_protocol::events::UnifiedEventPayload;
 use serde_json::{Value, json};
@@ -41,6 +42,7 @@ struct Mock {
     tx: broadcast::Sender<String>,
     calls: Arc<Mutex<Vec<String>>>,
     next_session: Arc<AtomicUsize>,
+    extra_command: Arc<AtomicBool>,
 }
 
 impl Mock {
@@ -60,6 +62,7 @@ async fn native_driver_uses_the_http_and_sse_contract() {
         tx,
         calls: Arc::new(Mutex::new(Vec::new())),
         next_session: Arc::new(AtomicUsize::new(1)),
+        extra_command: Arc::new(AtomicBool::new(false)),
     };
     let app = Router::new()
         .route("/api/info", get(info))
@@ -174,6 +177,8 @@ async fn native_driver_uses_the_http_and_sse_contract() {
     let mut child_announced = false;
     let mut child_text = false;
     let mut child_completed = false;
+    let mut plan = None;
+    let mut turn_ended = None;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     while tokio::time::Instant::now() < deadline {
         let Ok(Some(event)) = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await
@@ -209,6 +214,15 @@ async fn native_driver_uses_the_http_and_sse_contract() {
             }) if child == "ses_child" && message == "child result" => {
                 child_text = true;
             }
+            DriverEvent::Event(UnifiedEventPayload::PlanUpdate {
+                entries,
+                subagent_id: None,
+            }) => {
+                plan = Some(entries);
+            }
+            DriverEvent::Event(UnifiedEventPayload::TurnEnded { reason }) => {
+                turn_ended = Some(reason);
+            }
             DriverEvent::Event(UnifiedEventPayload::StatusChanged {
                 status: fxg_protocol::common::SessionStatus::Idle,
                 ..
@@ -222,6 +236,36 @@ async fn native_driver_uses_the_http_and_sse_contract() {
     assert!(child_announced, "the child session must be announced");
     assert!(child_text, "child text must carry the subagent id");
     assert!(child_completed, "the child completion must be reported");
+    let plan = plan.expect("todowrite must produce a plan update");
+    assert_eq!(plan.len(), 2);
+    assert_eq!(plan[0].title, "Write code");
+    assert_eq!(plan[0].status, PlanEntryStatus::InProgress);
+    assert_eq!(plan[1].status, PlanEntryStatus::Pending);
+    assert_eq!(
+        turn_ended,
+        Some(TurnStopReason::MaxTokens),
+        "finish=length must surface as a max-token turn end"
+    );
+
+    // A completed turn refreshes the command catalog. An unchanged refresh is
+    // suppressed; a new command is announced once.
+    state.emit(
+        json!({"type": "session.execution.succeeded", "id": "evt_refresh_1",
+        "data": {"sessionID": "ses_mock1"}}),
+    );
+    assert!(
+        next_capability_commands(&mut rx, 400).await.is_none(),
+        "an unchanged catalog must not emit duplicate capabilities"
+    );
+    state.extra_command.store(true, Ordering::SeqCst);
+    state.emit(
+        json!({"type": "session.execution.succeeded", "id": "evt_refresh_2",
+        "data": {"sessionID": "ses_mock1"}}),
+    );
+    let commands = next_capability_commands(&mut rx, 2_000)
+        .await
+        .expect("a changed command catalog must be announced");
+    assert!(commands.iter().any(|command| command == "deploy"));
 
     started
         .handle
@@ -343,6 +387,34 @@ async fn native_driver_uses_the_http_and_sse_contract() {
     started.handle.shutdown().await.expect("shutdown");
 }
 
+async fn next_capability_commands(
+    rx: &mut mpsc::UnboundedReceiver<DriverEvent>,
+    timeout_ms: u64,
+) -> Option<Vec<String>> {
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return None;
+        }
+        match tokio::time::timeout(remaining, rx.recv()).await {
+            Ok(Some(DriverEvent::Event(UnifiedEventPayload::CapabilitiesUpdated {
+                available_commands,
+                ..
+            }))) => {
+                return Some(
+                    available_commands
+                        .into_iter()
+                        .map(|command| command.name)
+                        .collect(),
+                );
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) | Err(_) => return None,
+        }
+    }
+}
+
 async fn info() -> Json<Value> {
     Json(json!({"version": "2.2.7"}))
 }
@@ -384,16 +456,20 @@ async fn default_model(uri: axum::http::Uri) -> Json<Value> {
     }}))
 }
 
-async fn commands(uri: axum::http::Uri) -> Json<Value> {
+async fn commands(State(state): State<Mock>, uri: axum::http::Uri) -> Json<Value> {
     assert!(
         uri.query()
             .is_some_and(|query| query.contains("location%5Bdirectory%5D=")),
         "command catalog must be scoped to the session directory: {uri}"
     );
-    Json(json!({"data": [
-        {"name": "review", "description": "Review changes"},
-        {"name": "compact", "description": "Compact"}
-    ]}))
+    let mut data = vec![
+        json!({"name": "review", "description": "Review changes"}),
+        json!({"name": "compact", "description": "Compact"}),
+    ];
+    if state.extra_command.load(Ordering::SeqCst) {
+        data.push(json!({"name": "deploy", "description": "Deploy changes"}));
+    }
+    Json(json!({ "data": data }))
 }
 
 async fn create_session(State(state): State<Mock>) -> Json<Value> {
@@ -446,6 +522,25 @@ async fn prompt(State(state): State<Mock>, Json(body): Json<Value>) -> Json<Valu
             .to_string(),
         );
         let _ = tx.send(
+            json!({"type": "session.tool.input.started", "id": "evt_todo_start",
+                   "data": {"sessionID": "ses_mock1", "id": "tool_todo", "name": "todowrite"}})
+            .to_string(),
+        );
+        let _ = tx.send(
+            json!({"type": "session.tool.called", "id": "evt_todo_called",
+            "data": {"sessionID": "ses_mock1", "id": "tool_todo",
+                     "input": {"todos": [
+                         {"content": "Write code", "status": "in_progress"},
+                         {"content": "Run tests", "status": "pending"}
+                     ]}}})
+            .to_string(),
+        );
+        let _ = tx.send(
+            json!({"type": "session.tool.success", "id": "evt_todo_done",
+                   "data": {"sessionID": "ses_mock1", "id": "tool_todo", "content": []}})
+            .to_string(),
+        );
+        let _ = tx.send(
             json!({"type": "session.text.delta", "id": "evt_delta",
                    "data": {"sessionID": "ses_mock1", "assistantMessageID": "msg_1", "ordinal": 0,
                             "delta": "hello from mock"}})
@@ -474,6 +569,12 @@ async fn prompt(State(state): State<Mock>, Json(body): Json<Value>) -> Json<Valu
         let _ = tx.send(
             json!({"type": "session.execution.succeeded", "id": "evt_child_done",
                    "data": {"sessionID": "ses_child"}})
+            .to_string(),
+        );
+        let _ = tx.send(
+            json!({"type": "session.step.ended", "id": "evt_step",
+                   "data": {"sessionID": "ses_mock1", "finish": "length",
+                            "tokens": {"input": 10, "output": 5}}})
             .to_string(),
         );
         let _ = tx.send(
