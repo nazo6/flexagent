@@ -54,11 +54,11 @@ impl LaunchKey {
         let mut env = spec.env.clone();
         // Normalize so that environment variable ordering does not produce a different key
         env.sort();
+        let options = spec.acp_options().cloned().unwrap_or_default();
         let acp = serde_json::json!({
-            "meta": spec.acp.client_meta.as_ref().map(|meta| meta.as_value()),
-            "notifications": &spec.acp.notifications,
-            "capabilities": spec
-                .acp
+            "meta": options.client_meta.as_ref().map(|meta| meta.as_value()),
+            "notifications": &options.notifications,
+            "capabilities": options
                 .capabilities
                 .iter()
                 .map(crate::extension::AcpCapability::as_str)

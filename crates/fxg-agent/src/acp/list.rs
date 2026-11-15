@@ -60,7 +60,7 @@ pub(super) async fn list_sessions(
     let config = AcpAgentConfig::new(program)
         .args(launch.args.iter().cloned())
         .envs(launch.env.iter().cloned());
-    let acp = launch.acp.clone();
+    let acp = launch.acp_options().cloned().unwrap_or_default();
 
     let (tx, rx) = oneshot::channel();
     let connected = Client

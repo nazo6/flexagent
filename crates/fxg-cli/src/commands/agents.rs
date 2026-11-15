@@ -2,7 +2,6 @@
 
 use anyhow::{Context, Result, bail};
 use fxg_agent::AgentCatalog;
-use fxg_agent::registry::AcpRegistry;
 use fxg_protocol::common::AgentAuthMethodKind;
 use usage::{Args, Subcommands};
 
@@ -32,11 +31,11 @@ async fn agent_catalog() -> Result<AgentCatalog> {
     let paths = fxg_protocol::paths::Paths::resolve(&env, fxg_protocol::paths::Role::Node);
     let db = node_db(&env).await?;
     let settings = db.ensure_agent_settings().await?;
-    Ok(AgentCatalog::new(AcpRegistry::new(
+    Ok(AgentCatalog::new(
         paths,
         &settings,
         db.custom_agents().await?,
-    )))
+    ))
 }
 
 /// `fxg agents login <id>`

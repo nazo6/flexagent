@@ -3,7 +3,8 @@
 use std::path::PathBuf;
 
 use fxg_agent::{
-    AcpDriver, AgentAuthRequired, AgentDriver, AgentLaunchSpec, DriverKind, StartSessionRequest,
+    AcpDriver, AcpLaunchOptions, AgentAuthRequired, AgentDriver, AgentLaunchSpec, LaunchBackend,
+    StartSessionRequest,
 };
 
 fn mock_agent_bin() -> PathBuf {
@@ -23,12 +24,10 @@ async fn session_new_auth_required_returns_advertised_methods() {
         launch: AgentLaunchSpec {
             agent_id: "mock".to_owned(),
             display_name: "Mock".to_owned(),
-            driver_kind: DriverKind::Acp,
-            extension: None,
+            backend: LaunchBackend::Acp(AcpLaunchOptions::default()),
             program: Some(mock_agent_bin()),
             args: vec!["--mode".to_owned(), "auth-required".to_owned()],
             env: Vec::new(),
-            acp: Default::default(),
         },
         extra_args: Vec::new(),
         initial_mode: None,

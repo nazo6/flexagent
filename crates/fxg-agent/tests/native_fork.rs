@@ -3,7 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use fxg_agent::{
-    AcpDriver, AgentDriver, AgentLaunchSpec, DriverKind, NativeForkUnavailable, StartSessionRequest,
+    AcpDriver, AcpLaunchOptions, AgentDriver, AgentLaunchSpec, LaunchBackend,
+    NativeForkUnavailable, StartSessionRequest,
 };
 
 fn mock_agent_bin() -> PathBuf {
@@ -18,12 +19,10 @@ fn request(mode: &str, fork_from: Option<&str>, cwd: &Path) -> StartSessionReque
         launch: AgentLaunchSpec {
             agent_id: "mock".to_owned(),
             display_name: "Mock".to_owned(),
-            driver_kind: DriverKind::Acp,
-            extension: None,
+            backend: LaunchBackend::Acp(AcpLaunchOptions::default()),
             program: Some(mock_agent_bin()),
             args: vec!["--mode".to_owned(), mode.to_owned()],
             env: Vec::new(),
-            acp: Default::default(),
         },
         extra_args: Vec::new(),
         initial_mode: None,

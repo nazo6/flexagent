@@ -380,10 +380,6 @@ impl AgentDriver for AcpDriver {
         list::list_sessions(launch, cwd).await
     }
 
-    fn stderr_tail(&self, agent_id: &str) -> Vec<String> {
-        self.stderr.tail(agent_id)
-    }
-
     fn stderr_snapshot(&self) -> BTreeMap<String, Vec<String>> {
         self.stderr.snapshot()
     }
@@ -473,7 +469,7 @@ impl AcpDriver {
             AcpAgent::new(config),
             req.launch.agent_id.clone(),
             self.stderr.clone(),
-            req.launch.acp.clone(),
+            req.launch.acp_options().cloned().unwrap_or_default(),
         );
         ready_rx
             .await

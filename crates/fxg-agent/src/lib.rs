@@ -29,21 +29,19 @@ pub mod extension;
 pub mod management;
 pub mod opencode;
 pub mod opencode_native;
-pub mod provider;
 pub mod registry;
 mod warm;
 
 pub use acp::AcpDriver;
+pub use builtin::{
+    AgentAuth, AgentBackend, AgentCommand, AgentDefinition, BuiltinAgent, LaunchPreset,
+};
 pub use catalog::AgentCatalog;
 pub use driver::{
-    ActiveSessionHandle, AgentAuthRequired, AgentDriver, AgentLaunchSpec, AgentSessionInfo,
-    AgentSessionList, DriverEvent, DriverKind, DriverSessionCapabilities,
-    ExternalSessionsUnsupported, HistoryCaptureUnavailable, NativeForkUnavailable,
+    AcpLaunchOptions, ActiveSessionHandle, AgentAuthRequired, AgentDriver, AgentLaunchSpec,
+    AgentSessionInfo, AgentSessionList, DriverEvent, DriverKind, DriverSessionCapabilities,
+    ExternalSessionsUnsupported, HistoryCaptureUnavailable, LaunchBackend, NativeForkUnavailable,
     NativeResumeUnavailable, NativeRevertUnavailable, ResumeRequest, StartSessionRequest,
     StartedSession,
 };
 pub use extension::{AgentExtension, AgentMetadata, EventDisposition};
-pub use provider::{
-    AgentAuth, AgentBackend, AgentCommand, AgentDefinition, AgentProvider, LaunchPreset,
-    StaticProvider,
-};

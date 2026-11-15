@@ -10,7 +10,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use fxg_agent::{
-    AcpDriver, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind, StartSessionRequest,
+    AcpDriver, AcpLaunchOptions, AgentDriver, AgentLaunchSpec, DriverEvent, LaunchBackend,
+    StartSessionRequest,
 };
 use fxg_protocol::events::UnifiedEventPayload;
 use tokio::sync::mpsc;
@@ -64,12 +65,10 @@ async fn modes_come_from_config_options_and_set_mode_uses_set_config() {
         launch: AgentLaunchSpec {
             agent_id: "mock".to_owned(),
             display_name: "Mock".to_owned(),
-            driver_kind: DriverKind::Acp,
-            extension: None,
+            backend: LaunchBackend::Acp(AcpLaunchOptions::default()),
             program: Some(mock_agent_bin()),
             args: vec!["--mode".to_owned(), "modes-as-config".to_owned()],
             env: Vec::new(),
-            acp: Default::default(),
         },
         extra_args: Vec::new(),
         initial_mode: Some("plan".to_owned()),

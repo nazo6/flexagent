@@ -7,7 +7,8 @@ use std::time::Duration;
 use fxg_agent::extension::AgentExtension;
 use fxg_agent::opencode::OpenCodeExtension;
 use fxg_agent::{
-    AcpDriver, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind, StartSessionRequest,
+    AcpDriver, AcpLaunchOptions, AgentDriver, AgentLaunchSpec, DriverEvent, LaunchBackend,
+    StartSessionRequest,
 };
 use fxg_protocol::common::PromptInput;
 use fxg_protocol::events::UnifiedEventPayload;
@@ -35,21 +36,18 @@ fn request(mode: &str, mut launch: AgentLaunchSpec, cwd: &Path) -> StartSessionR
 
 fn launch(
     extension: Option<&str>,
-    acp: fxg_agent::extension::AcpExtensionOptions,
+    options: fxg_agent::extension::AcpExtensionOptions,
 ) -> AgentLaunchSpec {
     AgentLaunchSpec {
         agent_id: extension.unwrap_or("mock").to_owned(),
         display_name: "Mock".to_owned(),
-        driver_kind: if extension.is_some() {
-            DriverKind::AcpExtended
-        } else {
-            DriverKind::Acp
-        },
-        extension: extension.map(str::to_owned),
+        backend: LaunchBackend::Acp(AcpLaunchOptions {
+            extension: extension.map(str::to_owned),
+            options,
+        }),
         program: Some(mock_agent_bin()),
         args: Vec::new(),
         env: Vec::new(),
-        acp,
     }
 }
 

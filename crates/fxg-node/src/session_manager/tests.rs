@@ -3,8 +3,7 @@ use super::replay::*;
 use super::*;
 use crate::testutil::MockAgent;
 use fxg_agent::AgentSessionInfo;
-use fxg_agent::registry::AcpRegistry;
-use fxg_agent::{AgentBackend, AgentCatalog, AgentDefinition, StaticProvider};
+use fxg_agent::{AgentBackend, AgentCatalog, AgentDefinition, BuiltinAgent};
 use fxg_db::Db;
 use fxg_db::queries::SessionFilter;
 use fxg_protocol::SessionId;
@@ -58,11 +57,7 @@ async fn setup() -> (SessionManager, MockAgent, tempfile::TempDir) {
         revision: 1,
         updated_at: 0,
     };
-    let catalog = AgentCatalog::new(AcpRegistry::new(
-        Paths::portable(dir.path(), Role::Node),
-        &settings,
-        custom,
-    ));
+    let catalog = AgentCatalog::new(Paths::portable(dir.path(), Role::Node), &settings, custom);
 
     let mock = MockAgent::default();
     let manager = SessionManager::with_factory(bus, "test-node", catalog, mock.factory());
@@ -278,7 +273,7 @@ async fn full_custom_driver_starts_through_the_catalog() {
     };
     let mock = MockAgent::default();
     mock.set_start_capabilities(AgentCapabilitiesPreview::default());
-    let provider = StaticProvider::new(
+    let agent = BuiltinAgent::new(
         AgentDefinition {
             id: "custom".to_owned(),
             name: "Custom".to_owned(),
@@ -288,13 +283,11 @@ async fn full_custom_driver_starts_through_the_catalog() {
         None,
     )
     .with_backend(AgentBackend::Custom(Arc::new(mock.clone())));
-    let catalog = AgentCatalog::with_providers(
-        AcpRegistry::new(
-            Paths::portable(dir.path(), Role::Node),
-            &settings,
-            BTreeMap::new(),
-        ),
-        vec![Arc::new(provider)],
+    let catalog = AgentCatalog::with_agents(
+        Paths::portable(dir.path(), Role::Node),
+        &settings,
+        BTreeMap::new(),
+        vec![agent],
     );
     let manager = SessionManager::new(bus, "test-node", catalog);
 
@@ -338,7 +331,7 @@ async fn full_custom_driver_probe_uses_the_catalog_driver() {
         config_options: Vec::new(),
     };
     mock.set_start_capabilities(preview.clone());
-    let provider = StaticProvider::new(
+    let agent = BuiltinAgent::new(
         AgentDefinition {
             id: "custom".to_owned(),
             name: "Custom".to_owned(),
@@ -348,13 +341,11 @@ async fn full_custom_driver_probe_uses_the_catalog_driver() {
         None,
     )
     .with_backend(AgentBackend::Custom(Arc::new(mock.clone())));
-    let catalog = AgentCatalog::with_providers(
-        AcpRegistry::new(
-            Paths::portable(dir.path(), Role::Node),
-            &settings,
-            BTreeMap::new(),
-        ),
-        vec![Arc::new(provider)],
+    let catalog = AgentCatalog::with_agents(
+        Paths::portable(dir.path(), Role::Node),
+        &settings,
+        BTreeMap::new(),
+        vec![agent],
     );
     let manager = SessionManager::new(bus, "test-node", catalog);
 

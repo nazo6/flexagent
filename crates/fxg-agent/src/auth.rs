@@ -18,8 +18,8 @@ use fxg_protocol::common::{AgentAuthMethodInfo, AgentAuthMethodKind};
 use tokio::sync::oneshot;
 
 use crate::acp::{client_capabilities, map_auth_method};
+use crate::builtin::AgentCommand;
 use crate::driver::AgentLaunchSpec;
-use crate::provider::AgentCommand;
 
 /// Builds the spawn configuration from a resolved launch spec.
 fn agent_config(spec: &AgentLaunchSpec) -> Result<AcpAgentConfig> {

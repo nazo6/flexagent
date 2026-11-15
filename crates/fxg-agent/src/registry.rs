@@ -26,35 +26,7 @@ use fxg_protocol::paths::{Paths, REGISTRY_CACHE_FILE_NAME};
 use fxg_protocol::settings::{AgentSettings, CustomAgentConfig, CustomAgentOrigin};
 use serde::{Deserialize, Serialize};
 
-use crate::driver::{AgentLaunchSpec, DriverKind};
-
-/// In-memory catalog state owned by `node.db`.
-#[derive(Debug, Clone, Default)]
-pub struct AgentCatalogState {
-    /// Registry URL (`None` = built-in default)
-    pub registry_url: Option<String>,
-    /// Registry cache TTL in seconds (`None` = built-in default)
-    pub cache_ttl_secs: Option<u64>,
-    /// Effective aliases (built-ins merged with the configured ones)
-    pub aliases: BTreeMap<String, String>,
-    /// Custom agent definitions
-    pub custom: BTreeMap<String, CustomAgentConfig>,
-}
-
-impl AgentCatalogState {
-    /// Builds the catalog from the persisted settings.
-    pub fn from_settings(
-        settings: &AgentSettings,
-        custom: BTreeMap<String, CustomAgentConfig>,
-    ) -> Self {
-        Self {
-            registry_url: settings.registry_url.clone(),
-            cache_ttl_secs: settings.registry_cache_ttl_secs,
-            aliases: settings.aliases.clone(),
-            custom,
-        }
-    }
-}
+use crate::driver::{AgentLaunchSpec, LaunchBackend};
 
 /// `agents[].distribution`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -213,21 +185,29 @@ impl AgentListEntry {
     }
 }
 
-/// ACP Registry management (fetch, cache, import).
+/// Registry fetch/cache settings (owned by the node settings).
+#[derive(Debug, Clone, Default)]
+struct RegistryOptions {
+    /// Registry URL (`None` = built-in default)
+    registry_url: Option<String>,
+    /// Registry cache TTL in seconds (`None` = built-in default)
+    cache_ttl_secs: Option<u64>,
+}
+
+/// ACP Registry client (fetch, cache, import).
+///
+/// Registry entries are not part of the runtime catalog: the catalog keeps the
+/// custom definitions and hands the registry only the fetch settings.
 #[derive(Debug, Clone)]
 pub struct AcpRegistry {
     paths: Paths,
-    catalog: Arc<RwLock<AgentCatalogState>>,
+    options: Arc<RwLock<RegistryOptions>>,
     http: reqwest::Client,
 }
 
 impl AcpRegistry {
-    /// Creates from the node's role paths and the persisted agent catalog.
-    pub fn new(
-        paths: Paths,
-        settings: &AgentSettings,
-        custom: BTreeMap<String, CustomAgentConfig>,
-    ) -> Self {
+    /// Creates a client for the node's role paths.
+    pub fn new(paths: Paths) -> Self {
         let http = reqwest::Client::builder()
             .user_agent(concat!("fxg/", env!("CARGO_PKG_VERSION")))
             .timeout(Duration::from_secs(300))
@@ -235,40 +215,25 @@ impl AcpRegistry {
             .unwrap_or_else(|_| reqwest::Client::new());
         Self {
             paths,
-            catalog: Arc::new(RwLock::new(AgentCatalogState::from_settings(
-                settings, custom,
-            ))),
+            options: Arc::new(RwLock::new(RegistryOptions::default())),
             http,
         }
     }
 
-    /// Replaces the in-memory catalog after a DB update.
-    pub fn apply_catalog(
-        &self,
-        settings: &AgentSettings,
-        custom: BTreeMap<String, CustomAgentConfig>,
-    ) {
-        let mut catalog = self.catalog.write().expect("agent catalog lock poisoned");
-        *catalog = AgentCatalogState::from_settings(settings, custom);
+    /// Applies the persisted registry settings (owned by `node.db`).
+    pub fn configure(&self, registry_url: Option<String>, cache_ttl_secs: Option<u64>) {
+        let mut options = self.options.write().expect("registry options poisoned");
+        options.registry_url = registry_url;
+        options.cache_ttl_secs = cache_ttl_secs;
     }
 
-    fn catalog(&self) -> std::sync::RwLockReadGuard<'_, AgentCatalogState> {
-        self.catalog.read().expect("agent catalog lock poisoned")
+    fn options(&self) -> std::sync::RwLockReadGuard<'_, RegistryOptions> {
+        self.options.read().expect("registry options poisoned")
     }
 
     /// Cache file path (`<cache>/node/registry.json`).
     pub fn cache_path(&self) -> PathBuf {
         self.paths.cache_dir().join(REGISTRY_CACHE_FILE_NAME)
-    }
-
-    /// Returns custom agent definitions from the DB catalog.
-    pub fn custom_agents(&self) -> BTreeMap<String, CustomAgentConfig> {
-        self.catalog().custom.clone()
-    }
-
-    /// Returns one custom agent definition.
-    pub fn custom_agent(&self, id: &str) -> Option<CustomAgentConfig> {
-        self.catalog().custom.get(id).cloned()
     }
 
     /// Runner that can launch the `npx` / `uvx` distribution (`None` if neither exists).
@@ -289,15 +254,6 @@ impl AcpRegistry {
             other => other,
         };
         format!("{os}-{}", std::env::consts::ARCH)
-    }
-
-    /// Resolves an agent name (alias / custom name) to the real agent ID.
-    pub fn resolve_alias(&self, name: &str) -> String {
-        self.catalog()
-            .aliases
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| name.to_owned())
     }
 
     /// Returns the registry index.
@@ -331,7 +287,7 @@ impl AcpRegistry {
     /// Fetches the registry (bypassing the cache).
     pub async fn fetch(&self) -> anyhow::Result<RegistryIndex> {
         let registry_url = self
-            .catalog()
+            .options()
             .registry_url
             .clone()
             .filter(|url| !url.trim().is_empty())
@@ -389,7 +345,7 @@ impl AcpRegistry {
                 }
             };
             let ttl_secs = self
-                .catalog()
+                .options()
                 .cache_ttl_secs
                 .unwrap_or(AgentSettings::DEFAULT_REGISTRY_CACHE_TTL_SECS);
             if age > Duration::from_secs(ttl_secs) {
@@ -427,34 +383,6 @@ impl AcpRegistry {
         }
         let json = serde_json::to_string_pretty(index)?;
         std::fs::write(&path, json).with_context(|| format!("failed to write {}", path.display()))
-    }
-
-    /// Lists custom agent definitions from `node.db`.
-    pub fn custom_entries(&self) -> Vec<AgentListEntry> {
-        self.custom_agents()
-            .into_iter()
-            .map(|(id, config)| {
-                let version = match &config.origin {
-                    Some(CustomAgentOrigin::Registry { version, .. }) => version.clone(),
-                    _ => "-".to_owned(),
-                };
-                let extension = config.extension.clone();
-                let capabilities = config.capabilities.clone();
-                AgentListEntry {
-                    name: config.name.clone().unwrap_or_else(|| id.clone()),
-                    backend: AgentBackendKind::Acp,
-                    has_management: false,
-                    icon: config.icon.clone(),
-                    id,
-                    version,
-                    description: config.description.clone(),
-                    sources: Vec::new(),
-                    custom: Some(config),
-                    extension,
-                    capabilities,
-                }
-            })
-            .collect()
     }
 
     /// Builds an import preview for one registry entry.
@@ -570,47 +498,6 @@ impl AcpRegistry {
         sources
     }
 
-    /// Builds a launch spec from a custom definition (`None` when not defined).
-    pub fn custom_launch_spec(
-        &self,
-        id: &str,
-        extra_args: &[String],
-    ) -> anyhow::Result<Option<AgentLaunchSpec>> {
-        let Some(custom) = self.custom_agents().remove(id) else {
-            return Ok(None);
-        };
-        let mut args = custom.args.clone();
-        args.extend(extra_args.iter().cloned());
-        let mut env: Vec<(String, String)> = custom
-            .env
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        // Resolve `env_secrets` from `<data>/node/secrets/<id>`. A missing
-        // value aborts the launch (never start with an empty token).
-        for (key, secret_id) in &custom.env_secrets {
-            let path = self.paths.secrets_dir().join(secret_id.as_str());
-            let value = std::fs::read_to_string(&path).map_err(|err| {
-                anyhow!(
-                    "secret {} referenced by {key} is missing ({}): {err}",
-                    secret_id.as_str(),
-                    path.display()
-                )
-            })?;
-            env.push((key.clone(), value.trim_end_matches(['\r', '\n']).to_owned()));
-        }
-        Ok(Some(AgentLaunchSpec {
-            agent_id: id.to_owned(),
-            display_name: custom.name.clone().unwrap_or_else(|| id.to_owned()),
-            driver_kind: DriverKind::Acp,
-            extension: None,
-            program: Some(PathBuf::from(&custom.command)),
-            args,
-            env,
-            acp: Default::default(),
-        }))
-    }
-
     /// Builds a launch spec from a launch source.
     fn spec_for_source(
         &self,
@@ -652,12 +539,10 @@ impl AcpRegistry {
         Some(AgentLaunchSpec {
             agent_id: agent.id.clone(),
             display_name: agent.name.clone(),
-            driver_kind: DriverKind::Acp,
-            extension: None,
+            backend: LaunchBackend::Acp(Default::default()),
             program: Some(program),
             args,
             env: env.into_iter().collect(),
-            acp: Default::default(),
         })
     }
 
@@ -720,37 +605,8 @@ mod tests {
     }
     "#;
 
-    fn settings() -> AgentSettings {
-        AgentSettings {
-            registry_url: None,
-            registry_cache_ttl_secs: None,
-            aliases: BTreeMap::new(),
-            revision: 1,
-            updated_at: 0,
-        }
-    }
-
-    fn custom_agents() -> BTreeMap<String, CustomAgentConfig> {
-        BTreeMap::from([(
-            "my-agent".to_owned(),
-            CustomAgentConfig {
-                name: Some("My Agent".to_owned()),
-                command: "my-agent".to_owned(),
-                args: vec!["--flag".to_owned()],
-                env: BTreeMap::from([("KEY".to_owned(), "value".to_owned())]),
-                env_secrets: BTreeMap::new(),
-                extension: None,
-                ..Default::default()
-            },
-        )])
-    }
-
     fn registry(dir: &Path) -> AcpRegistry {
-        AcpRegistry::new(
-            Paths::portable(dir, Role::Node),
-            &settings(),
-            custom_agents(),
-        )
+        AcpRegistry::new(Paths::portable(dir, Role::Node))
     }
 
     #[test]
@@ -786,35 +642,6 @@ mod tests {
     }
 
     #[test]
-    fn resolves_alias_and_custom_priority() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let mut settings = settings();
-        settings
-            .aliases
-            .insert("fast".to_owned(), "my-agent".to_owned());
-        let registry = AcpRegistry::new(
-            Paths::portable(dir.path(), Role::Node),
-            &settings,
-            custom_agents(),
-        );
-        // User-defined alias
-        assert_eq!(registry.resolve_alias("fast"), "my-agent");
-        // Removed built-in aliases pass through unchanged
-        assert_eq!(registry.resolve_alias("antigravity"), "antigravity");
-        // Unknown names pass through unchanged
-        assert_eq!(registry.resolve_alias("unknown-agent"), "unknown-agent");
-
-        let spec = registry
-            .custom_launch_spec("my-agent", &["--extra".to_owned()])
-            .expect("custom spec")
-            .expect("custom definition");
-        assert_eq!(spec.driver_kind, DriverKind::Acp);
-        assert_eq!(spec.program, Some(PathBuf::from("my-agent")));
-        assert_eq!(spec.args, vec!["--flag", "--extra"]);
-        assert_eq!(spec.env, vec![("KEY".to_owned(), "value".to_owned())]);
-    }
-
-    #[test]
     fn resolves_npx_specs() {
         let dir = tempfile::tempdir().expect("tempdir");
         let registry = registry(dir.path());
@@ -827,6 +654,7 @@ mod tests {
         assert_eq!(spec.program, Some(PathBuf::from("npx")));
         assert_eq!(spec.args, vec!["-y", "demo-agent@1.2.3", "--acp"]);
         assert_eq!(spec.env, vec![("DEMO".to_owned(), "1".to_owned())]);
+        assert_eq!(spec.backend, LaunchBackend::Acp(Default::default()));
     }
 
     #[test]
@@ -843,19 +671,6 @@ mod tests {
             "unexpected: {err}"
         );
         assert!(err.to_string().contains("PATH"), "unexpected: {err}");
-    }
-
-    #[test]
-    fn custom_entries_list_definitions_with_registry_metadata() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let registry = registry(dir.path());
-
-        let custom = registry.custom_entries();
-        assert_eq!(custom.len(), 1);
-        assert_eq!(custom[0].id, "my-agent");
-        assert!(custom[0].custom.is_some());
-        assert!(custom[0].is_available());
-        assert_eq!(custom[0].version, "-");
     }
 
     #[test]
@@ -889,61 +704,6 @@ mod tests {
             summary
                 .distribution
                 .contains(&RegistryDistributionKind::Npx)
-        );
-    }
-
-    #[tokio::test]
-    async fn custom_agent_env_secrets_are_resolved_from_the_store() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let paths = Paths::portable(dir.path(), Role::Node);
-        std::fs::create_dir_all(paths.secrets_dir()).expect("mkdir");
-        std::fs::write(paths.secrets_dir().join("key-1"), "secret-value\n").expect("write");
-        let custom = BTreeMap::from([
-            (
-                "secret-agent".to_owned(),
-                CustomAgentConfig {
-                    name: Some("Secret Agent".to_owned()),
-                    command: "node".to_owned(),
-                    args: Vec::new(),
-                    env: BTreeMap::from([("PLAIN".to_owned(), "value".to_owned())]),
-                    env_secrets: BTreeMap::from([(
-                        "API_KEY".to_owned(),
-                        fxg_protocol::SecretId::new("key-1"),
-                    )]),
-                    extension: None,
-                    ..Default::default()
-                },
-            ),
-            (
-                "missing-secret-agent".to_owned(),
-                CustomAgentConfig {
-                    command: "node".to_owned(),
-                    env_secrets: BTreeMap::from([(
-                        "API_KEY".to_owned(),
-                        fxg_protocol::SecretId::new("missing"),
-                    )]),
-                    ..Default::default()
-                },
-            ),
-        ]);
-        let registry = AcpRegistry::new(paths, &settings(), custom);
-        let spec = registry
-            .custom_launch_spec("secret-agent", &[])
-            .expect("spec")
-            .expect("custom definition");
-        assert!(spec.env.contains(&("PLAIN".to_owned(), "value".to_owned())));
-        assert!(
-            spec.env
-                .contains(&("API_KEY".to_owned(), "secret-value".to_owned()))
-        );
-
-        // A missing secret must abort the launch instead of starting with an empty value.
-        let err = registry
-            .custom_launch_spec("missing-secret-agent", &[])
-            .expect_err("missing secret");
-        assert!(
-            err.to_string().contains("is missing"),
-            "unexpected error: {err}"
         );
     }
 }

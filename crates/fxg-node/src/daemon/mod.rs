@@ -17,7 +17,6 @@ use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 
 use fxg_agent::AgentCatalog;
-use fxg_agent::registry::AcpRegistry;
 use fxg_db::Db;
 use fxg_hub::api::ClientEvent;
 use fxg_hub::push::{PushService, RunningTurns};
@@ -318,11 +317,7 @@ impl DaemonState {
         push.set_subject(node_settings.vapid_subject.as_deref());
         let running_turns = RunningTurns::default();
         let agent_settings = db.ensure_agent_settings().await?;
-        let catalog = AgentCatalog::new(AcpRegistry::new(
-            paths.clone(),
-            &agent_settings,
-            db.custom_agents().await?,
-        ));
+        let catalog = AgentCatalog::new(paths.clone(), &agent_settings, db.custom_agents().await?);
         let sessions = match driver_factory {
             Some(factory) => {
                 SessionManager::with_factory(bus.clone(), config.node_id.clone(), catalog, factory)
