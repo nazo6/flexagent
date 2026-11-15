@@ -245,7 +245,7 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
             get(workspace_git_diff::<B>),
         )
         .route(
-            "/api/v1/settings/hub",
+            "/api/v1/hub/settings",
             get(hub_settings::<B>).patch(update_hub_settings::<B>),
         )
         .route("/api/v1/nodes/{node_id}/settings", get(node_settings::<B>))

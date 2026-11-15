@@ -57,3 +57,41 @@ pub(super) async fn create_worktree(
     }
     Ok(PathBuf::from(path))
 }
+
+/// Replaces the port component of a `host:port` bind address.
+pub(super) fn replace_port(listen_addr: &str, port: u16, default_host: &str) -> String {
+    let host = listen_addr
+        .rsplit_once(':')
+        .map(|(host, _)| host)
+        .unwrap_or(default_host);
+    format!("{host}:{port}")
+}
+
+/// Appends logging flags to detached child-process arguments.
+pub(super) fn push_log_args(
+    args: &mut Vec<String>,
+    log_level: Option<&str>,
+    log_file: Option<&str>,
+    no_log_file: bool,
+    log_format: Option<&str>,
+    no_color: bool,
+) {
+    if let Some(level) = log_level {
+        args.push("--log-level".to_owned());
+        args.push(level.to_owned());
+    }
+    if let Some(file) = log_file {
+        args.push("--log-file".to_owned());
+        args.push(file.to_owned());
+    }
+    if no_log_file {
+        args.push("--no-log-file".to_owned());
+    }
+    if let Some(format) = log_format {
+        args.push("--log-format".to_owned());
+        args.push(format.to_owned());
+    }
+    if no_color {
+        args.push("--no-color".to_owned());
+    }
+}

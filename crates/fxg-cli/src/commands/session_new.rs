@@ -14,7 +14,7 @@ use super::*;
 pub(super) fn build_prompt_input(text: &str, attachments: &[String]) -> Result<PromptInput> {
     let mut input = PromptInput::text(text);
     for path in attachments {
-        let canonical = std::fs::canonicalize(path)
+        let canonical = dunce::canonicalize(path)
             .with_context(|| format!("failed to resolve attachment {path}"))?;
         let metadata = std::fs::metadata(&canonical)
             .with_context(|| format!("failed to read attachment {}", canonical.display()))?;

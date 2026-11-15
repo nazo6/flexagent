@@ -103,6 +103,7 @@ fn is_loopback_host(host: &str, port: u16) -> bool {
         format!("[::1]:{port}"),
         "localhost".to_owned(),
         "127.0.0.1".to_owned(),
+        "[::1]".to_owned(),
     ];
     allowed
         .iter()
@@ -181,4 +182,25 @@ fn extract_cookie(header: &str, key: &str) -> Option<String> {
             None
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loopback_host_allows_ipv4_ipv6_and_localhost_with_or_without_port() {
+        for host in [
+            "localhost",
+            "127.0.0.1",
+            "[::1]",
+            "localhost:7860",
+            "127.0.0.1:7860",
+            "[::1]:7860",
+        ] {
+            assert!(is_loopback_host(host, 7860), "expected {host} allowed");
+        }
+        assert!(!is_loopback_host("localhost:9999", 7860));
+        assert!(!is_loopback_host("evil.example.com", 7860));
+    }
 }

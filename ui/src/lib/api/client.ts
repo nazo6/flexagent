@@ -646,14 +646,14 @@ export class ApiClient {
   // Settings / secrets
   // ------------------------------------------------------------------
 
-  /** `GET /api/v1/settings/hub` (hub). */
+  /** `GET /api/v1/hub/settings` (hub). */
   hubSettings(): Promise<HubSettingsSnapshot> {
-    return this.#request("GET", "/api/v1/settings/hub");
+    return this.#request("GET", "/api/v1/hub/settings");
   }
 
-  /** `PATCH /api/v1/settings/hub` (hub). */
+  /** `PATCH /api/v1/hub/settings` (hub). */
   updateHubSettings(request: UpdateHubSettingsRequest): Promise<HubSettingsSnapshot> {
-    return this.#request("PATCH", "/api/v1/settings/hub", { body: request });
+    return this.#request("PATCH", "/api/v1/hub/settings", { body: request });
   }
 
   /** `GET /api/v1/nodes/:id/settings` (node-owned, local or relayed). */

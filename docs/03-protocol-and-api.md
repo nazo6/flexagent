@@ -226,7 +226,7 @@ prune します。`sessions` は最大 1000 件で、超過時は
 | `GET /api/v1/diagnostics/bundle`                 | redaction 済みサポートバンドル。                                                                                                                    |
 | `POST /api/v1/auth/login` / `logout`             | トークン入力と Cookie 発行 / 失効。                                                                                                                 |
 | `POST /api/v1/auth/rotate-token`                 | クライアント認証トークンを再生成。                                                                                                                  |
-| `GET/PATCH /api/v1/settings/hub`                 | ハブ設定（VAPID subject）。                                                                                                                         |
+| `GET/PATCH /api/v1/hub/settings`                 | ハブ設定（VAPID subject）。                                                                                                                         |
 | `POST /api/v1/system/kill-switch`                | `{ reason }`。全ノードへ `KillAllSessions` を配信し、`{ notified_nodes }` を返す。                                                                  |
 | `POST /api/v1/system/shutdown`                   | ハブ / ノードの graceful shutdown。                                                                                                                 |
 
@@ -305,7 +305,7 @@ prune します。`sessions` は最大 1000 件で、超過時は
 | `GET /api/v1/sessions/:id/events`                                | 履歴。`after_cursor` / `before_cursor` / `limit`。                          |
 | `POST /api/v1/sessions/:id/prompt`                               | `{ command_id, input, client_source }`。`CommandResult`。                   |
 | `POST /api/v1/sessions/:id/control`                              | `{ command_id, action }`。`CommandResult`。                                 |
-| `GET /api/v1/sessions/:id/diff`                                  | `scope=uncommitted` / `scope=branch`。                                      |
+| `GET /api/v1/sessions/:id/diff`                                  | `scope=uncommitted` / `scope=branch_base`。                                 |
 | `POST /api/v1/sessions/import`                                   | 既存エージェントセッションの取り込み（`mirror_history` で履歴を複製）。     |
 | `GET /api/v1/sessions/external`                                  | エージェント側の未取り込みセッション一覧（`node_id` / `agent` / `force`）。 |
 | `POST /api/v1/sessions/:id/permissions/:request_id/respond`      | 承認応答。解決済みは `200 { already_resolved: true }`。                     |

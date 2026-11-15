@@ -619,7 +619,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         ))
     }
 
-    /// `GET /api/v1/settings/hub` (hub only).
+    /// `GET /api/v1/hub/settings` (hub only).
     async fn hub_settings(&self) -> Result<HubSettingsSnapshot, ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
@@ -627,7 +627,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         ))
     }
 
-    /// `PATCH /api/v1/settings/hub` (hub only).
+    /// `PATCH /api/v1/hub/settings` (hub only).
     async fn update_hub_settings(
         &self,
         _request: UpdateHubSettingsRequest,

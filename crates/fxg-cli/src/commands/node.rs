@@ -53,10 +53,13 @@ pub struct NodeStartArgs {
     /// Bind address of the local HTTP/WS server (default: 127.0.0.1:7860)
     #[usage(long)]
     listen: Option<String>,
+    /// Port override (takes precedence over --listen)
+    #[usage(long)]
+    port: Option<u16>,
     /// Reside in the task tray (status / auto-start / Web UI / quit)
     #[usage(long)]
     tray: bool,
-    /// Disable the tray residency enabled by `[node] tray`
+    /// Disable the tray residency enabled by node settings
     #[usage(long)]
     no_tray: bool,
     /// Log level (trace | debug | info | warn | error)
@@ -111,6 +114,10 @@ impl NodeStartArgs {
             .or_else(|| config_file.listen_addr.clone())
         {
             config.listen_addr = listen;
+            config.listen_addr_explicit = true;
+        }
+        if let Some(port) = self.port {
+            config.listen_addr = replace_port(&config.listen_addr, port, "127.0.0.1");
             config.listen_addr_explicit = true;
         }
         config.allowed_hosts = config_file.allowed_hosts.clone();
@@ -171,9 +178,24 @@ impl usage::RunAsync for NodeStartArgs {
                 args.push("--listen".to_owned());
                 args.push(listen.clone());
             }
+            if let Some(port) = self.port {
+                args.push("--port".to_owned());
+                args.push(port.to_string());
+            }
             if self.tray {
                 args.push("--tray".to_owned());
             }
+            if self.no_tray {
+                args.push("--no-tray".to_owned());
+            }
+            push_log_args(
+                &mut args,
+                self.log_level.as_deref(),
+                self.log_file.as_deref(),
+                self.no_log_file,
+                self.log_format.as_deref(),
+                self.no_color,
+            );
             let refs: Vec<&str> = args.iter().map(String::as_str).collect();
             let log = crate::spawn::spawn_background(
                 &refs,

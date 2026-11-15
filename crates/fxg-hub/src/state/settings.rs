@@ -15,7 +15,7 @@ use fxg_protocol::settings::{
 use super::HubState;
 
 impl HubState {
-    /// Builds the typed settings snapshot exposed by `GET /api/v1/settings/hub`.
+    /// Builds the typed settings snapshot exposed by `GET /api/v1/hub/settings`.
     pub async fn hub_settings_snapshot(&self) -> Result<HubSettingsSnapshot, HubError> {
         let settings = self.db().ensure_hub_settings().await?;
         let config = match fxg_protocol::config::HubConfig::load_from_path(

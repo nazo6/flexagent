@@ -54,9 +54,8 @@ services:
       # コンテナ内の待受アドレス (既定: 127.0.0.1:7860)。コンテナ外へ公開するため
       # 0.0.0.0 にする (公開先は上記のとおりホストのループバックのみ)
       FXG_NODE_LISTEN_ADDR: "0.0.0.0:7860"
-      # ノード識別子 / 表示名 (未指定時はコンテナ ID ベースの自動採番になる)
+      # ノード識別子 (未指定時はコンテナ ID ベースの自動採番になる)
       FXG_NODE_ID: "docker"
-      FXG_NODE_NAME: "docker"
       # ハブへのペアリングは node.db が唯一の保存先 (環境変数では設定しない)。
       # 初回セットアップは次のどちらか:
       #   1. ホストのブラウザで http://127.0.0.1:7860 → 設定 → ハブ接続 から
@@ -65,8 +64,6 @@ services:
       #      `- ./node_token:/var/lib/flexagent/data/node/node_token` でマウントする (rw)
       # トークンは `docker compose exec hub fxg hub pairing-token issue docker`
       # で発行する。反映に再起動は不要。
-      # 中央サーバー経由 (Web UI / PWA) からの対話型 PTY を許可する場合は true
-      # FXG_ALLOW_REMOTE_PTY: "true"
 
 volumes:
   fxg-hub-data:

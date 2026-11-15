@@ -1625,6 +1625,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dirs 7.0.0",
+ "dunce",
  "futures-util",
  "fxg-acp",
  "fxg-db",

@@ -150,9 +150,8 @@ pub(crate) async fn session_diff<B: ClientApiBackend>(
     Query(params): Query<DiffQuery>,
 ) -> Response {
     let scope = match params.scope.as_deref() {
-        // Accept both the design notation (`scope=branch`) and the enum name
         None | Some("") | Some("uncommitted") => DiffScope::Uncommitted,
-        Some("branch") | Some("branch_base") | Some("branchbase") => DiffScope::BranchBase,
+        Some("branch_base") => DiffScope::BranchBase,
         Some(other) => {
             return ApiError::bad_request(format!("unknown diff scope: {other}")).into_response();
         }

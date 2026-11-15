@@ -2885,7 +2885,7 @@ export type UpdateAgentSettingsRequest = {
 	expected_revision: number,
 };
 
-/**  `PATCH /api/v1/settings/hub` request. */
+/**  `PATCH /api/v1/hub/settings` request. */
 export type UpdateHubSettingsRequest = {
 	/**  Web Push contact claim */
 	vapid_subject: string | null,

@@ -25,6 +25,15 @@ pub enum ServiceTarget {
 }
 
 impl ServiceTarget {
+    /// CLI target name (`fxg service install <cli_name>`).
+    #[cfg(windows)]
+    pub const fn cli_name(self) -> &'static str {
+        match self {
+            Self::Node => "node",
+            Self::Hub => "hub",
+        }
+    }
+
     /// Service / unit name.
     pub const fn name(self) -> &'static str {
         match self {
@@ -174,7 +183,10 @@ fn platform_start(target: ServiceTarget) -> Result<()> {
         if startup_script.exists() {
             start_via_script(&startup_script)?;
         } else {
-            bail!("service is not installed; run `fxg service install {name}`");
+            bail!(
+                "service is not installed; run `fxg service install {}`",
+                target.cli_name()
+            );
         }
     }
     Ok(())

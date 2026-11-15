@@ -29,7 +29,20 @@ impl usage::RunAsync for WebArgs {
                 let base = crate::client::local_node_base(&env)?;
                 format!("{base}/?token={token}")
             }
-            Some("hub") => crate::hub_api::resolve_hub_base(&env, self.hub.as_deref()).await?,
+            Some("hub") => {
+                let base = crate::hub_api::resolve_hub_base(&env, self.hub.as_deref()).await?;
+                let paths =
+                    fxg_protocol::paths::Paths::resolve(&env, fxg_protocol::paths::Role::Hub);
+                if self.hub.is_none()
+                    && paths.addr_path().is_file()
+                    && let Ok(token) = std::fs::read_to_string(paths.auth_token_path())
+                    && !token.trim().is_empty()
+                {
+                    format!("{base}/?token={}", token.trim())
+                } else {
+                    base
+                }
+            }
             Some(other) => bail!("unknown target: {other} (node | hub)"),
         };
 

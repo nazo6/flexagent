@@ -364,7 +364,7 @@ pub struct HubSettings {
     pub updated_at: i64,
 }
 
-/// `PATCH /api/v1/settings/hub` request.
+/// `PATCH /api/v1/hub/settings` request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct UpdateHubSettingsRequest {

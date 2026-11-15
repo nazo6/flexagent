@@ -107,18 +107,14 @@ impl HubStartArgs {
     }
 
     fn resolved_listen_addr(&self, config_file: &fxg_protocol::config::HubConfig) -> String {
-        let mut listen_addr = self
+        let listen_addr = self
             .listen
             .clone()
             .unwrap_or_else(|| config_file.resolved_listen_addr().to_owned());
-        if let Some(port) = self.port {
-            let host = listen_addr
-                .rsplit_once(':')
-                .map(|(host, _)| host.to_owned())
-                .unwrap_or_else(|| "0.0.0.0".to_owned());
-            listen_addr = format!("{host}:{port}");
+        match self.port {
+            Some(port) => super::replace_port(&listen_addr, port, "0.0.0.0"),
+            None => listen_addr,
         }
-        listen_addr
     }
 }
 
@@ -153,6 +149,14 @@ impl usage::RunAsync for HubStartArgs {
                 args.push("--port".to_owned());
                 args.push(port.to_string());
             }
+            super::push_log_args(
+                &mut args,
+                self.log_level.as_deref(),
+                self.log_file.as_deref(),
+                self.no_log_file,
+                self.log_format.as_deref(),
+                self.no_color,
+            );
             let listen_addr = self.resolved_listen_addr(&config_file);
             let refs: Vec<&str> = args.iter().map(String::as_str).collect();
             let log = crate::spawn::spawn_background(
