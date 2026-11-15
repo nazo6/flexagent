@@ -184,13 +184,15 @@
     </div>
   </div>
 
-  <!-- Mobile: compact context row -->
-  <div class="flex min-w-0 items-center gap-1 px-3 pb-1.5 md:hidden">
+  <!-- Mobile: compact context row. The quota chip uses a short window label
+       and hides the group, so it does not squeeze the node/branch. -->
+  <div class="flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 px-3 pb-1.5 md:hidden">
     {#if session}
       <AgentUsage
         nodeId={session.node_id}
         agentId={session.agent_id}
         localPath={session.local_path}
+        class="max-w-full"
       />
     {/if}
     <SessionInfo
@@ -199,7 +201,7 @@
       {status}
       {usage}
       {projectName}
-      class="min-w-0 flex-1 justify-start"
+      class="min-w-[10rem] flex-1 justify-start"
     />
   </div>
 </header>

@@ -99,6 +99,23 @@
     }
   }
 
+  /** Compact window label for the phone chip (full label is in the popover). */
+  function compactWindowLabel(window: UsageWindow): string {
+    switch (window.kind) {
+      case "rolling_5h":
+      case "5h":
+        return "5h";
+      case "weekly":
+        return "1w";
+      case "monthly":
+        return "1m";
+      case "budget":
+        return m.session_usage_window_budget();
+      default:
+        return window.label ?? m.session_usage_window_other();
+    }
+  }
+
   function barClass(window: UsageWindow): string {
     const remaining = remainingPercent(window);
     if (window.limited || remaining <= 10) return "bg-danger";
@@ -128,14 +145,31 @@
   <Popover.Root>
     <Popover.Trigger
       class={cn(
-        "text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:ring-ring/40 inline-flex min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md border border-transparent px-1.5 py-1 text-[11px] outline-none transition-colors focus-visible:ring-2",
+        "text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:ring-ring/40 inline-flex max-w-full min-w-0 shrink items-center gap-1.5 rounded-md border border-transparent px-1.5 py-1 text-[11px] outline-none transition-colors focus-visible:ring-2 sm:max-w-[18rem]",
         className,
       )}
       title={m.session_usage_title()}
       aria-label={chipLabel}
     >
       <AgentIcon icon={usage.source.icon} class="size-3.5" />
-      <span class="truncate">{chipLabel}</span>
+      <span class="min-w-0 truncate">
+        {usage.source.label}
+        {#if worst}
+          {#if usage.groups.length > 1}
+            <span class="hidden md:inline"> · {worst.group.label}</span>
+          {/if}
+          <span>
+            ·
+            {#if worst.window.limited}
+              {m.session_usage_limited()}
+            {:else}
+              <span class="hidden sm:inline">{windowLabel(worst.window)}</span>
+              <span class="sm:hidden">{compactWindowLabel(worst.window)}</span>
+              {m.session_usage_left({ percent: remainingPercent(worst.window) })}
+            {/if}
+          </span>
+        {/if}
+      </span>
       {#if worst?.window.limited}
         <span class="bg-danger size-1.5 shrink-0 rounded-full"></span>
       {/if}
