@@ -57,6 +57,17 @@
     sync.sessions.filter((s) => s.session_id !== session?.session_id && sessionNeedsAttention(s))
       .length,
   );
+
+  // The quota control is a single instance: in the top bar on desktop and in
+  // the compact context row on phones (where the top bar is already full).
+  let isDesktop = $state(typeof window !== "undefined" && window.innerWidth >= 768);
+  function updateDesktop(): void {
+    isDesktop = window.innerWidth >= 768;
+  }
+  $effect(() => {
+    window.addEventListener("resize", updateDesktop);
+    return () => window.removeEventListener("resize", updateDesktop);
+  });
 </script>
 
 <header class="wco-titlebar bg-card/85 border-border shrink-0 border-b backdrop-blur">
@@ -111,18 +122,17 @@
     </div>
 
     <div class="hidden min-w-0 items-center gap-2 md:flex">
-      {#if session}
-        <AgentUsage
-          nodeId={session.node_id}
-          agentId={session.agent_id}
-          localPath={session.local_path}
-          class="hidden lg:inline-flex"
-        />
-      {/if}
       <SessionInfo {session} {node} {status} {usage} {projectName} />
     </div>
 
     <div class="flex shrink-0 items-center gap-1">
+      {#if isDesktop && session}
+        <AgentUsage
+          nodeId={session.node_id}
+          agentId={session.agent_id}
+          localPath={session.local_path}
+        />
+      {/if}
       <!-- On desktop the sidebar footer owns the badge; when the sidebar is
            collapsed this header is the only remaining place for it. -->
       <ProblemBadge
@@ -184,15 +194,14 @@
     </div>
   </div>
 
-  <!-- Mobile: compact context row. The quota chip uses a short window label
-       and hides the group, so it does not squeeze the node/branch. -->
-  <div class="flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 px-3 pb-1.5 md:hidden">
-    {#if session}
+  <!-- Mobile: compact context row -->
+  <div class="flex min-w-0 items-center gap-1 px-3 pb-1.5 md:hidden">
+    {#if !isDesktop && session}
       <AgentUsage
         nodeId={session.node_id}
         agentId={session.agent_id}
         localPath={session.local_path}
-        class="max-w-full"
+        class="border-transparent"
       />
     {/if}
     <SessionInfo
@@ -201,7 +210,7 @@
       {status}
       {usage}
       {projectName}
-      class="min-w-[10rem] flex-1 justify-start"
+      class="min-w-0 flex-1 justify-start"
     />
   </div>
 </header>

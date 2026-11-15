@@ -33,10 +33,11 @@ rolling 5h / weekly / monthly、Antigravity の 5h / weekly など）を取得�
   `agy -p /usage --output-format json` を実行し、`command.data.groups` を
   `AgentUsageLimits` に変換する。プロファイル指定は ACP 起動と同じ値を
   引き継ぎ、60秒キャッシュする。
-- **UI**: セッションヘッダーに利用上限チップを追加。チップは source と
-  最も残量が少ない window を表示し、ポップオーバーで group / window /
-  リセット時刻を表示する。取得できない場合は何も表示しない。ポップオーバーの
-  Refresh は実行中に `Checking…`、成功時に `Updated just now`、失敗時に
+- **UI**: セッションヘッダーに利用上限アイコンを追加。数値は常時表示せず、
+  デスクトップはトップバー、モバイルはコンテキスト行にエージェントアイコン
+  だけを置き、ポップオーバーで source / group / window / リセット時刻を
+  表示する。取得できない場合は何も表示しない。ポップオーバーの Refresh は
+  実行中に `Checking…`、成功時に `Updated just now`、失敗時に
   `Could not update` を表示し、結果が同じでも操作が伝わるようにした。
 
 ## テスト

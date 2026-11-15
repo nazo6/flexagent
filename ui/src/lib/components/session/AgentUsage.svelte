@@ -141,23 +141,6 @@
     }
   }
 
-  /** Compact window label for the phone chip (full label is in the popover). */
-  function compactWindowLabel(window: UsageWindow): string {
-    switch (window.kind) {
-      case "rolling_5h":
-      case "5h":
-        return "5h";
-      case "weekly":
-        return "1w";
-      case "monthly":
-        return "1m";
-      case "budget":
-        return m.session_usage_window_budget();
-      default:
-        return window.label ?? m.session_usage_window_other();
-    }
-  }
-
   function barClass(window: UsageWindow): string {
     const remaining = remainingPercent(window);
     if (window.limited || remaining <= 10) return "bg-danger";
@@ -171,8 +154,9 @@
     return remaining > 0 ? formatDurationMs(remaining) : null;
   }
 
-  const chipLabel = $derived.by(() => {
-    if (usage === null || worst === null) return "";
+  /** Full summary used by the icon's tooltip and accessible name. */
+  const summaryLabel = $derived.by(() => {
+    if (usage === null || worst === null) return m.session_usage_title();
     const group = usage.groups.length > 1 ? `${worst.group.label} · ` : "";
     if (worst.window.limited) {
       return `${usage.source.label} · ${group}${m.session_usage_limited()}`;
@@ -187,37 +171,16 @@
   <Popover.Root>
     <Popover.Trigger
       class={cn(
-        "text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:ring-ring/40 inline-flex max-w-full min-w-0 shrink items-center gap-1.5 rounded-md border border-transparent px-1.5 py-1 text-[11px] outline-none transition-colors focus-visible:ring-2 sm:max-w-[18rem]",
+        "text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:ring-ring/40 flex size-7 shrink-0 items-center justify-center rounded-md border border-border outline-none transition-colors focus-visible:ring-2",
         className,
       )}
-      title={m.session_usage_title()}
-      aria-label={chipLabel}
+      title={summaryLabel}
+      aria-label={summaryLabel}
     >
-      <AgentIcon icon={usage.source.icon} class="size-3.5" />
-      <span class="min-w-0 truncate">
-        {usage.source.label}
-        {#if worst}
-          {#if usage.groups.length > 1}
-            <span class="hidden md:inline"> · {worst.group.label}</span>
-          {/if}
-          <span>
-            ·
-            {#if worst.window.limited}
-              {m.session_usage_limited()}
-            {:else}
-              <span class="hidden sm:inline">{windowLabel(worst.window)}</span>
-              <span class="sm:hidden">{compactWindowLabel(worst.window)}</span>
-              {m.session_usage_left({ percent: remainingPercent(worst.window) })}
-            {/if}
-          </span>
-        {/if}
-      </span>
-      {#if worst?.window.limited}
-        <span class="bg-danger size-1.5 shrink-0 rounded-full"></span>
-      {/if}
+      <AgentIcon icon={usage.source.icon} class="size-4" />
     </Popover.Trigger>
 
-    <Popover.Content align="start" class="w-[min(23rem,calc(100vw-2rem))] p-0">
+    <Popover.Content align="end" class="w-[min(23rem,calc(100vw-2rem))] p-0">
       <div class="border-b border-border px-3 py-2">
         <div class="flex min-w-0 items-center gap-2">
           <AgentIcon icon={usage.source.icon} class="size-4" />
