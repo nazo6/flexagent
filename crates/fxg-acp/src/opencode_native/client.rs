@@ -4,6 +4,9 @@
 )]
 
 use super::*;
+use time::OffsetDateTime;
+use time::format_description::FormatItem;
+use time::macros::format_description;
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum OpenCodeError {
@@ -780,77 +783,20 @@ fn parse_log_watermark(text: &str) -> Option<u64> {
 /// Formats an OpenCode millisecond timestamp as RFC 3339 (UTC).
 ///
 /// `AgentSessionInfo.updated_at` is consumed as ISO 8601 by the external-session
-/// dialog and by lexicographic sorting in the node.
+/// dialog and by lexicographic sorting in the node. A fixed millisecond width
+/// keeps that sort stable.
 fn epoch_millis_to_rfc3339(ms: i64) -> String {
-    let seconds = ms.div_euclid(1000);
-    let millis = ms.rem_euclid(1000);
-    let days = seconds.div_euclid(86_400);
-    let second_of_day = seconds.rem_euclid(86_400);
-    let (year, month, day) = civil_from_days(days);
-    let hour = second_of_day / 3_600;
-    let minute = (second_of_day % 3_600) / 60;
-    let second = second_of_day % 60;
-    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
-}
-
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let day_of_era = z - era * 146_097;
-    let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let year = year_of_era + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_prime = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
-    let month = if month_prime < 10 {
-        month_prime + 3
-    } else {
-        month_prime - 9
+    const FORMAT: &[FormatItem<'static>] =
+        format_description!("[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z");
+    let Ok(time) = OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000) else {
+        return "1970-01-01T00:00:00.000Z".to_owned();
     };
-    (if month <= 2 { year + 1 } else { year }, month, day)
+    match time.format(FORMAT) {
+        Ok(value) => value,
+        Err(_) => "1970-01-01T00:00:00.000Z".to_owned(),
+    }
 }
-
-// ---------------------------------------------------------------------------
-// Server discovery / lifecycle
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
-    use super::{OpenCodeError, epoch_millis_to_rfc3339, is_http_status, parse_log_watermark};
-
-    #[test]
-    fn classifies_http_statuses_without_string_matching() {
-        let error: anyhow::Error = OpenCodeError::Status {
-            path: "/api/session/ses_1".to_owned(),
-            status: reqwest::StatusCode::NOT_FOUND,
-            body: "not found".to_owned(),
-        }
-        .into();
-        assert!(is_http_status(&error, 404));
-        assert!(!is_http_status(&error, 409));
-    }
-
-    #[test]
-    fn formats_opencode_timestamps_as_rfc3339() {
-        assert_eq!(
-            epoch_millis_to_rfc3339(0),
-            "1970-01-01T00:00:00.000Z".to_owned()
-        );
-        assert_eq!(
-            epoch_millis_to_rfc3339(1_794_477_600_000),
-            "2026-11-12T10:00:00.000Z".to_owned()
-        );
-    }
-
-    #[test]
-    fn parses_the_log_synced_watermark() {
-        assert_eq!(
-            parse_log_watermark(
-                "data: {\"type\":\"log.synced\",\"aggregateID\":\"ses_1\",\"seq\":12}\n\n"
-            ),
-            Some(12)
-        );
-        assert_eq!(parse_log_watermark("data: {\"type\":\"other\"}\n\n"), None);
-    }
-}
+#[path = "client_tests.rs"]
+mod tests;
