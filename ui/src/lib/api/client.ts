@@ -2,6 +2,7 @@ import type {
   AgentCapabilitiesPreview,
   AgentOpResponse,
   AgentSummary,
+  AgentUsageResponse,
   AgentsResponse,
   AuditLogEntry,
   AuditLogsResponse,
@@ -282,6 +283,19 @@ export class ApiClient {
     return this.#request(
       "GET",
       `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/management`,
+    );
+  }
+
+  /** `GET /api/v1/nodes/:nodeId/agents/:agentId/usage`. */
+  agentUsage(
+    nodeId: string,
+    agentId: string,
+    localPath?: string | null,
+  ): Promise<AgentUsageResponse> {
+    return this.#request(
+      "GET",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/usage`,
+      { query: { local_path: localPath ?? undefined } },
     );
   }
 

@@ -56,6 +56,7 @@ use handlers::admin::{
 use handlers::agent_management::{
     management as agent_management, mcp_action, mcp_remove, mcp_upsert,
 };
+use handlers::agent_usage::usage as agent_usage;
 use handlers::agents::{
     import_registry_agent, list_agents, probe_agent_config, refresh_catalog, remove_custom_agent,
     upsert_custom_agent,
@@ -218,6 +219,10 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route(
             "/api/v1/nodes/{node_id}/agents/{agent_id}/management",
             get(agent_management::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/agents/{agent_id}/usage",
+            get(agent_usage::<B>),
         )
         .route(
             "/api/v1/nodes/{node_id}/agents/{agent_id}/management/mcp/{name}",

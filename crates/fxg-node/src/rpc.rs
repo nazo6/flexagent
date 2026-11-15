@@ -306,6 +306,23 @@ async fn execute_inner(
                 .await?;
             Ok(NodeRpcResponse::AgentCapabilities { preview })
         }
+        NodeRpcRequest::AgentUsage {
+            agent_id,
+            local_path,
+        } => {
+            let cwd = local_path
+                .map(PathBuf::from)
+                .filter(|path| path.is_dir())
+                .or_else(|| std::env::current_dir().ok())
+                .unwrap_or_else(|| PathBuf::from("."));
+            let usage = state
+                .session_manager()
+                .catalog()
+                .usage_limits(&agent_id, &cwd)
+                .await
+                .map_err(|err| NodeError::Agent(format!("{err:#}")))?;
+            Ok(NodeRpcResponse::AgentUsage { usage })
+        }
         NodeRpcRequest::GetNodeSettings => Ok(NodeRpcResponse::NodeSettings {
             snapshot: Box::new(state.node_settings_snapshot().await?),
         }),

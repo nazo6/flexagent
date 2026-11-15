@@ -18,9 +18,9 @@ use crate::client_api::{
     WorkspaceFileView, WorkspaceFsListResponse, WorkspaceGitStatusResponse, WorktreeInfo,
 };
 use crate::common::{
-    AgentAction, ClientSource, DataSafety, DiffScope, ElicitationContent, ErrorCode, ErrorInfo,
-    NodeProjectReport, PromptInput, ResolvedBy, SessionControlAction, WarningInfo,
-    WorkspaceDiffResponse, WorktreeAction,
+    AgentAction, AgentUsageLimits, ClientSource, DataSafety, DiffScope, ElicitationContent,
+    ErrorCode, ErrorInfo, NodeProjectReport, PromptInput, ResolvedBy, SessionControlAction,
+    WarningInfo, WorkspaceDiffResponse, WorktreeAction,
 };
 use crate::events::SessionEventEnvelope;
 use crate::settings::{
@@ -135,6 +135,13 @@ pub enum NodeRpcRequest {
         /// Configuration applied before capabilities are read
         #[serde(default)]
         initial_config: Vec<crate::common::InitialConfig>,
+    },
+    /// Read the agent's plan / account usage limits.
+    AgentUsage {
+        /// Agent ID
+        agent_id: String,
+        /// Working directory used for agent-specific lookups
+        local_path: Option<String>,
     },
     /// Fetch the node settings snapshot.
     GetNodeSettings,
@@ -283,6 +290,7 @@ impl NodeRpcRequest {
             Self::ProjectScan { .. }
             | Self::ListAgents
             | Self::ProbeAgentConfig { .. }
+            | Self::AgentUsage { .. }
             | Self::ImportSession { .. }
             | Self::ListExternalSessions { .. }
             | Self::ResumeSession { .. }
@@ -368,6 +376,11 @@ pub enum NodeRpcResponse {
     AgentCapabilities {
         /// Modes and configuration entries reported by the agent
         preview: AgentCapabilitiesPreview,
+    },
+    /// Agent usage limits (`AgentUsage`; `None` when not exposed).
+    AgentUsage {
+        /// Current limits
+        usage: Option<AgentUsageLimits>,
     },
     /// Settings snapshot (`GetNodeSettings` / `UpdateNodeSettings` /
     /// `UpdateAgentSettings`).

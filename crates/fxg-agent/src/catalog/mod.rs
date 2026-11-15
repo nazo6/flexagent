@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use anyhow::anyhow;
 use fxg_protocol::client_api::AgentBackendKind;
+use fxg_protocol::common::AgentUsageLimits;
 use fxg_protocol::paths::Paths;
 use fxg_protocol::settings::{
     AgentAcpCapabilities, AgentSettings, CustomAgentConfig, CustomAgentOrigin,
@@ -411,6 +412,20 @@ impl AgentCatalog {
             LaunchBackend::Custom => self.custom_driver(&spec.agent_id),
             LaunchBackend::Other(other) => Err(anyhow!("unknown launch backend: {other}")),
         }
+    }
+
+    /// Resolves an agent and reads its usage limits (best-effort).
+    ///
+    /// The driver decides whether the agent exposes a quota surface; `None`
+    /// means "not available" and should not be shown as an error.
+    pub async fn usage_limits(
+        &self,
+        agent_id: &str,
+        cwd: &Path,
+    ) -> anyhow::Result<Option<AgentUsageLimits>> {
+        let spec = self.launch_spec(agent_id, cwd, &[]).await?;
+        let driver = self.driver_for(&spec)?;
+        driver.usage_limits(&spec, cwd).await
     }
 
     /// Returns the built-in driver of a full custom agent.

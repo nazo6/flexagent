@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AgentUsage from "#lib/components/session/AgentUsage.svelte";
   import SessionInfo from "#lib/components/session/SessionInfo.svelte";
   import SessionActionsMenu from "#lib/components/session/SessionActionsMenu.svelte";
   import SessionStatusBadge from "#lib/components/SessionStatusBadge.svelte";
@@ -109,7 +110,15 @@
       {/if}
     </div>
 
-    <div class="hidden min-w-0 md:flex">
+    <div class="hidden min-w-0 items-center gap-2 md:flex">
+      {#if session}
+        <AgentUsage
+          nodeId={session.node_id}
+          agentId={session.agent_id}
+          localPath={session.local_path}
+          class="hidden lg:inline-flex"
+        />
+      {/if}
       <SessionInfo {session} {node} {status} {usage} {projectName} />
     </div>
 
@@ -176,7 +185,21 @@
   </div>
 
   <!-- Mobile: compact context row -->
-  <div class="flex px-3 pb-1.5 md:hidden">
-    <SessionInfo {session} {node} {status} {usage} {projectName} class="w-full justify-start" />
+  <div class="flex min-w-0 items-center gap-1 px-3 pb-1.5 md:hidden">
+    {#if session}
+      <AgentUsage
+        nodeId={session.node_id}
+        agentId={session.agent_id}
+        localPath={session.local_path}
+      />
+    {/if}
+    <SessionInfo
+      {session}
+      {node}
+      {status}
+      {usage}
+      {projectName}
+      class="min-w-0 flex-1 justify-start"
+    />
   </div>
 </header>
