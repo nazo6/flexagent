@@ -41,6 +41,18 @@ const COMMAND_TIMEOUT_MS = 30_000;
 const SEND_PROMPT_TIMEOUT_MS = 120_000;
 /** Upper bound for reconnect backoff. */
 const MAX_RECONNECT_DELAY_MS = 30_000;
+/** Sessions per sidebar page (`GET /api/v1/sessions`). */
+const SESSION_PAGE_SIZE = 100;
+/** Events per chat history page (`before_cursor` paging). */
+export const HISTORY_PAGE_SIZE = 200;
+/**
+ * Events retained for a session that is not open.
+ *
+ * Chat history is reloaded from the paginated events API when the session is
+ * opened again, so keeping every live event of every session would only grow
+ * memory without being displayed.
+ */
+const INACTIVE_EVENT_LIMIT = 200;
 
 interface PendingCommand {
   sessionId: string | null;
@@ -51,6 +63,15 @@ interface PendingCommand {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Session-list order shared with the server (`updated_at` desc, ID asc). */
+function sortSessions(sessions: SessionSummary[]): SessionSummary[] {
+  return sessions.toSorted((a, b) => {
+    if (a.updated_at !== b.updated_at) return b.updated_at - a.updated_at;
+    if (a.session_id === b.session_id) return 0;
+    return a.session_id < b.session_id ? -1 : 1;
+  });
 }
 
 function readCursor(): number | null {
@@ -118,6 +139,10 @@ export class SyncStore {
   sessions = $state<SessionSummary[]>([]);
   /** Whether the initial / latest session refresh is in flight. */
   sessionsLoading = $state(false);
+  /** Whether an older session page is being fetched. */
+  sessionsLoadingMore = $state(false);
+  /** Whether `GET /api/v1/sessions` has another page. */
+  sessionsHasMore = $state(false);
   /** Last session refresh error (null when the latest refresh succeeded). */
   sessionsError = $state<string | null>(null);
   nodes = $state<NodeSummary[]>([]);
@@ -158,6 +183,10 @@ export class SyncStore {
   #reconnectDelayMs = 1_000;
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   #cursor: number | null = readCursor();
+  /** Whether this page has already connected once (later connections resume from `#cursor`). */
+  #hasConnected = false;
+  /** Cursor of the next older session-list page (`null` when fully loaded). */
+  #sessionsNextCursor: string | null = null;
   #pendingCommands = new Map<string, PendingCommand>();
   #sessionsRefreshQueued = false;
   #projectsRefreshQueued = false;
@@ -216,9 +245,26 @@ export class SyncStore {
     ws.addEventListener("open", () => {
       this.wsConnected = true;
       this.#reconnectDelayMs = 1_000;
+      // A client with no stored cursor starts at the store tail: chat history
+      // is loaded per session from the paginated events API, so replaying the
+      // whole log would defeat paging and grow memory. A stored cursor is kept
+      // so live events and unread state missed while the tab was closed are
+      // replayed, and reconnects resume from the in-memory cursor.
+      let since = this.#cursor;
+      if (!this.#hasConnected && since === null) {
+        const latest = this.connection.systemInfo?.latest_event_cursor;
+        if (latest !== undefined) {
+          since = latest;
+          this.#cursor = latest;
+          if (typeof localStorage !== "undefined") {
+            localStorage.setItem(CURSOR_KEY, String(latest));
+          }
+        }
+      }
+      this.#hasConnected = true;
       this.#send({
         op: "subscribe",
-        since_cursor: this.#cursor,
+        since_cursor: since,
         focused_session_id: this.activeSessionId,
       });
       void this.refreshAll();
@@ -260,11 +306,22 @@ export class SyncStore {
   async refreshSessions(): Promise<void> {
     this.sessionsLoading = true;
     try {
-      // Also fetch archived sessions so the sidebar can split out an "Archived" section
-      this.sessions = await this.connection.client.sessions({
+      // Always refresh the newest page. Pages the reader loaded explicitly are
+      // kept as-is below: sessions that change move to the top (their
+      // `updated_at` bumps), so merging keeps their projections current without
+      // refetching the whole loaded depth on every status change.
+      const page = await this.connection.client.sessions({
         includeArchived: true,
-        limit: 200,
+        limit: SESSION_PAGE_SIZE,
       });
+      const firstPageIds = new Set(page.sessions.map((session) => session.session_id));
+      const older = this.sessions.filter((session) => !firstPageIds.has(session.session_id));
+      this.sessions = sortSessions([...page.sessions, ...older]);
+      if (older.length === 0) {
+        // No extra page is loaded: the cursor follows the refreshed first page.
+        this.#sessionsNextCursor = page.next_cursor ?? null;
+      }
+      this.sessionsHasMore = this.#sessionsNextCursor !== null;
       if (!this.#sessionsInitialized) {
         // Mark sessions that this device has never opened as read, so a first
         // visit does not flag the entire history as unread.
@@ -283,6 +340,38 @@ export class SyncStore {
       this.#warn("sessions", error);
     } finally {
       this.sessionsLoading = false;
+    }
+  }
+
+  /**
+   * Append the next page of sessions (older entries) to the sidebar list.
+   *
+   * `refreshSessions` keeps the loaded depth, so this only has to fetch once
+   * per explicit "load older" action.
+   */
+  async loadMoreSessions(): Promise<void> {
+    const cursor = this.#sessionsNextCursor;
+    if (cursor === null || this.sessionsLoadingMore) return;
+    this.sessionsLoadingMore = true;
+    try {
+      const page = await this.connection.client.sessions({
+        includeArchived: true,
+        limit: SESSION_PAGE_SIZE,
+        cursor,
+      });
+      const known = new Set(this.sessions.map((session) => session.session_id));
+      this.sessions = [
+        ...this.sessions,
+        ...page.sessions.filter((session) => !known.has(session.session_id)),
+      ];
+      this.#sessionsNextCursor = page.next_cursor ?? null;
+      this.sessionsHasMore = this.#sessionsNextCursor !== null;
+      this.sessionsError = null;
+    } catch (error) {
+      this.sessionsError = errorMessage(error);
+      this.#warn("sessions", error);
+    } finally {
+      this.sessionsLoadingMore = false;
     }
   }
 
@@ -474,20 +563,107 @@ export class SyncStore {
   }
 
   /**
-   * Load session history over REST (fallback before the WS connects).
+   * Load the latest history page of a session (fallback before the WS connects
+   * and whenever the timeline was pruned).
    *
-   * Known events are harmlessly skipped as duplicate `node_seq` values.
+   * The newest page is fetched with `before_cursor` paging. When the session is
+   * longer than one page, the oldest page is also kept aside so session-level
+   * metadata (capabilities, provisioning log, ...) stays available without
+   * rendering the whole conversation. Older pages are loaded on demand with
+   * [`SyncStore.loadOlderSessionEvents`].
    */
   async loadSessionEvents(sessionId: string): Promise<void> {
     const timeline = this.timelineFor(sessionId);
+    if (timeline.historyLoading) return;
+    if (timeline.historyLoaded && timeline.events.length > 0) return;
+    timeline.historyLoading = true;
+    timeline.resetWindow();
     try {
-      const batch = await this.connection.client.sessionEvents(sessionId, 0, 5_000);
-      for (const event of batch.events) {
+      const tail = await this.connection.client.sessionEventsBefore(
+        sessionId,
+        null,
+        HISTORY_PAGE_SIZE,
+      );
+      for (const event of tail.events) {
         if (timeline.applyEvent(event)) this.#trackReadState(event);
       }
+      const oldestSeq = tail.events[0]?.node_seq ?? 1;
+      if (tail.events.length < HISTORY_PAGE_SIZE || oldestSeq <= 1) {
+        // The tail reaches the session start; nothing older exists.
+        timeline.olderCursor = null;
+        timeline.hasOlder = false;
+        timeline.historyLoaded = true;
+        return;
+      }
+      const head = await this.connection.client.sessionEvents(sessionId, 0, HISTORY_PAGE_SIZE);
+      for (const event of head.events) {
+        timeline.applyHeadEvent(event);
+        this.#trackReadState(event);
+      }
+      timeline.headEndSeq = head.events.at(-1)?.node_seq ?? 0;
+      if (head.events.length < HISTORY_PAGE_SIZE || timeline.headEndSeq >= oldestSeq) {
+        // Head and tail overlap (the session fits in two pages).
+        timeline.mergeHeadIntoWindow();
+        timeline.olderCursor = null;
+        timeline.hasOlder = false;
+      } else {
+        timeline.olderCursor = tail.first_cursor;
+        timeline.hasOlder = true;
+      }
+      timeline.historyLoaded = true;
     } catch (error) {
       this.#warn(`session events (${sessionId})`, error);
       throw error;
+    } finally {
+      timeline.historyLoading = false;
+    }
+  }
+
+  /**
+   * Prepend the next older page of a session's history.
+   *
+   * Returns whether anything was added (the caller uses it to restore the
+   * scroll position).
+   */
+  async loadOlderSessionEvents(sessionId: string): Promise<boolean> {
+    const timeline = this.#timelines.get(sessionId);
+    if (
+      timeline === undefined ||
+      timeline.historyLoading ||
+      !timeline.hasOlder ||
+      timeline.olderCursor === null
+    ) {
+      return false;
+    }
+    timeline.historyLoading = true;
+    try {
+      const batch = await this.connection.client.sessionEventsBefore(
+        sessionId,
+        timeline.olderCursor,
+        HISTORY_PAGE_SIZE,
+      );
+      let added = false;
+      for (const event of batch.events) {
+        if (timeline.applyEvent(event)) added = true;
+        this.#trackReadState(event);
+      }
+      const oldestSeq = batch.events[0]?.node_seq;
+      const reachedHead =
+        timeline.headEndSeq > 0 && oldestSeq !== undefined && oldestSeq <= timeline.headEndSeq + 1;
+      if (batch.events.length === 0 || batch.events.length < HISTORY_PAGE_SIZE || reachedHead) {
+        timeline.mergeHeadIntoWindow();
+        timeline.olderCursor = null;
+        timeline.hasOlder = false;
+      } else {
+        timeline.olderCursor = batch.first_cursor;
+        timeline.hasOlder = true;
+      }
+      return added;
+    } catch (error) {
+      this.#warn(`session history (${sessionId})`, error);
+      throw error;
+    } finally {
+      timeline.historyLoading = false;
     }
   }
 
@@ -707,6 +883,28 @@ export class SyncStore {
     }
   }
 
+  /** Apply a projection change to a loaded session entry (older pages included). */
+  #patchSession(sessionId: string, patch: Partial<SessionSummary>): void {
+    this.sessions = this.sessions.map((session) =>
+      session.session_id === sessionId ? { ...session, ...patch } : session,
+    );
+  }
+
+  /**
+   * Keep memory bounded for sessions the reader is not looking at.
+   *
+   * Their timeline is only used for unread tracking (which is seq-based), so
+   * the oldest events can be dropped. Opening the session reloads its history
+   * from the paginated events API.
+   */
+  #trimInactiveTimeline(sessionId: string, timeline: SessionTimeline): void {
+    if (sessionId === this.activeSessionId) return;
+    const overflow = timeline.events.length - INACTIVE_EVENT_LIMIT;
+    if (overflow <= 0) return;
+    timeline.events = timeline.events.slice(overflow);
+    timeline.resetWindow();
+  }
+
   #applyBatch(events: SessionEventEnvelope[], cursor: number): void {
     // After the source store is recreated or reset, the cursor rewinds (docs/03 §3.2).
     // Keeping the old timeline would discard the new store's events as duplicate
@@ -726,8 +924,10 @@ export class SyncStore {
     let projectsDirty = false;
     for (const event of events) {
       const timeline = this.timelineFor(event.session_id);
-      if (!timeline.applyEvent(event)) continue;
-      this.#trackReadState(event);
+      if (timeline.applyEvent(event)) {
+        this.#trackReadState(event);
+        this.#trimInactiveTimeline(event.session_id, timeline);
+      }
       switch (event.payload.type) {
         case "session_created":
           sessionsDirty = true;
@@ -737,8 +937,20 @@ export class SyncStore {
         case "session_agent_bound":
         case "status_changed":
         case "capabilities_updated":
+          sessionsDirty = true;
+          break;
         case "session_archived":
+          // Archiving does not bump `updated_at`, so an entry from an older page
+          // would otherwise keep its stale visibility until it is refreshed.
+          this.#patchSession(event.session_id, {
+            archived_at: event.payload.data.archived ? event.created_at : null,
+          });
+          sessionsDirty = true;
+          break;
         case "session_permission_policy_changed":
+          this.#patchSession(event.session_id, {
+            permission_policy: event.payload.data.policy,
+          });
           sessionsDirty = true;
           break;
         case "session_deleted":
@@ -747,6 +959,9 @@ export class SyncStore {
           this.#timelines.delete(event.session_id);
           this.provisioningLogs.delete(event.session_id);
           this.#forgetSessionReadState(event.session_id);
+          this.sessions = this.sessions.filter(
+            (session) => session.session_id !== event.session_id,
+          );
           sessionsDirty = true;
           projectsDirty = true;
           break;

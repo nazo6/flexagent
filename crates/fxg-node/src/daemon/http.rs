@@ -754,6 +754,109 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_json(response).await;
         assert_eq!(body["events"].as_array().expect("events").len(), 1);
+        assert!(
+            body["first_cursor"]
+                .as_u64()
+                .is_some_and(|cursor| cursor > 0),
+            "before_cursor paging must return the first event cursor"
+        );
+
+        // `tail=true` returns the newest page (used when opening a chat).
+        let response = app
+            .clone()
+            .oneshot(get(
+                &host,
+                &format!("/api/v1/sessions/{session_id}/events?tail=true&limit=1"),
+                Some(&token),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        let events = body["events"].as_array().expect("events");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["node_seq"].as_u64(), Some(2));
+
+        daemon.shutdown();
+        tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())
+            .await
+            .expect("stop");
+    }
+
+    #[tokio::test]
+    async fn rest_session_list_paginates_with_cursor() {
+        let (daemon, _dir) = test_daemon().await;
+        let app = router(daemon.state().clone(), daemon.http_addr());
+        let host = host_of(&daemon);
+        let token = daemon.state().auth_token();
+
+        let mut created = Vec::new();
+        for title in ["one", "two", "three"] {
+            let session_id = fxg_protocol::util::uuid_v7();
+            daemon
+                .state()
+                .bus()
+                .create_session(
+                    &session_id,
+                    fxg_protocol::events::UnifiedEventPayload::SessionCreated {
+                        node_id: daemon.state().node_id().into(),
+                        project_id: "github.com/nazo6/flexagent".into(),
+                        project_name: "flexagent".to_owned(),
+                        local_path: "/tmp/repo".to_owned(),
+                        git_branch: Some("main".to_owned()),
+                        is_worktree: false,
+                        agent_id: "mock".to_owned(),
+                        parent_session_id: None,
+                        title: title.to_owned(),
+                    },
+                )
+                .await
+                .expect("create session");
+            created.push(session_id);
+        }
+
+        let response = app
+            .clone()
+            .oneshot(get(&host, "/api/v1/sessions?limit=2", Some(&token)))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let first = body_json(response).await;
+        assert_eq!(first["sessions"].as_array().expect("sessions").len(), 2);
+        let cursor = first["next_cursor"].as_str().expect("next cursor");
+
+        let response = app
+            .clone()
+            .oneshot(get(
+                &host,
+                &format!("/api/v1/sessions?limit=2&cursor={cursor}"),
+                Some(&token),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let second = body_json(response).await;
+        assert_eq!(second["sessions"].as_array().expect("sessions").len(), 1);
+        assert!(second["next_cursor"].is_null(), "last page");
+
+        let mut paged: Vec<String> = first["sessions"]
+            .as_array()
+            .expect("sessions")
+            .iter()
+            .chain(second["sessions"].as_array().expect("sessions").iter())
+            .map(|session| {
+                session["session_id"]
+                    .as_str()
+                    .expect("session id")
+                    .to_owned()
+            })
+            .collect();
+        paged.sort();
+        created.sort();
+        assert_eq!(
+            paged, created,
+            "paging must cover every session exactly once"
+        );
 
         daemon.shutdown();
         tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())

@@ -283,6 +283,47 @@ pub struct SessionSummary {
     pub archived_at: Option<i64>,
 }
 
+/// Keyset cursor for the session list (`GET /api/v1/sessions`).
+///
+/// Sessions are ordered by `updated_at` descending with `session_id` ascending
+/// as the tie-breaker. The cursor is **opaque to clients**: the server encodes
+/// it into [`SessionCursor::encode`] and accepts it back as `?cursor=`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionCursor {
+    /// `updated_at` of the last entry of the previous page
+    pub updated_at: i64,
+    /// Session ID used as the tie-breaker when `updated_at` matches
+    pub session_id: SessionId,
+}
+
+impl SessionCursor {
+    /// Encodes the cursor as the opaque `?cursor=` value.
+    pub fn encode(&self) -> String {
+        format!("{}:{}", self.updated_at, self.session_id.as_str())
+    }
+
+    /// Decodes an opaque `?cursor=` value (`None` when it is malformed).
+    pub fn decode(raw: &str) -> Option<Self> {
+        let (updated_at, session_id) = raw.split_once(':')?;
+        if session_id.is_empty() {
+            return None;
+        }
+        let Ok(updated_at) = updated_at.parse() else {
+            return None;
+        };
+        Some(Self {
+            updated_at,
+            session_id: SessionId::from(session_id),
+        })
+    }
+
+    /// Whether a session comes strictly after this cursor in list order.
+    pub fn is_after(&self, updated_at: i64, session_id: &SessionId) -> bool {
+        updated_at < self.updated_at
+            || (updated_at == self.updated_at && session_id.as_str() > self.session_id.as_str())
+    }
+}
+
 /// Ephemeral chunk produced while streaming.
 ///
 /// It is never persisted to the DB and never resent (exclusive to

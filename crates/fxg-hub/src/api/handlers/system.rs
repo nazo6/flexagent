@@ -103,6 +103,10 @@ pub(crate) async fn system_info<B: ClientApiBackend>(
         Ok(extras) => extras,
         Err(err) => return err.into_response(),
     };
+    let latest_event_cursor = match state.backend.db().latest_cursor().await {
+        Ok(cursor) => cursor,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
     Json(SystemInfoResponse {
         role: state.backend.connection_role(),
         node_id: state.backend.local_node_id(),
@@ -111,6 +115,7 @@ pub(crate) async fn system_info<B: ClientApiBackend>(
         unsynced_event_count: extras.unsynced_event_count,
         hub_link: extras.hub_link,
         last_synced_at: extras.last_synced_at,
+        latest_event_cursor,
     })
     .into_response()
 }

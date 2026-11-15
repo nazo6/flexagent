@@ -16,11 +16,12 @@ use fxg_db::{
 use fxg_protocol::common::{
     ClientSource, CommandInfo, ElicitationAction, ElicitationMode, ElicitationRequestStatus,
     EventType, ForkScope, ModeInfo, PermissionOption, PermissionOptionKind,
-    PermissionRequestStatus, PlanEntry, PlanEntryStatus, ResolvedBy, SessionStatus, UsageCost,
+    PermissionRequestStatus, PlanEntry, PlanEntryStatus, ResolvedBy, SessionCursor, SessionStatus,
+    UsageCost,
 };
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use fxg_protocol::util::{now_ms, uuid_v7};
-use fxg_protocol::{NodeId, ProjectId};
+use fxg_protocol::{NodeId, ProjectId, SessionId};
 
 const PROJECT_ID: &str = "github.com/nazo6/flexagent";
 const NODE_ID: &str = "test-node";
@@ -1192,6 +1193,76 @@ async fn session_filters_and_plan_projection() {
         .await
         .expect("limit 0");
     assert!(limited.is_empty());
+}
+
+#[tokio::test]
+async fn session_list_keyset_pagination() {
+    let fixture = Fixture::new(Role::Node).await;
+    let ids = [
+        SessionId::from(uuid_v7()),
+        SessionId::from(uuid_v7()),
+        SessionId::from(uuid_v7()),
+    ];
+    let mut events = Vec::new();
+    for (index, session_id) in ids.iter().enumerate() {
+        events.push(SessionEventEnvelope {
+            event_id: fxg_protocol::EventId::from(uuid_v7()),
+            session_id: session_id.clone(),
+            node_seq: 1,
+            // Older sessions get older update times (index 0 is the oldest).
+            created_at: 1_000 + index as i64,
+            payload: session_created_payload(),
+        });
+    }
+    fixture.db.append_events(&events).await.expect("append");
+
+    let first = fixture
+        .db
+        .list_session_page(&SessionFilter {
+            limit: Some(2),
+            ..SessionFilter::default()
+        })
+        .await
+        .expect("first page");
+    assert_eq!(first.sessions.len(), 2);
+    assert!(first.has_more);
+    assert_eq!(first.sessions[0].session_id, ids[2]);
+    assert_eq!(first.sessions[1].session_id, ids[1]);
+
+    let last = first.sessions.last().expect("last session");
+    let cursor = SessionCursor {
+        updated_at: last.updated_at,
+        session_id: last.session_id.clone(),
+    };
+    let second = fixture
+        .db
+        .list_session_page(&SessionFilter {
+            limit: Some(2),
+            cursor: Some(SessionCursor::decode(&cursor.encode()).expect("decode cursor")),
+            ..SessionFilter::default()
+        })
+        .await
+        .expect("second page");
+    assert_eq!(second.sessions.len(), 1);
+    assert!(!second.has_more);
+    assert_eq!(second.sessions[0].session_id, ids[0]);
+
+    // The cursor of the final page yields an empty page (clients stop at `has_more=false`).
+    let last = second.sessions.last().expect("last session");
+    let tail = fixture
+        .db
+        .list_session_page(&SessionFilter {
+            limit: Some(2),
+            cursor: Some(SessionCursor {
+                updated_at: last.updated_at,
+                session_id: last.session_id.clone(),
+            }),
+            ..SessionFilter::default()
+        })
+        .await
+        .expect("tail page");
+    assert!(tail.sessions.is_empty());
+    assert!(!tail.has_more);
 }
 
 #[tokio::test]

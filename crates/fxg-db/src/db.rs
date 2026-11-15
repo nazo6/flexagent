@@ -281,6 +281,14 @@ impl Db {
         queries::list_sessions(&self.pool, filter).await
     }
 
+    /// One keyset-paginated page of the session list.
+    pub async fn list_session_page(
+        &self,
+        filter: &queries::SessionFilter,
+    ) -> Result<queries::SessionPage, DbError> {
+        queries::list_session_page(&self.pool, filter).await
+    }
+
     /// Retrieves a single session.
     pub async fn get_session(&self, session_id: &str) -> Result<Option<SessionSummary>, DbError> {
         queries::get_session(&self.pool, session_id).await

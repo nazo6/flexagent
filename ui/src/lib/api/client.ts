@@ -63,10 +63,11 @@ import type {
   SessionRenameRequest,
   SessionRenameResponse,
   SessionEventBatch,
+  SessionListResponse,
+  SessionDetail,
   SecretsResponse,
   HubLinkStatus,
   HubSettingsSnapshot,
-  SessionSummary,
   SystemInfoResponse,
   WorkspaceDiffResponse,
   TestPairingRequest,
@@ -463,7 +464,7 @@ export class ApiClient {
   // Sessions / approvals / search / audit
   // ------------------------------------------------------------------
 
-  /** `GET /api/v1/sessions` */
+  /** `GET /api/v1/sessions` (one keyset-paginated page) */
   async sessions(
     filter: {
       projectId?: string | null;
@@ -472,22 +473,27 @@ export class ApiClient {
       /** Whether to include archived sessions (default `false` = exclude). */
       includeArchived?: boolean | null;
       limit?: number;
+      /** Opaque `next_cursor` of the previous page. */
+      cursor?: string | null;
     } = {},
-  ): Promise<SessionSummary[]> {
-    const response = await this.#request<{ sessions: SessionSummary[] }>(
-      "GET",
-      "/api/v1/sessions",
-      {
-        query: {
-          project_id: filter.projectId,
-          node_id: filter.nodeId,
-          status: filter.status,
-          include_archived: filter.includeArchived,
-          limit: filter.limit,
-        },
+  ): Promise<SessionListResponse> {
+    return await this.#request<SessionListResponse>("GET", "/api/v1/sessions", {
+      query: {
+        project_id: filter.projectId,
+        node_id: filter.nodeId,
+        status: filter.status,
+        include_archived: filter.includeArchived,
+        limit: filter.limit,
+        cursor: filter.cursor,
       },
-    );
-    return response.sessions;
+    });
+  }
+
+  /** `GET /api/v1/sessions/:id` (single session aggregate). */
+  sessionDetail(sessionId: string, recentEvents = 0): Promise<SessionDetail> {
+    return this.#request("GET", `/api/v1/sessions/${encodeURIComponent(sessionId)}`, {
+      query: { recent_events: recentEvents },
+    });
   }
 
   /** `POST /api/v1/sessions` (start a new session). */
@@ -514,10 +520,25 @@ export class ApiClient {
     return this.#request("GET", "/api/v1/sessions/external", { query });
   }
 
-  /** `GET /api/v1/sessions/:id/events?after_cursor=` */
+  /** `GET /api/v1/sessions/:id/events?after_cursor=...` (ascending resume batches). */
   sessionEvents(sessionId: string, afterCursor = 0, limit?: number): Promise<SessionEventBatch> {
     return this.#request("GET", `/api/v1/sessions/${encodeURIComponent(sessionId)}/events`, {
       query: { after_cursor: afterCursor, limit },
+    });
+  }
+
+  /**
+   * `GET /api/v1/sessions/:id/events?before_cursor=...` (newest page first).
+   *
+   * Omitting `beforeCursor` returns the latest page of the session (`tail=true`).
+   */
+  sessionEventsBefore(
+    sessionId: string,
+    beforeCursor: number | null = null,
+    limit?: number,
+  ): Promise<SessionEventBatch> {
+    return this.#request("GET", `/api/v1/sessions/${encodeURIComponent(sessionId)}/events`, {
+      query: beforeCursor === null ? { tail: true, limit } : { before_cursor: beforeCursor, limit },
     });
   }
 

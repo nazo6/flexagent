@@ -2128,6 +2128,13 @@ export type SessionEventBatch = {
 	events: SessionEventEnvelope[],
 	/**  Cursor of the source store at the time of this batch */
 	cursor: number,
+	/**
+	 *  Cursor of the **first** event in `events` (`0` when the batch is empty).
+	 *
+	 *  Together with `cursor` it delimits the batch in source-store order. A
+	 *  client paging backwards passes it as the next `before_cursor`.
+	 */
+	first_cursor: number,
 };
 
 /**  Envelope of a session event (the unit of persistence and synchronization). */
@@ -2202,6 +2209,13 @@ export type SessionImportResponse = {
 export type SessionListResponse = {
 	/**  Sessions (newest update first) */
 	sessions: SessionSummary[],
+	/**
+	 *  Opaque cursor of the next (older) page (`None` when this is the last page).
+	 *
+	 *  Pass it back as `?cursor=` to continue the list. Sessions are ordered by
+	 *  `updated_at` descending with `session_id` ascending as the tie-breaker.
+	 */
+	next_cursor?: string | null,
 };
 
 /**  `POST /api/v1/sessions/:id/title` request. */
@@ -2441,6 +2455,14 @@ export type SystemInfoResponse = {
 	hub_link: HubLinkStatus | null,
 	/**  Last successful synchronization time (Unix epoch ms; local node only) */
 	last_synced_at: number | null,
+	/**
+	 *  Latest cursor of the source `session_events` store.
+	 *
+	 *  A client that has no timeline state yet subscribes from this cursor so
+	 *  the initial WS replay does not resend the full history. Chat history is
+	 *  loaded per session with the paginated events API instead.
+	 */
+	latest_event_cursor: number,
 };
 
 /**  Overall health snapshot returned by diagnostics. */

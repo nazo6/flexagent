@@ -30,7 +30,7 @@ use fxg_protocol::common::{
     AuditAction, AuditLogEntry, ElicitationMode, ElicitationRequestEntry, ElicitationRequestStatus,
     EventType, ForkScope, NodeLifecycleStatus, NodeSummary, PermissionPolicy,
     PermissionRequestEntry, PermissionRequestStatus, ProjectBindingSummary, ProjectSummary,
-    ResolvedBy, SearchHit, SessionStatus, SessionSummary, SessionUsage,
+    ResolvedBy, SearchHit, SessionCursor, SessionStatus, SessionSummary, SessionUsage,
 };
 use fxg_protocol::events::SessionEventBatch;
 use fxg_protocol::settings::ProjectIdentityKind;
@@ -53,6 +53,17 @@ pub struct SessionFilter {
     pub include_archived: bool,
     /// Maximum number of results
     pub limit: Option<u32>,
+    /// Return only sessions strictly older than this keyset cursor
+    pub cursor: Option<SessionCursor>,
+}
+
+/// One page of the session list.
+#[derive(Debug, Clone, Default)]
+pub struct SessionPage {
+    /// Sessions of this page (newest update first)
+    pub sessions: Vec<SessionSummary>,
+    /// Whether at least one more session matches the filter after this page
+    pub has_more: bool,
 }
 
 /// Context character count for LIKE search and snippet generation.
@@ -91,6 +102,18 @@ pub async fn list_sessions(
     pool: &SqlitePool,
     filter: &SessionFilter,
 ) -> Result<Vec<SessionSummary>, DbError> {
+    Ok(list_session_page(pool, filter).await?.sessions)
+}
+
+/// Retrieves one keyset-paginated page of the session list.
+///
+/// Ordering is `updated_at` descending, then `session_id` ascending. The
+/// filter's [`SessionFilter::cursor`] is the last entry of the previous page;
+/// [`SessionPage::has_more`] tells the caller whether another page exists.
+pub async fn list_session_page(
+    pool: &SqlitePool,
+    filter: &SessionFilter,
+) -> Result<SessionPage, DbError> {
     let rows = sqlx::query_as!(
         SessionRow,
         r#"
@@ -136,10 +159,18 @@ pub async fn list_sessions(
             .cmp(&a.updated_at)
             .then_with(|| a.session_id.as_str().cmp(b.session_id.as_str()))
     });
-    if let Some(limit) = filter.limit {
-        sessions.truncate(limit as usize);
-    }
-    Ok(sessions)
+
+    let start = filter.cursor.as_ref().map_or(0, |cursor| {
+        sessions
+            .iter()
+            .position(|session| cursor.is_after(session.updated_at, &session.session_id))
+            .unwrap_or(sessions.len())
+    });
+    let remaining = sessions.split_off(start);
+    let limit = filter.limit.map_or(usize::MAX, |limit| limit as usize);
+    let has_more = remaining.len() > limit;
+    let sessions = remaining.into_iter().take(limit).collect();
+    Ok(SessionPage { sessions, has_more })
 }
 
 /// Retrieves a single session (`None` if deleted).
@@ -195,9 +226,15 @@ pub async fn session_events_after(
     .await?;
 
     let mut cursor = after_cursor;
+    let mut first_cursor = 0;
     let mut events = Vec::with_capacity(rows.len());
     for row in rows {
-        cursor = u64::try_from(row.cursor).map_err(|_| DbError::NegativeNodeSeq(row.cursor))?;
+        let row_cursor =
+            u64::try_from(row.cursor).map_err(|_| DbError::NegativeNodeSeq(row.cursor))?;
+        if first_cursor == 0 {
+            first_cursor = row_cursor;
+        }
+        cursor = row_cursor;
         events.push(envelope_from_row(
             row.event_id,
             row.session_id,
@@ -206,7 +243,11 @@ pub async fn session_events_after(
             row.created_at,
         )?);
     }
-    Ok(SessionEventBatch { events, cursor })
+    Ok(SessionEventBatch {
+        events,
+        cursor,
+        first_cursor,
+    })
 }
 
 /// Retrieves the most recent events before `before_cursor` (oldest first).
@@ -262,9 +303,15 @@ fn batch_from_rows(
     after_cursor: u64,
 ) -> Result<SessionEventBatch, DbError> {
     let mut cursor = after_cursor;
+    let mut first_cursor = 0;
     let mut events = Vec::with_capacity(rows.len());
     for (row_cursor, event_id, session_id, node_seq, payload_json, created_at) in rows {
-        cursor = u64::try_from(row_cursor).map_err(|_| DbError::NegativeNodeSeq(row_cursor))?;
+        let row_cursor =
+            u64::try_from(row_cursor).map_err(|_| DbError::NegativeNodeSeq(row_cursor))?;
+        if first_cursor == 0 {
+            first_cursor = row_cursor;
+        }
+        cursor = row_cursor;
         events.push(envelope_from_row(
             event_id,
             session_id,
@@ -273,7 +320,11 @@ fn batch_from_rows(
             created_at,
         )?);
     }
-    Ok(SessionEventBatch { events, cursor })
+    Ok(SessionEventBatch {
+        events,
+        cursor,
+        first_cursor,
+    })
 }
 
 /// Retrieves events after `after_cursor` across all sessions.

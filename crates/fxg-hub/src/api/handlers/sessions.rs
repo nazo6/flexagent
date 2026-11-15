@@ -14,7 +14,7 @@ use fxg_protocol::client_api::{
     SessionArchiveRequest, SessionDetail, SessionImportRequest, SessionListResponse,
     SessionRenameRequest,
 };
-use fxg_protocol::common::{DiffScope, SessionStatus};
+use fxg_protocol::common::{DiffScope, SessionCursor, SessionStatus};
 
 use crate::api::{
     ApiError, ClientApiBackend, ClientApiState, ClientCommand, ClientInfo, REPLAY_BATCH_SIZE,
@@ -28,6 +28,8 @@ pub(crate) struct SessionListQuery {
     /// Whether to include archived sessions (default `false`)
     include_archived: Option<bool>,
     limit: Option<u32>,
+    /// Opaque keyset cursor from a previous response's `next_cursor`
+    cursor: Option<String>,
 }
 
 pub(crate) async fn list_sessions<B: ClientApiBackend>(
@@ -41,15 +43,40 @@ pub(crate) async fn list_sessions<B: ClientApiBackend>(
         },
         None => Vec::new(),
     };
+    let cursor = match params.cursor.as_deref() {
+        Some(raw) => match SessionCursor::decode(raw) {
+            Some(cursor) => Some(cursor),
+            None => return ApiError::bad_request("invalid session cursor").into_response(),
+        },
+        None => None,
+    };
     let filter = SessionFilter {
         project_id: params.project_id.map(fxg_protocol::ProjectId::from),
         node_id: params.node_id.map(fxg_protocol::NodeId::from),
         statuses,
         include_archived: params.include_archived.unwrap_or(false),
         limit: Some(params.limit.unwrap_or(100)),
+        cursor,
     };
-    match state.backend.db().list_sessions(&filter).await {
-        Ok(sessions) => Json(SessionListResponse { sessions }).into_response(),
+    match state.backend.db().list_session_page(&filter).await {
+        Ok(page) => {
+            let next_cursor = page
+                .sessions
+                .last()
+                .filter(|_| page.has_more)
+                .map(|session| {
+                    SessionCursor {
+                        updated_at: session.updated_at,
+                        session_id: session.session_id.clone(),
+                    }
+                    .encode()
+                });
+            Json(SessionListResponse {
+                sessions: page.sessions,
+                next_cursor,
+            })
+            .into_response()
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -107,6 +134,8 @@ pub(crate) async fn session_detail<B: ClientApiBackend>(
 pub(crate) struct EventsQuery {
     after_cursor: Option<u64>,
     before_cursor: Option<u64>,
+    /// Return the latest page (`before_cursor` from the end) instead of the oldest page
+    tail: Option<bool>,
     limit: Option<u32>,
 }
 
@@ -116,21 +145,15 @@ pub(crate) async fn session_events<B: ClientApiBackend>(
     Query(params): Query<EventsQuery>,
 ) -> Response {
     let limit = params.limit.unwrap_or(REPLAY_BATCH_SIZE);
-    let result = match params.before_cursor {
-        Some(before) => {
-            state
-                .backend
-                .db()
-                .session_events_before(&session_id, Some(before), limit)
-                .await
-        }
-        None => {
-            state
-                .backend
-                .db()
-                .session_events_after(&session_id, params.after_cursor.unwrap_or(0), limit)
-                .await
-        }
+    let db = state.backend.db();
+    let result = if params.tail.unwrap_or(false) {
+        db.session_events_before(&session_id, None, limit).await
+    } else if let Some(before) = params.before_cursor {
+        db.session_events_before(&session_id, Some(before), limit)
+            .await
+    } else {
+        db.session_events_after(&session_id, params.after_cursor.unwrap_or(0), limit)
+            .await
     };
     match result {
         Ok(batch) => Json(batch).into_response(),

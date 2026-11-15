@@ -101,6 +101,12 @@ pub struct SystemInfoResponse {
     pub hub_link: Option<HubLinkStatus>,
     /// Last successful synchronization time (Unix epoch ms; local node only)
     pub last_synced_at: Option<i64>,
+    /// Latest cursor of the source `session_events` store.
+    ///
+    /// A client that has no timeline state yet subscribes from this cursor so
+    /// the initial WS replay does not resend the full history. Chat history is
+    /// loaded per session with the paginated events API instead.
+    pub latest_event_cursor: u64,
 }
 
 /// Recent stderr lines for one agent (diagnostics).
@@ -441,6 +447,12 @@ pub struct ProjectUnlinkResponse {
 pub struct SessionListResponse {
     /// Sessions (newest update first)
     pub sessions: Vec<SessionSummary>,
+    /// Opaque cursor of the next (older) page (`None` when this is the last page).
+    ///
+    /// Pass it back as `?cursor=` to continue the list. Sessions are ordered by
+    /// `updated_at` descending with `session_id` ascending as the tie-breaker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
 }
 
 /// `GET /api/v1/agents` response (available agents plus import candidates).

@@ -390,6 +390,22 @@
       </div>
     {/if}
 
+    {#if sync.sessionsHasMore}
+      <div class="mt-2 flex justify-center pb-1">
+        <button
+          type="button"
+          class="text-muted-foreground hover:text-foreground hover:bg-accent flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] select-none disabled:opacity-60"
+          disabled={sync.sessionsLoadingMore}
+          onclick={() => void sync.loadMoreSessions()}
+        >
+          {#if sync.sessionsLoadingMore}
+            <LoaderCircleIcon class="size-3 animate-spin" />
+          {/if}
+          {m.shell_load_older_sessions()}
+        </button>
+      </div>
+    {/if}
+
     <!-- Archived sessions (collapsible) -->
     {#if archivedSessions.length > 0}
       <div class="mt-3 border-t pt-2">
