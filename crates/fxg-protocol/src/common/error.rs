@@ -83,7 +83,7 @@ pub enum ErrorCode {
     DbCorrupt,
     /// Provisioning an ephemeral VM / sandbox failed
     ProvisionerFailed,
-    /// Incompatible node / server / schema versions
+    /// Incompatible node / hub / schema versions
     VersionMismatch,
     /// An operation timed out
     Timeout,
@@ -95,7 +95,7 @@ pub enum ErrorCode {
     IoError,
     /// A PTY operation failed
     PtyFailed,
-    /// The local or hub failed
+    /// The hub operation failed
     HubError,
     /// The operation was cancelled
     Cancelled,

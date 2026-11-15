@@ -50,7 +50,7 @@ function persistTargets(targets: ConnectionTarget[]): void {
 }
 
 /**
- * Store that manages the connection target (central server / local node) and auth state.
+ * Store that manages the connection target (hub / local node) and auth state.
  *
  * Connection targets are switched by **origin-level navigation**
  * (`location.assign`). Cross-origin fetches are rejected both by the shared

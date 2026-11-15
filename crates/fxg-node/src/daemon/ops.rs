@@ -52,7 +52,7 @@ impl AuditSource {
     /// Operation from a remote client (via the hub).
     pub fn remote(node_id: &str) -> Self {
         Self {
-            client_ip: "server".to_owned(),
+            client_ip: "hub".to_owned(),
             auth_subject: format!("node:{node_id}"),
             user_agent: None,
             via_hub: true,
@@ -863,7 +863,7 @@ use fxg_protocol::SecretId;
 use fxg_protocol::config::{NodeConfig, process_env};
 use fxg_protocol::settings::{
     ConfigSource, NodeBootstrapView, NodeSettingsSnapshot, SecretSummary, SourcedValue,
-    UpsertSecretRequest, sourced_list, sourced_option, sourced_string,
+    UpsertSecretRequest, sourced_bool, sourced_list, sourced_option, sourced_string,
 };
 
 impl DaemonState {
@@ -949,13 +949,13 @@ impl DaemonState {
             Some("text"),
             Some("--log-format"),
         );
-        let log_no_color = SourcedValue::new(
+        let log_no_color = sourced_bool(
+            &env,
             log.no_color,
-            if log.no_color == config.log.no_color {
-                ConfigSource::ConfigFile
-            } else {
-                ConfigSource::Cli
-            },
+            fxg_protocol::config::env_keys::LOG_NO_COLOR,
+            config.log.no_color,
+            "log.no_color",
+            false,
             Some("--no-color"),
         );
 

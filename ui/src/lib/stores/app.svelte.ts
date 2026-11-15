@@ -2,7 +2,7 @@ import { ConnectionStore } from "./connection.svelte";
 import { problems } from "./problems.svelte.ts";
 import { SyncStore } from "./sync.svelte";
 
-/** Singleton for the connection target (central server / local node) and auth state. */
+/** Singleton for the connection target (hub / local node) and auth state. */
 export const connection = new ConnectionStore();
 
 /** Singleton for Client WS incremental sync. */

@@ -5,7 +5,7 @@ import type { ConfigOptionValue } from "#lib/generated/bindings.ts";
  *
  * Remembers the last used agent / initial mode per project, and the model /
  * thinking level per project and agent.
- * This is a per-device preference and is never stored on the server (node or central server).
+ * This is a per-device preference and is never stored on the server (node or hub).
  */
 
 /**

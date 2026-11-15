@@ -96,12 +96,12 @@ export function errorCodeMessage(
     case "CANCELLED":
       return m.error_cancelled();
     case "REVISION_MISMATCH":
-      return m.error_invalid_state();
+      return m.error_revision_mismatch();
     case "SECRET_MISSING":
-      return m.error_not_found();
+      return m.error_secret_missing();
     case "SECRET_IN_USE":
-      return m.error_invalid_state();
+      return m.error_secret_in_use();
     case "SECRET_INVALID":
-      return m.error_invalid_state();
+      return m.error_secret_invalid();
   }
 }

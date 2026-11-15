@@ -3,7 +3,7 @@ name = "fxg-hub"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "FlexAgent central server (Axum Node Hub, event aggregation, Web Push, PWA delivery)"
+description = "FlexAgent hub (Axum Node Hub, event aggregation, Web Push, PWA delivery)"
 repository.workspace = true
 
 [dependencies]

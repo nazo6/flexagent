@@ -113,7 +113,7 @@ pub fn process_env(key: &str) -> Option<String> {
     }
 }
 
-fn parse_bool_env(key: &'static str, value: &str) -> Result<bool, ConfigError> {
+pub(crate) fn parse_bool_env(key: &'static str, value: &str) -> Result<bool, ConfigError> {
     match value.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Ok(true),
         "0" | "false" | "no" | "off" => Ok(false),

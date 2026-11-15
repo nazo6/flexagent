@@ -1,4 +1,4 @@
-//! Entry point of the `fxg` binary (CLI / TUI).
+//! Entry point of the `fxg` binary (CLI).
 //!
 //! CLI parsing uses **`usage-rs`** (the `usage` crate), not `clap`.
 //! The `#[derive(Cli)]` / `Args` / `Subcommands` declarations are the single

@@ -22,7 +22,7 @@ UI のエラーバナー「Details」からは、このページの対応する�
 
 - **インシデント永続化 (`incidents` テーブル)**: REST (5xx/409/408/429)・Client WS・ノード RPC・エージェントの `StatusChanged(Error)` を観測した時点で `node.db` / `hub.db` へ記録する（同期対象外）。同一 `(code, source, session_id, node_id)` が未解決のまま 10 分以内に再発した場合は集約して `occurrence_count` を増やし、14 日・最大 1,000 行で保持する。
 - **ヘルス & カウンタ**: `/api/v1/diagnostics` がコンポーネントヘルス（`db` / `migrations` / `http` / `sync` / `hub` / `disk` 等）と `DropCounters`（`dropped_events` / `lagged_broadcasts` / `replay_failures` / `outbox_retries` / `push_failures`）を返す。UI では **Problem center**（サイドバー下部バッジ）または設定の Process タブから確認できる。
-- **サポートバンドル & Redaction**: `GET /api/v1/diagnostics/bundle` および `fxg support` / `fxg diagnostics export` で設定・DB 統計・インシデント・ログ末尾を取得できる。出力時は Bearer トークン・`fxg_session`・`token=`/`password=`/`secret=`・ホームディレクトリ（`~` 置換）等を自動 redaction する。
+- **サポートバンドル & Redaction**: `GET /api/v1/diagnostics/bundle` および `fxg support bundle` で設定・DB 統計・インシデント・ログ末尾を取得できる。出力時は Bearer トークン・`fxg_session`・`token=`/`password=`/`secret=`・ホームディレクトリ（`~` 置換）等を自動 redaction する。
 - **CLI 切り分け**: `fxg doctor` でデータディレクトリ・DB・設定パスを検査し、`fxg logs [hub]` でログを確認する。
 
 ## エラー処理の規約（開発者向け）

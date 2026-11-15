@@ -9,7 +9,7 @@
  * - **App Shell cache**: caches build artifacts and static files from
  *   `$service-worker`, so the UI can start offline or on an unstable mobile
  *   connection (navigation is network-first, so development HMR is unaffected).
- * - **Web Push receive**: shows VAPID notifications from the central server and,
+ * - **Web Push receive**: shows VAPID notifications from the hub and,
  *   from the notification banner's `[Approve]` / `[Reject]`, calls
  *   `POST /api/v1/sessions/:id/permissions/:req_id/respond` directly (approval
  *   completes without opening the app).

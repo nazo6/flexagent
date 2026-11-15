@@ -53,7 +53,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM debian:bookworm-slim AS runtime
 
 LABEL org.opencontainers.image.title="FlexAgent (fxg)" \
-      org.opencontainers.image.description="Self-hosted, local-first agent manager (CLI/TUI, node, hub and PWA in a single binary)" \
+      org.opencontainers.image.description="Self-hosted, local-first agent manager (CLI, node, hub and PWA in a single binary)" \
       org.opencontainers.image.source="https://github.com/nazo6/flexagent"
 
 # - ca-certificates: HTTPS (Node Hub / Web Push / PWA 配信) 用

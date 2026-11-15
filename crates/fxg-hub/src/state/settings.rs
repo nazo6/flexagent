@@ -8,8 +8,8 @@ use fxg_protocol::SecretId;
 use fxg_protocol::client_api::{ProvisionerSummary, ProvisionersResponse};
 use fxg_protocol::settings::{
     ConfigSource, HubBootstrapView, HubSettingsSnapshot, ProvisionerDefinition, SecretsResponse,
-    SourcedValue, UpdateHubSettingsRequest, UpsertSecretRequest, sourced_list, sourced_option,
-    sourced_string,
+    SourcedValue, UpdateHubSettingsRequest, UpsertSecretRequest, sourced_bool, sourced_list,
+    sourced_option, sourced_string,
 };
 
 use super::HubState;
@@ -95,13 +95,13 @@ impl HubState {
             Some("text"),
             Some("--log-format"),
         );
-        let log_no_color = SourcedValue::new(
+        let log_no_color = sourced_bool(
+            &env,
             log.no_color,
-            if log.no_color == config.log.no_color {
-                ConfigSource::ConfigFile
-            } else {
-                ConfigSource::Cli
-            },
+            fxg_protocol::config::env_keys::LOG_NO_COLOR,
+            config.log.no_color,
+            "log.no_color",
+            false,
             Some("--no-color"),
         );
         Ok(HubSettingsSnapshot {

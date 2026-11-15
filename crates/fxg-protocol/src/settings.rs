@@ -141,6 +141,31 @@ pub fn sourced_list(
     SourcedValue::new(effective, ConfigSource::Default, Option::<&str>::None)
 }
 
+/// Resolves the origin of an effective bootstrap boolean.
+pub fn sourced_bool(
+    env: EnvLookup<'_>,
+    effective: bool,
+    env_key: &'static str,
+    file_value: bool,
+    config_key: &str,
+    default_value: bool,
+    cli_flag: Option<&str>,
+) -> SourcedValue<bool> {
+    if let Some(raw) = env(env_key)
+        && let Ok(parsed) = crate::config::parse_bool_env(env_key, &raw)
+        && parsed == effective
+    {
+        return SourcedValue::new(effective, ConfigSource::Env, Some(env_key));
+    }
+    if file_value == effective && file_value != default_value {
+        return SourcedValue::new(effective, ConfigSource::ConfigFile, Some(config_key));
+    }
+    if effective == default_value {
+        return SourcedValue::new(effective, ConfigSource::Default, Option::<&str>::None);
+    }
+    SourcedValue::new(effective, ConfigSource::Cli, cli_flag)
+}
+
 /// Read-only bootstrap view of a local node (`node.toml` / env / CLI).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]

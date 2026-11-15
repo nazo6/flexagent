@@ -860,7 +860,7 @@ export type ErrorCode =
 "DB_CORRUPT" |
 /**  Provisioning an ephemeral VM / sandbox failed */
 "PROVISIONER_FAILED" |
-/**  Incompatible node / server / schema versions */
+/**  Incompatible node / hub / schema versions */
 "VERSION_MISMATCH" |
 /**  An operation timed out */
 "TIMEOUT" |
@@ -872,7 +872,7 @@ export type ErrorCode =
 "IO_ERROR" |
 /**  A PTY operation failed */
 "PTY_FAILED" |
-/**  The local or hub failed */
+/**  The hub operation failed */
 "HUB_ERROR" |
 /**  The operation was cancelled */
 "CANCELLED";

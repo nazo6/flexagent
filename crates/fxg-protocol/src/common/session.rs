@@ -434,20 +434,6 @@ crate::open_string_enum! {
     }
 }
 
-crate::open_string_enum! {
-    /// Role of a conversation history item injected on resume.
-    pub enum HistoryRole {
-        /// A user utterance
-        User => "user",
-        /// An agent reply
-        Agent => "agent",
-        /// A tool result
-        Tool => "tool",
-        /// An assistant message
-        Assistant => "assistant",
-    }
-}
-
 /// Session control action (`ControlSession` command).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "action", rename_all = "snake_case")]
