@@ -557,6 +557,7 @@
   "session_usage_updated_just_now": "Updated just now",
   "session_usage_resets_in": "resets in {time}",
   "session_usage_title": "Usage limits",
+  "session_usage_unavailable": "Usage limits are not available yet. Resume the session and try again.",
   "session_usage_updated": "Updated {time}",
   "session_usage_window_5h": "5h",
   "session_usage_window_budget": "Budget",

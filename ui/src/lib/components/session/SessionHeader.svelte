@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { untrack } from "svelte";
+  import { loadAgentCatalog } from "#lib/agents.ts";
   import AgentUsage from "#lib/components/session/AgentUsage.svelte";
   import SessionInfo from "#lib/components/session/SessionInfo.svelte";
   import SessionActionsMenu from "#lib/components/session/SessionActionsMenu.svelte";
@@ -68,6 +70,34 @@
     window.addEventListener("resize", updateDesktop);
     return () => window.removeEventListener("resize", updateDesktop);
   });
+
+  // The usage control keeps the agent identity visible even before the agent
+  // reports limits, so the icon comes from the catalog, not the usage payload.
+  let agentIcon = $state<string | null>(null);
+  let iconRequest = 0;
+
+  async function loadAgentIcon(nodeId: string, agentId: string): Promise<void> {
+    const current = ++iconRequest;
+    try {
+      const catalog = await loadAgentCatalog(nodeId, () =>
+        sync.connection.client.nodeAgentCatalog(nodeId),
+      );
+      if (current !== iconRequest) return;
+      agentIcon = catalog.agents.find((agent) => agent.id === agentId)?.icon ?? null;
+    } catch {
+      if (current === iconRequest) agentIcon = null;
+    }
+  }
+
+  $effect(() => {
+    const nodeId = session?.node_id ?? "";
+    const agentId = session?.agent_id ?? "";
+    if (nodeId === "" || agentId === "") {
+      agentIcon = null;
+      return;
+    }
+    untrack(() => void loadAgentIcon(nodeId, agentId));
+  });
 </script>
 
 <header class="wco-titlebar bg-card/85 border-border shrink-0 border-b backdrop-blur">
@@ -122,17 +152,18 @@
     </div>
 
     <div class="hidden min-w-0 items-center gap-2 md:flex">
-      <SessionInfo {session} {node} {status} {usage} {projectName} />
-    </div>
-
-    <div class="flex shrink-0 items-center gap-1">
       {#if isDesktop && session}
         <AgentUsage
           nodeId={session.node_id}
           agentId={session.agent_id}
           localPath={session.local_path}
+          icon={agentIcon}
         />
       {/if}
+      <SessionInfo {session} {node} {status} {usage} {projectName} />
+    </div>
+
+    <div class="flex shrink-0 items-center gap-1">
       <!-- On desktop the sidebar footer owns the badge; when the sidebar is
            collapsed this header is the only remaining place for it. -->
       <ProblemBadge
@@ -201,6 +232,7 @@
         nodeId={session.node_id}
         agentId={session.agent_id}
         localPath={session.local_path}
+        icon={agentIcon}
         class="border-transparent"
       />
     {/if}

@@ -1,6 +1,7 @@
 import type {
   AgentBackendKind,
   AgentSource,
+  AgentsResponse,
   AgentSummary,
   RegistryDistributionKind,
 } from "#lib/generated/bindings.ts";
@@ -56,4 +57,25 @@ export function agentOptionLabel(agent: AgentSummary): string {
 /** Return only the agents available on the node. */
 export function agentsAvailableOn(agents: AgentSummary[], nodeId: string): AgentSummary[] {
   return agents.filter((agent) => agent.installed_nodes.includes(nodeId));
+}
+
+/** Short shared cache for node agent catalogs (identity / icon lookups). */
+const CATALOG_TTL_MS = 60_000;
+const catalogCache = new Map<string, { at: number; value: Promise<AgentsResponse> }>();
+
+/** Load a node's agent catalog, sharing one request across header mounts. */
+export function loadAgentCatalog(
+  nodeId: string,
+  load: () => Promise<AgentsResponse>,
+): Promise<AgentsResponse> {
+  const cached = catalogCache.get(nodeId);
+  if (cached !== undefined && Date.now() - cached.at < CATALOG_TTL_MS) {
+    return cached.value;
+  }
+  const value = load();
+  catalogCache.set(nodeId, { at: Date.now(), value });
+  value.catch(() => {
+    if (catalogCache.get(nodeId)?.value === value) catalogCache.delete(nodeId);
+  });
+  return value;
 }

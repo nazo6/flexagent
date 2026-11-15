@@ -36,7 +36,9 @@ rolling 5h / weekly / monthly、Antigravity の 5h / weekly など）を取得�
 - **UI**: セッションヘッダーに利用上限アイコンを追加。数値は常時表示せず、
   デスクトップはトップバー、モバイルはコンテキスト行にエージェントアイコン
   だけを置き、ポップオーバーで source / group / window / リセット時刻を
-  表示する。取得できない場合は何も表示しない。ポップオーバーの Refresh は
+  表示する。アイコンは `AgentSummary.icon` から取得し（フロントに
+  エージェント ID をハードコードしない）、停止中でも消さない。usage が
+  未取得のときはポップオーバーで再開を促す。ポップオーバーの Refresh は
   実行中に `Checking…`、成功時に `Updated just now`、失敗時に
   `Could not update` を表示し、結果が同じでも操作が伝わるようにした。
 

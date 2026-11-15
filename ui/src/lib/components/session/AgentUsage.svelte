@@ -18,10 +18,18 @@
     agentId: string;
     /** Working directory used for agent-specific lookups. */
     localPath: string;
+    /** Agent icon from the catalog (kept even when usage is unavailable). */
+    icon?: string | null;
     class?: string;
   }
 
-  let { nodeId, agentId, localPath, class: className = "" }: Props = $props();
+  let {
+    nodeId,
+    agentId,
+    localPath,
+    icon: agentIcon = null,
+    class: className = "",
+  }: Props = $props();
 
   const REFRESH_MS = 60_000;
 
@@ -30,7 +38,11 @@
   let usage = $state<AgentUsageLimits | null>(null);
   let refreshState = $state<RefreshState>("idle");
   let statusTimer: ReturnType<typeof setTimeout> | null = null;
+  let hasLoaded = $state(false);
   let requestId = 0;
+
+  /** The agent identity icon; the source icon is only a fallback. */
+  const icon = $derived(agentIcon ?? usage?.source.icon ?? null);
 
   function flashStatus(state: "updated" | "failed"): void {
     refreshState = state;
@@ -74,6 +86,7 @@
       // Keep the last snapshot; the next refresh may succeed.
       if (current === requestId && options.manual) flashStatus("failed");
     } finally {
+      if (current === requestId) hasLoaded = true;
       // A background poll may supersede this request; do not leave the button
       // spinning forever.
       if (current !== requestId && refreshState === "refreshing") {
@@ -167,51 +180,67 @@
   });
 </script>
 
-{#if usage}
-  <Popover.Root>
-    <Popover.Trigger
-      class={cn(
-        "text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:ring-ring/40 flex size-7 shrink-0 items-center justify-center rounded-md border border-border outline-none transition-colors focus-visible:ring-2",
-        className,
-      )}
-      title={summaryLabel}
-      aria-label={summaryLabel}
-    >
-      <AgentIcon icon={usage.source.icon} class="size-4" />
-    </Popover.Trigger>
+<Popover.Root>
+  <Popover.Trigger
+    class={cn(
+      "text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:ring-ring/40 flex size-7 shrink-0 items-center justify-center rounded-md border border-border outline-none transition-colors focus-visible:ring-2",
+      className,
+    )}
+    title={summaryLabel}
+    aria-label={summaryLabel}
+  >
+    <AgentIcon {icon} class="size-4" />
+  </Popover.Trigger>
 
-    <Popover.Content align="end" class="w-[min(23rem,calc(100vw-2rem))] p-0">
-      <div class="border-b border-border px-3 py-2">
-        <div class="flex min-w-0 items-center gap-2">
-          <AgentIcon icon={usage.source.icon} class="size-4" />
-          <div class="min-w-0">
-            <div class="flex min-w-0 items-center gap-1.5">
-              <h2 class="truncate text-[13px] font-semibold">{usage.source.label}</h2>
-              {#if usage.source.plan}
-                <span class="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[10px]">
-                  {usage.source.plan}
-                </span>
-              {/if}
-            </div>
-            <div class="text-muted-foreground truncate text-[11px]">
-              {usage.source.id}{usage.source.account ? ` · ${usage.source.account}` : ""}
-            </div>
+  <Popover.Content align="start" class="w-[min(23rem,calc(100vw-2rem))] p-0">
+    <div class="border-b border-border px-3 py-2">
+      <div class="flex min-w-0 items-center gap-2">
+        <AgentIcon {icon} class="size-4" />
+        <div class="min-w-0">
+          <div class="flex min-w-0 items-center gap-1.5">
+            <h2 class="truncate text-[13px] font-semibold">
+              {usage?.source.label ?? m.session_usage_title()}
+            </h2>
+            {#if usage?.source.plan}
+              <span class="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[10px]">
+                {usage.source.plan}
+              </span>
+            {/if}
           </div>
-          <button
-            type="button"
-            class="text-muted-foreground hover:text-foreground hover:bg-accent ml-auto flex size-6 shrink-0 items-center justify-center rounded-md transition-colors"
-            title={m.session_usage_refresh()}
-            aria-label={m.session_usage_refresh()}
-            onclick={() => void load(nodeId, agentId, localPath, { manual: true, force: true })}
-            disabled={refreshState === "refreshing"}
-          >
-            <RefreshCwIcon
-              class={cn("size-3.5", refreshState === "refreshing" && "animate-spin")}
-            />
-          </button>
+          <div class="text-muted-foreground truncate text-[11px]">
+            {usage?.source.id ?? agentId}{usage?.source.account ? ` · ${usage.source.account}` : ""}
+          </div>
         </div>
+        <button
+          type="button"
+          class="text-muted-foreground hover:text-foreground hover:bg-accent ml-auto flex size-6 shrink-0 items-center justify-center rounded-md transition-colors"
+          title={m.session_usage_refresh()}
+          aria-label={m.session_usage_refresh()}
+          onclick={() => void load(nodeId, agentId, localPath, { manual: true, force: true })}
+          disabled={refreshState === "refreshing"}
+        >
+          <RefreshCwIcon class={cn("size-3.5", refreshState === "refreshing" && "animate-spin")} />
+        </button>
       </div>
+    </div>
 
+    {#if usage === null}
+      <div class="text-muted-foreground p-3 text-[12px] leading-snug" aria-live="polite">
+        {#if !hasLoaded || refreshState === "refreshing"}
+          <span class="flex items-center gap-1.5">
+            <RefreshCwIcon class="size-3 animate-spin" />
+            {m.session_usage_checking()}
+          </span>
+        {:else if refreshState === "failed"}
+          <span class="text-destructive flex items-center gap-1.5">
+            <TriangleAlertIcon class="size-3" />
+            {m.session_usage_update_failed()}
+          </span>
+        {:else}
+          {m.session_usage_unavailable()}
+        {/if}
+      </div>
+    {:else}
       <div class="space-y-3 p-3">
         {#each usage.groups as group (group.id)}
           <section>
@@ -270,6 +299,6 @@
           {/if}
         </div>
       </div>
-    </Popover.Content>
-  </Popover.Root>
-{/if}
+    {/if}
+  </Popover.Content>
+</Popover.Root>
