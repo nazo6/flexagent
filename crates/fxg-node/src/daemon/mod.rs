@@ -1192,6 +1192,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_pairing_requires_an_explicit_token_for_a_different_hub() {
+        use fxg_protocol::settings::{TestPairingRequest, UpdatePairingRequest};
+
+        let (daemon, _dir) = start_test_daemon().await;
+        let state = daemon.state();
+        let source = AuditSource::local();
+        let revision = state.pairing_settings().await.expect("pairing").revision;
+        state
+            .update_pairing(
+                &UpdatePairingRequest {
+                    hub_url: "http://127.0.0.1:1".to_owned(),
+                    token: Some("stored-token".to_owned()),
+                    expected_revision: revision,
+                },
+                &source,
+            )
+            .await
+            .expect("pair");
+
+        let err = state
+            .test_pairing(&TestPairingRequest {
+                hub_url: "http://127.0.0.1:2".to_owned(),
+                token: None,
+            })
+            .await
+            .expect_err("a different hub must require an explicit token");
+        assert!(matches!(err, NodeError::PairingTokenRequired));
+
+        daemon.shutdown();
+        fxg_protocol::discard_with!(
+            tokio::time::timeout(Duration::from_secs(5), daemon.wait()).await,
+            "wait for the daemon to stop"
+        );
+    }
+
+    #[tokio::test]
     async fn daemon_starts_and_registers_itself() {
         let (daemon, _dir) = start_test_daemon().await;
         assert_ne!(daemon.http_addr().port(), 0, "ephemeral port is bound");
