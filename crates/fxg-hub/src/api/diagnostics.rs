@@ -614,13 +614,50 @@ fn is_secret_key(key: &str) -> bool {
         || key.contains("client_secret")
 }
 
+/// Resolves the newest file for a logically named log (`node.log`).
+///
+/// Daily rotation writes `node.log.YYYY-MM-DD`, so callers that only know the
+/// configured path use this helper instead of assuming the exact file exists.
+pub fn resolve_log_file(path: &Path) -> std::path::PathBuf {
+    if path.is_file() {
+        return path.to_path_buf();
+    }
+    let Some(parent) = path.parent() else {
+        return path.to_path_buf();
+    };
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return path.to_path_buf();
+    };
+    let prefix = format!("{name}.");
+    let mut newest: Option<(std::time::SystemTime, std::path::PathBuf)> = None;
+    for entry in std::fs::read_dir(parent).into_iter().flatten().flatten() {
+        let file_name = entry.file_name();
+        if !file_name.to_string_lossy().starts_with(&prefix) {
+            continue;
+        }
+        let Ok(modified) = entry.metadata().and_then(|meta| meta.modified()) else {
+            continue;
+        };
+        if newest
+            .as_ref()
+            .is_none_or(|(current, _)| modified > *current)
+        {
+            newest = Some((modified, entry.path()));
+        }
+    }
+    newest
+        .map(|(_, path)| path)
+        .unwrap_or_else(|| path.to_path_buf())
+}
+
 /// Reads the tail of a log file (oldest first). Missing files yield an empty tail.
 ///
 /// Only the last 1 MiB is read, so a large (non-rotated) log cannot make the
 /// diagnostics endpoint allocate the whole file.
 pub fn log_tail(path: &Path, lines: usize) -> Vec<String> {
     const MAX_TAIL_BYTES: u64 = 1024 * 1024;
-    let mut file = match std::fs::File::open(path) {
+    let path = resolve_log_file(path);
+    let mut file = match std::fs::File::open(&path) {
         Ok(file) => file,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
         Err(err) => {
@@ -694,6 +731,15 @@ mod tests {
         ] {
             assert!(is_secret_key(key), "{key} must be treated as a secret key");
         }
+    }
+
+    #[test]
+    fn resolve_log_file_finds_a_rotated_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = dir.path().join("node.log");
+        let rotated = dir.path().join("node.log.2026-11-16");
+        std::fs::write(&rotated, "rotated").expect("write rotated");
+        assert_eq!(resolve_log_file(&base), rotated);
     }
 
     #[test]
