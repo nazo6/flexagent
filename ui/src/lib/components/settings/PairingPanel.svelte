@@ -28,6 +28,8 @@
   let loading = $state(false);
   let busy = $state(false);
   let error = $state<string | null>(null);
+  /** Target whose snapshot is currently loaded (null = none). */
+  let loadedTarget = $state<string | null>(null);
   let hubUrl = $state("");
   let token = $state("");
   let tested = $state<HubLinkState | null>(null);
@@ -51,13 +53,22 @@
     if (targetNode === "" || loading) return;
     // Capture the target: it can change while the request is in flight.
     const node = targetNode;
+    if (loadedTarget !== node) {
+      snapshot = null;
+      loadedTarget = null;
+      hubUrl = "";
+      token = "";
+      tested = null;
+    }
     loading = true;
     error = null;
     try {
-      snapshot = await sync.connection.client.nodeSettings(node);
+      const next = await sync.connection.client.nodeSettings(node);
       // Do not overwrite what the user is typing if the target moved on.
       if (targetNode !== node) return;
-      hubUrl = snapshot.pairing.hub_url ?? "";
+      snapshot = next;
+      loadedTarget = node;
+      hubUrl = next.pairing.hub_url ?? "";
       token = "";
     } catch (cause) {
       error = errorMessage(cause);
@@ -79,6 +90,10 @@
 
   async function test(): Promise<void> {
     if (busy || hubUrl.trim() === "") return;
+    if (loadedTarget !== targetNode || snapshot === null) {
+      toast.error(m.settings_node_not_loaded());
+      return;
+    }
     busy = true;
     tested = null;
     try {
@@ -100,7 +115,11 @@
   }
 
   async function save(): Promise<void> {
-    if (busy || hubUrl.trim() === "" || snapshot === null) return;
+    if (busy || hubUrl.trim() === "") return;
+    if (loadedTarget !== targetNode || snapshot === null) {
+      toast.error(m.settings_node_not_loaded());
+      return;
+    }
     busy = true;
     try {
       snapshot = await sync.connection.client.updatePairing(targetNode, {
@@ -119,7 +138,11 @@
   }
 
   async function clear(): Promise<void> {
-    if (busy || snapshot === null) return;
+    if (busy) return;
+    if (loadedTarget !== targetNode || snapshot === null) {
+      toast.error(m.settings_node_not_loaded());
+      return;
+    }
     busy = true;
     try {
       snapshot = await sync.connection.client.clearPairing(targetNode, {
@@ -223,17 +246,35 @@
       {/if}
 
       <div class="flex flex-wrap items-center gap-2">
-        <Button variant="outline" size="sm" disabled={busy || hubUrl.trim() === ""} onclick={test}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy ||
+            hubUrl.trim() === "" ||
+            snapshot === null ||
+            loadedTarget !== targetNode}
+          onclick={test}
+        >
           <LinkIcon />
           {m.settings_pairing_test()}
         </Button>
-        <Button size="sm" disabled={busy || hubUrl.trim() === ""} onclick={save}>
+        <Button
+          size="sm"
+          disabled={busy ||
+            hubUrl.trim() === "" ||
+            snapshot === null ||
+            loadedTarget !== targetNode}
+          onclick={save}
+        >
           {m.settings_pairing_save()}
         </Button>
         <Button
           variant="outline"
           size="sm"
-          disabled={busy || pairing?.hub_url === null}
+          disabled={busy ||
+            pairing?.hub_url === null ||
+            snapshot === null ||
+            loadedTarget !== targetNode}
           onclick={clear}
         >
           <UnplugIcon />
