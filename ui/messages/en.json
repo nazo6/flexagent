@@ -144,6 +144,7 @@
   "data_safety_unchanged": "Your workspace was not modified.",
   "data_safety_unknown": "The state of your data is unknown.",
   "diff_binary_or_unsupported": "This file is binary or its diff text is unavailable.",
+  "diff_load_failed": "Failed to load the diff editor.",
   "diff_loading": "Loading diff…",
   "diff_loading_editor": "Loading diff editor…",
   "diff_no_changes": "No changes.",
