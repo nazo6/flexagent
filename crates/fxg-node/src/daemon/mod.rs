@@ -131,13 +131,13 @@ async fn reconcile_stale_sessions(bus: &SessionEventBus) -> Result<(), NodeError
         include_archived: true,
         ..SessionFilter::default()
     };
-    for session in bus.db().list_sessions(&filter).await? {
+    for session_id in bus.db().list_session_ids(&filter).await? {
         tracing::info!(
-            session_id = %session.session_id,
+            session_id = %session_id,
             "marking session as stopped (daemon restarted)"
         );
         bus.record(
-            session.session_id.as_str(),
+            session_id.as_str(),
             UnifiedEventPayload::StatusChanged {
                 status: SessionStatus::Stopped,
                 error_message: None,
@@ -780,7 +780,7 @@ impl DaemonState {
         let sessions = self
             .inner
             .db
-            .list_sessions(&fxg_db::SessionFilter {
+            .list_session_ids(&fxg_db::SessionFilter {
                 statuses: Self::active_statuses(),
                 // kill-all also stops archived active sessions
                 include_archived: true,
@@ -789,12 +789,12 @@ impl DaemonState {
             .await?;
 
         let mut killed_sessions = Vec::new();
-        for session in sessions {
+        for session_id in sessions {
             match self
                 .inner
                 .bus
                 .record(
-                    session.session_id.as_str(),
+                    session_id.as_str(),
                     UnifiedEventPayload::StatusChanged {
                         status: SessionStatus::Stopped,
                         error_message: Some(reason.to_owned()),
@@ -802,9 +802,9 @@ impl DaemonState {
                 )
                 .await
             {
-                Ok(_) => killed_sessions.push(session.session_id.to_string()),
+                Ok(_) => killed_sessions.push(session_id.to_string()),
                 Err(err) => {
-                    tracing::warn!("failed to stop session {}: {err}", session.session_id);
+                    tracing::warn!("failed to stop session {}: {err}", session_id);
                 }
             }
         }

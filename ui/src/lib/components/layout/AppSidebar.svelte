@@ -371,7 +371,35 @@
                 {#each group.sessions as session (session.session_id)}
                   {@render sessionRow(session)}
                 {/each}
-                {#if group.sessions.length === 0}
+                {#if group.sessions.length === 0 && !sync.hasLoadedProjectSessions(group.projectId)}
+                  <li class="py-1 px-1.5">
+                    <button
+                      type="button"
+                      class="text-muted-foreground hover:text-foreground hover:bg-accent flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] select-none disabled:opacity-60"
+                      disabled={sync.sessionsLoadingMore(group.projectId)}
+                      onclick={() => void sync.loadMoreSessions(group.projectId)}
+                    >
+                      {#if sync.sessionsLoadingMore(group.projectId)}
+                        <LoaderCircleIcon class="size-3 animate-spin" />
+                      {/if}
+                      {m.shell_load_sessions()}
+                    </button>
+                  </li>
+                {:else if sync.hasMoreSessions(group.projectId)}
+                  <li class="py-1 px-1.5">
+                    <button
+                      type="button"
+                      class="text-muted-foreground hover:text-foreground hover:bg-accent flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] select-none disabled:opacity-60"
+                      disabled={sync.sessionsLoadingMore(group.projectId)}
+                      onclick={() => void sync.loadMoreSessions(group.projectId)}
+                    >
+                      {#if sync.sessionsLoadingMore(group.projectId)}
+                        <LoaderCircleIcon class="size-3 animate-spin" />
+                      {/if}
+                      {m.shell_load_older_sessions()}
+                    </button>
+                  </li>
+                {:else if group.sessions.length === 0}
                   <li class="py-1 px-1.5 text-[11px] text-muted-foreground">
                     <a
                       href={`/?project=${encodeURIComponent(group.projectId)}`}

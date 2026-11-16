@@ -280,17 +280,17 @@ impl DaemonState {
 
         // Sessions remember the path they were created with; this keeps a live
         // session usable after its binding was removed.
-        let sessions = self
+        let session_paths = self
             .db()
-            .list_sessions(&fxg_db::SessionFilter {
+            .list_session_local_paths(&fxg_db::SessionFilter {
+                node_id: Some(self.node_id().into()),
                 include_archived: true,
                 ..fxg_db::SessionFilter::default()
             })
             .await?;
-        let known_session_path = sessions.iter().any(|session| {
-            session.node_id.as_str() == self.node_id()
-                && fxg_pty::canonicalize(&session.local_path).is_ok_and(|path| path == canonical)
-        });
+        let known_session_path = session_paths
+            .iter()
+            .any(|path| fxg_pty::canonicalize(path).is_ok_and(|path| path == canonical));
         if known_session_path {
             return Ok(canonical);
         }
@@ -346,18 +346,15 @@ impl DaemonState {
         // Re-resolve every path this node knows about so Worktrees and sessions
         // follow the new identity.
         let mut paths: Vec<PathBuf> = vec![link_root.clone(), canonical.clone()];
-        let sessions = self
+        let session_paths = self
             .db()
-            .list_sessions(&fxg_db::SessionFilter {
+            .list_session_local_paths(&fxg_db::SessionFilter {
+                node_id: Some(self.node_id().into()),
                 include_archived: true,
                 ..fxg_db::SessionFilter::default()
             })
             .await?;
-        for session in sessions {
-            if session.node_id.as_str() == self.node_id() {
-                paths.push(PathBuf::from(&session.local_path));
-            }
-        }
+        paths.extend(session_paths.into_iter().map(PathBuf::from));
         paths.sort();
         paths.dedup();
 

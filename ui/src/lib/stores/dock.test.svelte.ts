@@ -164,6 +164,54 @@ describe("WorkspaceDockStore", () => {
     expect(restored.treeWidth).toBe(45);
   });
 
+  it("remembers the line of a chat file link", () => {
+    const { store, storage } = newStore();
+    store.setContext(context("s1"));
+
+    store.openFile("/repo/src/main.ts", "view", "uncommitted", 12);
+    expect(store.activeFileTab?.line).toBe(12);
+
+    store.openFile("/repo/src/main.ts", "view");
+    expect(store.activeFileTab?.line).toBeNull();
+
+    store.openFile("/repo/src/main.ts", "view", "uncommitted", 20);
+    store.setFileMode("/repo/src/main.ts", "diff");
+    expect(store.activeFileTab?.line).toBe(20);
+
+    const restored = new WorkspaceDockStore(storage);
+    restored.setContext(context("s2"));
+    expect(restored.activeFileTab?.line).toBe(20);
+    expect(restored.activeFileTab?.mode).toBe("diff");
+  });
+
+  it("drops invalid persisted lines", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: 2,
+        width: 42,
+        workspaces: {
+          [workspaceDockKey("node-1", "/repo")]: {
+            activeTool: "files",
+            files: [
+              { path: "/repo/a.ts", mode: "view", scope: "uncommitted", line: -3 },
+              { path: "/repo/b.ts", mode: "view", scope: "uncommitted", line: "9" },
+            ],
+            activeFile: "/repo/a.ts",
+            collapsed: false,
+            updatedAt: 1,
+          },
+        },
+      }),
+    );
+
+    const store = new WorkspaceDockStore(storage);
+    store.setContext(context("s1"));
+
+    expect(store.files.map((file) => file.line)).toEqual([null, null]);
+  });
+
   it("starts each workspace with one terminal tab", () => {
     const { store } = newStore();
     store.setContext(context("s1"));

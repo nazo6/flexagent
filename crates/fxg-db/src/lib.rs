@@ -21,9 +21,10 @@
 //! # SQL conventions
 //!
 //! SQL must use `sqlx::query!` / `query_as!` / `query_scalar!` (compile-time verification).
-//! Runtime string `sqlx::query()` is only an exception for special syntax such as FTS5
-//! `MATCH`. The `.sqlx/` directory for offline builds is generated with `cargo sqlx prepare`
-//! and committed (`SQLX_OFFLINE=true`).
+//! Runtime string SQL is limited to documented exceptions: the session-list filter
+//! (`QueryBuilder` for its optional filters, see `queries` module docs) and special syntax
+//! such as FTS5 `MATCH`. The `.sqlx/` directory for offline builds is generated with
+//! `cargo sqlx prepare` and committed (`SQLX_OFFLINE=true`).
 
 #![warn(missing_docs)]
 
@@ -51,6 +52,8 @@ pub use events::{AppendedEvent, ApplyOutcome};
 pub use incidents::{DatabaseCounts, IncidentRecord};
 pub use outbox::SessionOutboxBatch;
 pub use push::PushSubscriptionRecord;
+pub use queries::ProjectSessionCursor;
 pub use queries::SessionFilter;
+pub use queries::SessionPage;
 pub use registration::{NodeRecord, ProjectBindingRecord, ProjectRecord};
 pub use settings::NodePairing;

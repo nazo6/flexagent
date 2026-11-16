@@ -28,9 +28,11 @@ Client ⇔ Hub / Local Node（HTTP / WebSocket）で共有する型を定義し�
 | `created_at` | ノードのローカル時計（Unix epoch ms）。                                |
 | `payload`    | `UnifiedEventPayload`。イベント本体。                                  |
 
-`SessionEventBatch` はイベント列と `cursor` を持ちます。`cursor` は
+`SessionEventBatch` はイベント列と `cursor` / `first_cursor` を持ちます。`cursor` は
 **配信元ストア**（`node.db` / `hub.db`）への取り込み順で、クライアントの
-差分再開にだけ使います。接続先を変えた場合、別ストアの `cursor` は使えません。
+差分再開にだけ使います。`first_cursor` はバッチ先頭イベントの cursor で、
+履歴を古い方向へページングする際の次の `before_cursor` です。接続先を変えた場合、
+別ストアの `cursor` は使えません。
 
 ### 1.2 永続化の境界
 
@@ -215,20 +217,20 @@ prune します。`sessions` は最大 1000 件で、超過時は
 
 #### システム / 認証
 
-| Method / Path                                    | 内容                                                                                                                                                |
-| :----------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/v1/meta`                               | 認証不要。`role`（`hub` / `local_node`）を返す。                                                                                                    |
-| `GET /api/v1/system/info`                        | `role` / `version` / `vapid_public_key` / `node_id` / `unsynced_event_count`（ノードのスタンドアロン時は `null`） / `hub_link` / `last_synced_at`。 |
-| `GET /healthz` / `GET /readyz`                   | 認証不要の liveness / readiness。                                                                                                                   |
-| `GET /api/v1/diagnostics`                        | エージェント stderr、ログパス、ヘルス、未解決インシデント。                                                                                         |
-| `GET /api/v1/diagnostics/incidents`              | 永続化されたインシデント一覧（`limit` / `include_resolved`）。                                                                                      |
-| `POST /api/v1/diagnostics/incidents/:id/resolve` | インシデントを解決済みにする。                                                                                                                      |
-| `GET /api/v1/diagnostics/bundle`                 | redaction 済みサポートバンドル。                                                                                                                    |
-| `POST /api/v1/auth/login` / `logout`             | トークン入力と Cookie 発行 / 失効。                                                                                                                 |
-| `POST /api/v1/auth/rotate-token`                 | クライアント認証トークンを再生成。                                                                                                                  |
-| `GET/PATCH /api/v1/hub/settings`                 | ハブ設定（VAPID subject）。                                                                                                                         |
-| `POST /api/v1/system/kill-switch`                | `{ reason }`。全ノードへ `KillAllSessions` を配信し、`{ notified_nodes }` を返す。                                                                  |
-| `POST /api/v1/system/shutdown`                   | ハブ / ノードの graceful shutdown。                                                                                                                 |
+| Method / Path                                    | 内容                                                                                                                                                                        |
+| :----------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/meta`                               | 認証不要。`role`（`hub` / `local_node`）を返す。                                                                                                                            |
+| `GET /api/v1/system/info`                        | `role` / `version` / `vapid_public_key` / `node_id` / `unsynced_event_count`（ノードのスタンドアロン時は `null`） / `hub_link` / `last_synced_at` / `latest_event_cursor`。 |
+| `GET /healthz` / `GET /readyz`                   | 認証不要の liveness / readiness。                                                                                                                                           |
+| `GET /api/v1/diagnostics`                        | エージェント stderr、ログパス、ヘルス、未解決インシデント。                                                                                                                 |
+| `GET /api/v1/diagnostics/incidents`              | 永続化されたインシデント一覧（`limit` / `include_resolved`）。                                                                                                              |
+| `POST /api/v1/diagnostics/incidents/:id/resolve` | インシデントを解決済みにする。                                                                                                                                              |
+| `GET /api/v1/diagnostics/bundle`                 | redaction 済みサポートバンドル。                                                                                                                                            |
+| `POST /api/v1/auth/login` / `logout`             | トークン入力と Cookie 発行 / 失効。                                                                                                                                         |
+| `POST /api/v1/auth/rotate-token`                 | クライアント認証トークンを再生成。                                                                                                                                          |
+| `GET/PATCH /api/v1/hub/settings`                 | ハブ設定（VAPID subject）。                                                                                                                                                 |
+| `POST /api/v1/system/kill-switch`                | `{ reason }`。全ノードへ `KillAllSessions` を配信し、`{ notified_nodes }` を返す。                                                                                          |
+| `POST /api/v1/system/shutdown`                   | ハブ / ノードの graceful shutdown。                                                                                                                                         |
 
 #### プロジェクト / Worktree / ノード
 
@@ -320,23 +322,30 @@ driver 側のキャッシュを無視する（UI の明示的な Refresh 用）�
 
 #### セッション
 
-| Method / Path                                                    | 内容                                                                        |
-| :--------------------------------------------------------------- | :-------------------------------------------------------------------------- |
-| `GET /api/v1/sessions`                                           | 一覧。`project_id` / `node_id` / `status` / `include_archived` / `limit`。  |
-| `POST /api/v1/sessions`                                          | 新規セッション（常駐ノード / プロビジョナー / Worktree / Fork）。           |
-| `GET /api/v1/sessions/:id`                                       | 詳細。`recent_events`（既定 20、最大 500）。                                |
-| `GET /api/v1/sessions/:id/events`                                | 履歴。`after_cursor` / `before_cursor` / `limit`。                          |
-| `POST /api/v1/sessions/:id/prompt`                               | `{ command_id, input, client_source }`。`CommandResult`。                   |
-| `POST /api/v1/sessions/:id/control`                              | `{ command_id, action }`。`CommandResult`。                                 |
-| `GET /api/v1/sessions/:id/diff`                                  | `scope=uncommitted` / `scope=branch_base`。                                 |
-| `POST /api/v1/sessions/import`                                   | 既存エージェントセッションの取り込み（`mirror_history` で履歴を複製）。     |
-| `GET /api/v1/sessions/external`                                  | エージェント側の未取り込みセッション一覧（`node_id` / `agent` / `force`）。 |
-| `POST /api/v1/sessions/:id/permissions/:request_id/respond`      | 承認応答。解決済みは `200 { already_resolved: true }`。                     |
-| `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` | 質問応答。解決済みは `200 { already_resolved: true }`。                     |
-| `POST /api/v1/sessions/:id/resume`                               | 停止セッションの再開。                                                      |
-| `POST /api/v1/sessions/:id/title`                                | タイトル変更。                                                              |
-| `POST /api/v1/sessions/:id/archive`                              | アーカイブ / 復元。                                                         |
-| `DELETE /api/v1/sessions/:id`                                    | 削除（tombstone）。                                                         |
+| Method / Path                                                    | 内容                                                                                                                                                                                                                                                                              |
+| :--------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/sessions`                                           | 一覧。`project_id` / `node_id` / `status` / `include_archived` / `limit`（既定 100）/ `cursor`。応答の `next_cursor` を次の `cursor` に渡して古い順へページングする。`project_cursors` はページに含まれるプロジェクトごとの続きカーソルで、プロジェクト単位の追加読み込みに使う。 |
+| `POST /api/v1/sessions`                                          | 新規セッション（常駐ノード / プロビジョナー / Worktree / Fork）。                                                                                                                                                                                                                 |
+| `GET /api/v1/sessions/:id`                                       | 詳細。`recent_events`（既定 20、最大 500）。                                                                                                                                                                                                                                      |
+| `GET /api/v1/sessions/:id/events`                                | 履歴。`after_cursor` / `before_cursor` / `tail`（最新ページ）/ `limit`。                                                                                                                                                                                                          |
+| `POST /api/v1/sessions/:id/prompt`                               | `{ command_id, input, client_source }`。`CommandResult`。                                                                                                                                                                                                                         |
+| `POST /api/v1/sessions/:id/control`                              | `{ command_id, action }`。`CommandResult`。                                                                                                                                                                                                                                       |
+| `GET /api/v1/sessions/:id/diff`                                  | `scope=uncommitted` / `scope=branch_base`。                                                                                                                                                                                                                                       |
+| `POST /api/v1/sessions/import`                                   | 既存エージェントセッションの取り込み（`mirror_history` で履歴を複製）。                                                                                                                                                                                                           |
+| `GET /api/v1/sessions/external`                                  | エージェント側の未取り込みセッション一覧（`node_id` / `agent` / `force`）。                                                                                                                                                                                                       |
+| `POST /api/v1/sessions/:id/permissions/:request_id/respond`      | 承認応答。解決済みは `200 { already_resolved: true }`。                                                                                                                                                                                                                           |
+| `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` | 質問応答。解決済みは `200 { already_resolved: true }`。                                                                                                                                                                                                                           |
+| `POST /api/v1/sessions/:id/resume`                               | 停止セッションの再開。                                                                                                                                                                                                                                                            |
+| `POST /api/v1/sessions/:id/title`                                | タイトル変更。                                                                                                                                                                                                                                                                    |
+| `POST /api/v1/sessions/:id/archive`                              | アーカイブ / 復元。                                                                                                                                                                                                                                                               |
+| `DELETE /api/v1/sessions/:id`                                    | 削除（tombstone）。                                                                                                                                                                                                                                                               |
+
+セッション一覧は `updated_at` 降順 → `session_id` 昇順のキーセットで、フィルタ
+(`project_id` / `node_id` / `status` / `include_archived`) と `limit` は DB 側で
+適用する。`has_more` は `limit + 1` 件取得で判定する。`project_cursors` は
+ページに含まれるプロジェクトだけを持ち、`next_cursor = null` はそのプロジェクト
+が全件読み込み済み、エントリなしは「このページに含まれない（続きは不明）」を
+意味する。
 
 #### 検索 / Push / 監査
 
@@ -360,6 +369,12 @@ driver 側のキャッシュを無視する（UI の明示的な Refresh 用）�
 - `since_cursor` がストア末尾より大きい場合は無効として 0 から再同期する。
   カーソルの巻き戻りを検知したら、保存済みタイムラインを破棄して REST 投影を
   再取得する。
+- **初回接続と履歴**: 保存済みカーソルがないクライアントは、初回接続で
+  `GET /api/v1/system/info` の `latest_event_cursor` から購読する。イベント
+  ログの全履歴はリプレイせず、チャット履歴は `GET /api/v1/sessions/:id/events`
+  の `before_cursor` ページングで必要な分だけ取得する。保存済みカーソルがある
+  場合はそこから差分をリプレイし、タブを閉じている間に発生したイベントと未読
+  状態を取りこぼさない。
 
 ### 3.3 Client PTY WebSocket (`/api/v1/pty/ws`)
 

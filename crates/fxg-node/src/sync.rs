@@ -26,7 +26,7 @@ use fxg_db::SessionFilter;
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{HubLinkState, HubLinkStatus};
 use fxg_protocol::common::ErrorCode;
-use fxg_protocol::node_hub::{HubToNodeMsg, NodeToHubMsg, SessionSyncState};
+use fxg_protocol::node_hub::{HubToNodeMsg, NodeToHubMsg};
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -387,7 +387,7 @@ pub(crate) async fn build_hello(state: &DaemonState) -> NodeToHubMsg {
 
     let sessions = match state
         .db()
-        .list_sessions(&SessionFilter {
+        .list_session_sync_states(&SessionFilter {
             // Archived sessions are also synced (so the resync safety net covers them)
             include_archived: true,
             // Fetch one more row to tell "exactly at the limit" from "truncated".
@@ -401,13 +401,6 @@ pub(crate) async fn build_hello(state: &DaemonState) -> NodeToHubMsg {
             state.set_sessions_truncated(sessions.len() > limit);
             sessions.truncate(limit);
             sessions
-                .into_iter()
-                .map(|session| SessionSyncState {
-                    session_id: session.session_id.clone(),
-                    project_id: session.project_id,
-                    last_node_seq: session.last_node_seq,
-                })
-                .collect()
         }
         Err(err) => {
             tracing::warn!("failed to list sessions for NodeHello: {err}");

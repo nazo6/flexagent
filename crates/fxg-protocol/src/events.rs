@@ -58,6 +58,11 @@ pub struct SessionEventBatch {
     pub events: Vec<SessionEventEnvelope>,
     /// Cursor of the source store at the time of this batch
     pub cursor: u64,
+    /// Cursor of the **first** event in `events` (`0` when the batch is empty).
+    ///
+    /// Together with `cursor` it delimits the batch in source-store order. A
+    /// client paging backwards passes it as the next `before_cursor`.
+    pub first_cursor: u64,
 }
 
 impl SessionEventBatch {
@@ -66,6 +71,7 @@ impl SessionEventBatch {
         Self {
             events: Vec::new(),
             cursor,
+            first_cursor: 0,
         }
     }
 }

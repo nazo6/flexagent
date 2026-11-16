@@ -4,16 +4,20 @@
 //! **the same response types** ([`SessionSummary`] / [`PermissionRequestEntry`], etc.)
 //! (design: `docs/02-database-schema.md` §3).
 //!
-//! # Policy: avoiding dynamic SQL
+//! # Policy: SQL push-down for list filters
 //!
-//! To keep the type-safe macros (`query!` / `query_as!` / `query_scalar!`), list filters are
-//! applied in Rust after fetching instead of dynamically composing SQL
-//! (a simplification assuming self-hosted, single-tenant scale).
+//! List filters are applied in SQL. [`list_session_page`] builds its `WHERE` clause with
+//! [`sqlx::QueryBuilder`] because the filter is optional and combinatorial; the row shape is
+//! still a typed `SessionRow` (`FromRow`), and the column list is one constant shared by
+//! every session-list query. Filtering in Rust would read every session row on each request
+//! (O(total sessions) per page) and defeat the keyset indexes.
 //!
-//! The only exceptions are FTS5 `MATCH` and the LIKE fallback for search terms shorter than
-//! 3 characters. Both are special syntaxes that cannot go through placeholders, so
-//! `query_as` (runtime strings) is used with an explanatory comment (a documented exception,
-//! covered by unit tests).
+//! The type-safe macros (`query!` / `query_as!` / `query_scalar!`) remain the default for
+//! static SQL. The documented exceptions are:
+//!
+//! - the session-list filter (`QueryBuilder`, as above),
+//! - FTS5 `MATCH` and the LIKE fallback for search terms shorter than 3 characters (special
+//!   syntax that cannot go through placeholders, covered by unit tests).
 //!
 //! # Type overrides
 //!
@@ -30,12 +34,13 @@ use fxg_protocol::common::{
     AuditAction, AuditLogEntry, ElicitationMode, ElicitationRequestEntry, ElicitationRequestStatus,
     EventType, ForkScope, NodeLifecycleStatus, NodeSummary, PermissionPolicy,
     PermissionRequestEntry, PermissionRequestStatus, ProjectBindingSummary, ProjectSummary,
-    ResolvedBy, SearchHit, SessionStatus, SessionSummary, SessionUsage,
+    ResolvedBy, SearchHit, SessionCursor, SessionStatus, SessionSummary, SessionUsage,
 };
 use fxg_protocol::events::SessionEventBatch;
+use fxg_protocol::node_hub::SessionSyncState;
 use fxg_protocol::settings::ProjectIdentityKind;
 use fxg_protocol::{EventId, NodeId, ProjectId, SessionId};
-use sqlx::SqlitePool;
+use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
 use crate::error::DbError;
 use crate::events::{StoredPermissionDetails, envelope_from_row};
@@ -53,6 +58,32 @@ pub struct SessionFilter {
     pub include_archived: bool,
     /// Maximum number of results
     pub limit: Option<u32>,
+    /// Return only sessions strictly older than this keyset cursor
+    pub cursor: Option<SessionCursor>,
+}
+
+/// One page of the session list.
+#[derive(Debug, Clone, Default)]
+pub struct SessionPage {
+    /// Sessions of this page (newest update first)
+    pub sessions: Vec<SessionSummary>,
+    /// Whether at least one more session matches the filter after this page
+    pub has_more: bool,
+    /// Per-project continuation for the projects present in `sessions`.
+    ///
+    /// Projects that are not part of this page have no entry (their
+    /// continuation is unknown). A project with `next_cursor = None` has no
+    /// older sessions.
+    pub project_cursors: Vec<ProjectSessionCursor>,
+}
+
+/// Continuation of one project's session list ([`SessionPage::project_cursors`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectSessionCursor {
+    /// Logical project ID
+    pub project_id: ProjectId,
+    /// Cursor of the project's next (older) page (`None` when fully loaded)
+    pub next_cursor: Option<SessionCursor>,
 }
 
 /// Context character count for LIKE search and snippet generation.
@@ -83,63 +114,280 @@ pub async fn find_session_by_agent_session(
     Ok(session_id)
 }
 
+/// Column list of `SessionRow` (kept in sync with its fields).
+const SESSION_ROW_COLUMNS: &str = "session_id, project_id, node_id, local_path, git_branch, \
+     is_worktree, agent_id, agent_session_id, parent_session_id, title, status, \
+     current_mode, permission_policy, usage_json, last_node_seq, fork_scope, \
+     created_at, updated_at, archived_at";
+
 /// Retrieves the session list (descending by update time).
 ///
 /// Deleted (tombstone) sessions are always excluded. Archived sessions are excluded when
 /// [`SessionFilter::include_archived`] is `false`.
+///
+/// Without [`SessionFilter::limit`] this reads every matching row; callers that only need
+/// identifiers or counts should use the dedicated lightweight queries instead.
 pub async fn list_sessions(
     pool: &SqlitePool,
     filter: &SessionFilter,
 ) -> Result<Vec<SessionSummary>, DbError> {
-    let rows = sqlx::query_as!(
-        SessionRow,
+    Ok(fetch_session_page(pool, filter, false).await?.sessions)
+}
+
+/// Retrieves one keyset-paginated page of the session list.
+///
+/// Ordering is `updated_at` descending, then `session_id` ascending. The
+/// filter's [`SessionFilter::cursor`] is the last entry of the previous page;
+/// [`SessionPage::has_more`] tells the caller whether another page exists.
+pub async fn list_session_page(
+    pool: &SqlitePool,
+    filter: &SessionFilter,
+) -> Result<SessionPage, DbError> {
+    fetch_session_page(pool, filter, true).await
+}
+
+async fn fetch_session_page(
+    pool: &SqlitePool,
+    filter: &SessionFilter,
+    with_project_cursors: bool,
+) -> Result<SessionPage, DbError> {
+    let mut builder = QueryBuilder::<Sqlite>::new("SELECT ");
+    builder.push(SESSION_ROW_COLUMNS);
+    builder.push(" FROM sessions");
+    push_session_filters(&mut builder, filter);
+    builder.push(" ORDER BY updated_at DESC, session_id ASC");
+    if let Some(limit) = filter.limit {
+        // One extra row distinguishes "exactly at the limit" from "more rows exist".
+        builder.push(" LIMIT ").push_bind(i64::from(limit) + 1);
+    }
+    let mut rows = builder
+        .build_query_as::<SessionRow>()
+        .fetch_all(pool)
+        .await?;
+
+    let limit = filter
+        .limit
+        .map(|limit| usize::try_from(limit).unwrap_or(usize::MAX));
+    let has_more = limit.is_some_and(|limit| rows.len() > limit);
+    if let Some(limit) = limit {
+        rows.truncate(limit);
+    }
+    let sessions = rows
+        .into_iter()
+        .map(SessionRow::into_summary)
+        .collect::<Result<Vec<_>, _>>()?;
+    let project_cursors = if with_project_cursors {
+        project_cursors(pool, filter, &sessions, has_more).await?
+    } else {
+        Vec::new()
+    };
+
+    Ok(SessionPage {
+        sessions,
+        has_more,
+        project_cursors,
+    })
+}
+
+/// Computes the per-project continuation of one page.
+///
+/// A project present in `sessions` gets an entry. Its `next_cursor` is the last
+/// session of that project in the page when the project has an older matching
+/// session, and `None` when it is fully loaded. When the page already contains
+/// every matching session (`has_more = false`), no project can have an older
+/// session and the probes are skipped. Otherwise the check is one indexed
+/// `EXISTS` probe per project (at most the page size), so the result is exact
+/// without scanning the rest of the session table.
+async fn project_cursors(
+    pool: &SqlitePool,
+    filter: &SessionFilter,
+    sessions: &[SessionSummary],
+    has_more: bool,
+) -> Result<Vec<ProjectSessionCursor>, DbError> {
+    let mut project_ids: Vec<&ProjectId> = Vec::new();
+    for session in sessions {
+        if !project_ids.contains(&&session.project_id) {
+            project_ids.push(&session.project_id);
+        }
+    }
+
+    let mut cursors = Vec::with_capacity(project_ids.len());
+    for project_id in project_ids {
+        let last = sessions
+            .iter()
+            .rev()
+            .find(|session| &session.project_id == project_id)
+            .expect("project is present in the page");
+        let last_cursor = SessionCursor {
+            updated_at: last.updated_at,
+            session_id: last.session_id.clone(),
+        };
+
+        let has_older = if has_more {
+            let mut probe = filter.clone();
+            probe.project_id = Some(project_id.clone());
+            probe.cursor = Some(last_cursor.clone());
+            probe.limit = None;
+            let mut builder = QueryBuilder::<Sqlite>::new("SELECT 1 FROM sessions");
+            push_session_filters(&mut builder, &probe);
+            builder.push(" LIMIT 1");
+            builder
+                .build_query_scalar::<i64>()
+                .fetch_optional(pool)
+                .await?
+                .is_some()
+        } else {
+            false
+        };
+
+        cursors.push(ProjectSessionCursor {
+            project_id: project_id.clone(),
+            next_cursor: has_older.then_some(last_cursor),
+        });
+    }
+    Ok(cursors)
+}
+
+/// Appends the `WHERE` conditions of `filter` to a session query.
+///
+/// Every session-list query shares this clause so the SQL push-down stays
+/// consistent (and index-friendly) across the page, count and column queries.
+fn push_session_filters(builder: &mut QueryBuilder<Sqlite>, filter: &SessionFilter) {
+    builder.push(" WHERE deleted_at IS NULL");
+    if let Some(project_id) = filter.project_id.as_ref() {
+        builder
+            .push(" AND project_id = ")
+            .push_bind(project_id.as_str());
+    }
+    if let Some(node_id) = filter.node_id.as_ref() {
+        builder.push(" AND node_id = ").push_bind(node_id.as_str());
+    }
+    if !filter.include_archived {
+        builder.push(" AND archived_at IS NULL");
+    }
+    if !filter.statuses.is_empty() {
+        builder.push(" AND status IN (");
+        let mut statuses = builder.separated(", ");
+        for status in &filter.statuses {
+            statuses.push_bind(status.as_str());
+        }
+        statuses.push_unseparated(")");
+    }
+    if let Some(cursor) = filter.cursor.as_ref() {
+        builder
+            .push(" AND (updated_at < ")
+            .push_bind(cursor.updated_at)
+            .push(" OR (updated_at = ")
+            .push_bind(cursor.updated_at)
+            .push(" AND session_id > ")
+            .push_bind(cursor.session_id.as_str())
+            .push("))");
+    }
+}
+
+/// Appends `filter.limit` as a plain `LIMIT` (no `has_more` look-ahead).
+fn push_limit(builder: &mut QueryBuilder<Sqlite>, limit: Option<u32>) {
+    if let Some(limit) = limit {
+        builder.push(" LIMIT ").push_bind(i64::from(limit));
+    }
+}
+
+/// Counts the sessions matching `filter`.
+///
+/// Used by callers that only need a number (the tray's active-session badge)
+/// instead of loading every summary.
+pub async fn count_sessions(pool: &SqlitePool, filter: &SessionFilter) -> Result<u64, DbError> {
+    let mut builder = QueryBuilder::<Sqlite>::new("SELECT COUNT(*) FROM sessions");
+    push_session_filters(&mut builder, filter);
+    let count = builder.build_query_scalar::<i64>().fetch_one(pool).await?;
+    u64::try_from(count)
+        .map_err(|_| DbError::InvalidPayload(format!("negative session count: {count}")))
+}
+
+/// Lists the IDs of the sessions matching `filter` (order is unspecified).
+///
+/// Used by startup reconciliation and the kill switch, which only need the
+/// session IDs to append a `StatusChanged` event.
+pub async fn list_session_ids(
+    pool: &SqlitePool,
+    filter: &SessionFilter,
+) -> Result<Vec<SessionId>, DbError> {
+    let mut builder = QueryBuilder::<Sqlite>::new("SELECT session_id FROM sessions");
+    push_session_filters(&mut builder, filter);
+    push_limit(&mut builder, filter.limit);
+    Ok(builder
+        .build_query_scalar::<SessionId>()
+        .fetch_all(pool)
+        .await?)
+}
+
+/// Lists the `NodeHello` sync state of the sessions matching `filter`.
+///
+/// Selects only `(session_id, project_id, last_node_seq)` instead of loading
+/// every summary column.
+pub async fn list_session_sync_states(
+    pool: &SqlitePool,
+    filter: &SessionFilter,
+) -> Result<Vec<SessionSyncState>, DbError> {
+    let mut builder =
+        QueryBuilder::<Sqlite>::new("SELECT session_id, project_id, last_node_seq FROM sessions");
+    push_session_filters(&mut builder, filter);
+    push_limit(&mut builder, filter.limit);
+    let rows = builder
+        .build_query_as::<SessionSyncRow>()
+        .fetch_all(pool)
+        .await?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(SessionSyncState {
+                session_id: row.session_id,
+                project_id: row.project_id,
+                last_node_seq: u64::try_from(row.last_node_seq)
+                    .map_err(|_| DbError::NegativeNodeSeq(row.last_node_seq))?,
+            })
+        })
+        .collect()
+}
+
+/// Lists the `local_path` values of the sessions matching `filter`.
+///
+/// Used by workspace validation and project-link re-resolution, which only
+/// compare paths.
+pub async fn list_session_local_paths(
+    pool: &SqlitePool,
+    filter: &SessionFilter,
+) -> Result<Vec<String>, DbError> {
+    let mut builder = QueryBuilder::<Sqlite>::new("SELECT local_path FROM sessions");
+    push_session_filters(&mut builder, filter);
+    push_limit(&mut builder, filter.limit);
+    Ok(builder
+        .build_query_scalar::<String>()
+        .fetch_all(pool)
+        .await?)
+}
+
+/// Lists `(agent_id, agent_session_id, session_id)` of live sessions that are
+/// bound to an agent-side session.
+///
+/// Used by external-session discovery to skip sessions that were already
+/// imported.
+pub async fn list_agent_session_bindings(
+    pool: &SqlitePool,
+) -> Result<Vec<(String, String, SessionId)>, DbError> {
+    let rows = sqlx::query!(
         r#"
-        SELECT session_id AS "session_id!",
-               project_id, node_id, local_path, git_branch,
-               is_worktree AS "is_worktree: bool",
-               agent_id, agent_session_id, parent_session_id AS "parent_session_id: SessionId",
-               title, status AS "status: SessionStatus", current_mode,
-               permission_policy AS "permission_policy: PermissionPolicy", usage_json,
-               last_node_seq, fork_scope AS "fork_scope: ForkScope", created_at, updated_at,
-               archived_at
+        SELECT agent_id, agent_session_id AS "agent_session_id!",
+               session_id AS "session_id!: SessionId"
           FROM sessions
-         WHERE deleted_at IS NULL
-         ORDER BY updated_at DESC
+         WHERE deleted_at IS NULL AND agent_session_id IS NOT NULL
         "#,
     )
     .fetch_all(pool)
     .await?;
-
-    let mut sessions = Vec::with_capacity(rows.len());
-    for row in rows {
-        if let Some(project_id) = filter.project_id.as_ref()
-            && &row.project_id != project_id
-        {
-            continue;
-        }
-        if let Some(node_id) = filter.node_id.as_ref()
-            && &row.node_id != node_id
-        {
-            continue;
-        }
-        let summary = row.into_summary()?;
-        if !filter.include_archived && summary.archived_at.is_some() {
-            continue;
-        }
-        if !filter.statuses.is_empty() && !filter.statuses.contains(&summary.status) {
-            continue;
-        }
-        sessions.push(summary);
-    }
-    sessions.sort_by(|a, b| {
-        b.updated_at
-            .cmp(&a.updated_at)
-            .then_with(|| a.session_id.as_str().cmp(b.session_id.as_str()))
-    });
-    if let Some(limit) = filter.limit {
-        sessions.truncate(limit as usize);
-    }
-    Ok(sessions)
+    Ok(rows
+        .into_iter()
+        .map(|row| (row.agent_id, row.agent_session_id, row.session_id))
+        .collect())
 }
 
 /// Retrieves a single session (`None` if deleted).
@@ -195,9 +443,15 @@ pub async fn session_events_after(
     .await?;
 
     let mut cursor = after_cursor;
+    let mut first_cursor = 0;
     let mut events = Vec::with_capacity(rows.len());
     for row in rows {
-        cursor = u64::try_from(row.cursor).map_err(|_| DbError::NegativeNodeSeq(row.cursor))?;
+        let row_cursor =
+            u64::try_from(row.cursor).map_err(|_| DbError::NegativeNodeSeq(row.cursor))?;
+        if first_cursor == 0 {
+            first_cursor = row_cursor;
+        }
+        cursor = row_cursor;
         events.push(envelope_from_row(
             row.event_id,
             row.session_id,
@@ -206,7 +460,11 @@ pub async fn session_events_after(
             row.created_at,
         )?);
     }
-    Ok(SessionEventBatch { events, cursor })
+    Ok(SessionEventBatch {
+        events,
+        cursor,
+        first_cursor,
+    })
 }
 
 /// Retrieves the most recent events before `before_cursor` (oldest first).
@@ -262,9 +520,15 @@ fn batch_from_rows(
     after_cursor: u64,
 ) -> Result<SessionEventBatch, DbError> {
     let mut cursor = after_cursor;
+    let mut first_cursor = 0;
     let mut events = Vec::with_capacity(rows.len());
     for (row_cursor, event_id, session_id, node_seq, payload_json, created_at) in rows {
-        cursor = u64::try_from(row_cursor).map_err(|_| DbError::NegativeNodeSeq(row_cursor))?;
+        let row_cursor =
+            u64::try_from(row_cursor).map_err(|_| DbError::NegativeNodeSeq(row_cursor))?;
+        if first_cursor == 0 {
+            first_cursor = row_cursor;
+        }
+        cursor = row_cursor;
         events.push(envelope_from_row(
             event_id,
             session_id,
@@ -273,7 +537,11 @@ fn batch_from_rows(
             created_at,
         )?);
     }
-    Ok(SessionEventBatch { events, cursor })
+    Ok(SessionEventBatch {
+        events,
+        cursor,
+        first_cursor,
+    })
 }
 
 /// Retrieves events after `after_cursor` across all sessions.
@@ -718,6 +986,7 @@ pub async fn audit_logs(pool: &SqlitePool, limit: u32) -> Result<Vec<AuditLogEnt
 // Row structs (for the type-safe sqlx macros)
 // ----------------------------------------------------------------------
 
+#[derive(sqlx::FromRow)]
 struct SessionRow {
     session_id: SessionId,
     project_id: ProjectId,
@@ -770,6 +1039,13 @@ impl SessionRow {
             archived_at: self.archived_at,
         })
     }
+}
+
+#[derive(sqlx::FromRow)]
+struct SessionSyncRow {
+    session_id: SessionId,
+    project_id: ProjectId,
+    last_node_seq: i64,
 }
 
 struct ProjectRow {

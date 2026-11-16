@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import ProvisioningLogCard from "#lib/components/ProvisioningLogCard.svelte";
   import ChatTimeline from "#lib/components/chat/ChatTimeline.svelte";
@@ -15,6 +15,7 @@
   import { commandErrorMessage } from "#lib/api/client.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { forkScopeOf } from "#lib/fork-scope.ts";
+  import type { SessionSummary } from "#lib/generated/bindings.ts";
   import type { DockLauncherId } from "#lib/dock/registry.ts";
   import { dock } from "#lib/stores/dock.svelte.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
@@ -31,10 +32,21 @@
   import ArchiveIcon from "@lucide/svelte/icons/archive";
   import { layoutState } from "#lib/stores/layout.svelte.ts";
   import ArrowDownIcon from "@lucide/svelte/icons/arrow-down";
+  import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import SkullIcon from "@lucide/svelte/icons/skull";
 
   const sessionId = $derived(page.params.id ?? "");
-  const session = $derived(sync.sessions.find((entry) => entry.session_id === sessionId) ?? null);
+  /**
+   * Session aggregate for the header.
+   *
+   * Deep links can point at a session outside the loaded sidebar pages (the
+   * list is paginated), so fall back to `GET /api/v1/sessions/:id`.
+   */
+  let fallbackSession = $state<{ id: string; session: SessionSummary } | null>(null);
+  const session = $derived(
+    sync.sessions.find((entry) => entry.session_id === sessionId) ??
+      (fallbackSession?.id === sessionId ? fallbackSession.session : null),
+  );
   const sessionNode = $derived(
     session ? (sync.nodes.find((n) => n.node_id === session.node_id) ?? null) : null,
   );
@@ -86,14 +98,14 @@
     }
     return null;
   });
-  const capabilities = $derived(capabilitiesFromEvents(timeline.events));
+  const capabilities = $derived(capabilitiesFromEvents(timeline.metadataEvents()));
   const canRevert = $derived(capabilities?.nativeFeatures.includes("revert") ?? false);
   // Prefer the latest usage derived from events, and fall back to the session list (projection) value.
   const usage = $derived(latestUsageFromEvents(timeline.events) ?? session?.usage ?? null);
   // Merge persistent events (ProvisioningLog synced after a turn completes) with the
   // ephemeral log the server streams from an ephemeral VM.
   const provisioningLines = $derived.by(() => {
-    const persisted = provisioningLogLines(timeline.events);
+    const persisted = provisioningLogLines(timeline.metadataEvents());
     const live = sync.provisioningLinesFor(sessionId);
     return live.length === 0 ? persisted : [...new Set([...persisted, ...live])];
   });
@@ -191,6 +203,26 @@
     return () => sync.setActiveSession(null);
   });
 
+  // Deep links may point at a session outside the loaded sidebar pages.
+  $effect(() => {
+    const id = sessionId;
+    if (!id) return;
+    if (sync.sessions.some((entry) => entry.session_id === id)) return;
+    if (fallbackSession?.id === id) return;
+    let cancelled = false;
+    void sync.connection.client
+      .sessionDetail(id)
+      .then((detail) => {
+        if (!cancelled) fallbackSession = { id, session: detail.session };
+      })
+      .catch(() => {
+        /* Keep the "not found" state of the header. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
+
   // Follow the tail while the reader is there. Coalesced into one scroll per
   // frame: streamed deltas rebuild the timeline several times per second.
   function scheduleScrollToBottom(): void {
@@ -273,6 +305,32 @@
       behavior: "smooth",
     });
     showScrollBottom = false;
+  }
+
+  let loadingOlder = $state(false);
+
+  /**
+   * Prepend the next older page of the session history and keep the reader's
+   * position (the content above grows by the inserted height).
+   */
+  async function loadOlder() {
+    const container = chatContainer;
+    if (container === null || loadingOlder) return;
+    const previousHeight = container.scrollHeight;
+    const previousTop = container.scrollTop;
+    loadingOlder = true;
+    followOutput = false;
+    try {
+      const added = await sync.loadOlderSessionEvents(sessionId);
+      if (added) {
+        await tick();
+        container.scrollTop = previousTop + (container.scrollHeight - previousHeight);
+      }
+    } catch {
+      /* Reported through the sync store's problem banner. */
+    } finally {
+      loadingOlder = false;
+    }
   }
 
   /** Mobile header: open the tool, or close the dock when it is already active. */
@@ -472,6 +530,22 @@
         >
           <div class="mx-auto flex max-w-[760px] flex-col gap-4">
             <ProvisioningLogCard lines={provisioningLines} />
+            {#if timeline.hasOlder}
+              <div class="flex justify-center">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="gap-1.5 text-[12px]"
+                  disabled={timeline.historyLoading}
+                  onclick={loadOlder}
+                >
+                  {#if loadingOlder}
+                    <LoaderCircleIcon class="size-3.5 animate-spin" />
+                  {/if}
+                  {m.chat_load_earlier()}
+                </Button>
+              </div>
+            {/if}
             <ChatTimeline
               {sessionId}
               {items}

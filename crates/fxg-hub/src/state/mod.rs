@@ -104,14 +104,14 @@ impl HubState {
         // Seed completion-notification tracking so a turn that started before the hub
         // restarted still produces a notification when it ends.
         let running_turns = RunningTurns::from_session_ids(
-            db.list_sessions(&fxg_db::SessionFilter {
+            db.list_session_ids(&fxg_db::SessionFilter {
                 statuses: vec![fxg_protocol::common::SessionStatus::Running],
                 include_archived: true,
                 ..fxg_db::SessionFilter::default()
             })
             .await?
             .into_iter()
-            .map(|session| session.session_id.as_str().to_owned()),
+            .map(|session_id| session_id.as_str().to_owned()),
         );
         let provisioners = ProvisionerManager::new(options.paths.clone(), db.provisioners().await?);
         Ok(Self {

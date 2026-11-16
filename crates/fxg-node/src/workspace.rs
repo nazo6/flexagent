@@ -298,18 +298,16 @@ async fn access_root(state: &DaemonState, canonical: &Path) -> Result<PathBuf, N
             candidates.push(canonical_path);
         }
     }
-    let sessions = state
+    let session_paths = state
         .db()
-        .list_sessions(&fxg_db::SessionFilter {
+        .list_session_local_paths(&fxg_db::SessionFilter {
+            node_id: Some(node_id.into()),
             include_archived: true,
             ..fxg_db::SessionFilter::default()
         })
         .await?;
-    for session in sessions {
-        if session.node_id.as_str() != node_id {
-            continue;
-        }
-        let session_path = PathBuf::from(&session.local_path);
+    for local_path in session_paths {
+        let session_path = PathBuf::from(local_path);
         let Ok(canonical_session) = dunce::canonicalize(&session_path) else {
             continue;
         };

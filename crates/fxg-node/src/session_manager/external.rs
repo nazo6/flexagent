@@ -12,7 +12,6 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use fxg_agent::{AgentAuthRequired, ExternalSessionsUnsupported};
-use fxg_db::SessionFilter;
 use fxg_protocol::SessionId;
 use fxg_protocol::client_api::{
     ExternalSessionAgentInfo, ExternalSessionListResponse, ExternalSessionSummary,
@@ -263,16 +262,11 @@ impl SessionManager {
 
     /// Maps every live fxg session to its agent-side session ID.
     async fn imported_sessions(&self) -> Result<HashMap<(String, String), SessionId>, NodeError> {
-        let filter = SessionFilter {
-            include_archived: true,
-            ..SessionFilter::default()
-        };
-        let sessions = self.inner.bus.db().list_sessions(&filter).await?;
-        Ok(sessions
+        let bindings = self.inner.bus.db().list_agent_session_bindings().await?;
+        Ok(bindings
             .into_iter()
-            .filter_map(|session| {
-                let agent_session_id = session.agent_session_id?;
-                Some(((session.agent_id, agent_session_id), session.session_id))
+            .map(|(agent_id, agent_session_id, session_id)| {
+                ((agent_id, agent_session_id), session_id)
             })
             .collect())
     }

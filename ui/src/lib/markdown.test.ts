@@ -22,4 +22,17 @@ describe("renderMarkdown", () => {
     expect(html).toContain('target="_blank"');
     expect(html).toContain('rel="noopener noreferrer"');
   });
+
+  it("keeps file URIs and drive paths for the Files dock", () => {
+    expect(renderMarkdown("[a](file:///repo/src/a.ts)")).toContain('href="file:///repo/src/a.ts"');
+    expect(renderMarkdown("[a](C:/repo/src/a.ts)")).toContain('href="C:/repo/src/a.ts"');
+    expect(renderMarkdown("[a](C:\\repo\\src\\a.ts)")).toContain('href="C:%5Crepo%5Csrc%5Ca.ts"');
+  });
+
+  it("drops script-capable URI schemes", () => {
+    const html = renderMarkdown("[a](javascript:alert(1)) [b](vbscript:x) [c](data:text/html,x)");
+    expect(html).not.toContain("javascript:");
+    expect(html).not.toContain("vbscript:");
+    expect(html).not.toContain("data:");
+  });
 });
