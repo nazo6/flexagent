@@ -193,6 +193,13 @@ async fn diagnostics_expose_health_and_persisted_incidents() {
 #[tokio::test(flavor = "multi_thread")]
 async fn support_bundle_is_redacted() {
     let (home, server) = start_hub().await;
+    let paths = Paths::portable(home.path(), Role::Hub);
+    let user_home = dirs::home_dir().expect("user home");
+    let secret_path = user_home.join("secret.txt");
+    let log_path = paths.log_path();
+    std::fs::create_dir_all(log_path.parent().expect("log parent")).expect("log dir");
+    std::fs::write(&log_path, format!("path={}\n", secret_path.display())).expect("write log");
+
     let http = reqwest::Client::new();
     let token = auth_token(&home);
     let response = http
@@ -207,12 +214,30 @@ async fn support_bundle_is_redacted() {
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     let text = response.text().await.expect("body");
     assert!(!text.contains(&token), "the auth token must not leak");
+    let secret_text = secret_path.to_string_lossy();
+    assert!(
+        !text.contains(secret_text.as_ref()),
+        "the user home must be redacted"
+    );
     let bundle: serde_json::Value = serde_json::from_str(&text).expect("json");
-    assert_eq!(bundle["config"]["data_dir"], "~");
+    let data_dir = paths.data_dir().to_string_lossy().to_string();
+    assert_eq!(
+        bundle["config"]["data_dir"].as_str(),
+        Some(data_dir.as_str())
+    );
     assert!(
         bundle["database"]["path"]
             .as_str()
             .expect("path")
-            .contains('~')
+            .contains(&data_dir)
+    );
+    assert!(
+        bundle["logs"]
+            .as_array()
+            .expect("logs")
+            .iter()
+            .any(|line| line.as_str().is_some_and(|line| line.contains("~/secret.txt"))),
+        "the user home in logs must be redacted: {}",
+        bundle["logs"]
     );
 }
