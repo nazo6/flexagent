@@ -35,6 +35,12 @@ class MockWebSocket {
       listener({ data });
     }
   }
+
+  emitClose(): void {
+    for (const listener of this.#listeners.get("close") ?? []) {
+      listener({});
+    }
+  }
 }
 
 function makeProject(projectId: string, name: string): ProjectSummary {
@@ -207,6 +213,22 @@ describe("SyncStore project refresh triggers", () => {
     await vi.waitFor(() => expect(projectsFn).toHaveBeenCalledTimes(2));
     expect(sessionsFn).toHaveBeenCalledTimes(2);
     expect(store.projects.map((p) => p.name)).toEqual(["demo-repo"]);
+    store.stop();
+  });
+
+  it("does not reconnect from a socket replaced by restart", async () => {
+    const { store } = createStore();
+    store.start();
+    await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const first = MockWebSocket.instances[0];
+
+    store.restart();
+    await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    first.emitClose();
+
+    // The reconnect delay is 1s; a stale close must not create a third socket.
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    expect(MockWebSocket.instances).toHaveLength(2);
     store.stop();
   });
 

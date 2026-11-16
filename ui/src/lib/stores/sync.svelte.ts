@@ -272,7 +272,11 @@ export class SyncStore {
       if (typeof event.data === "string") this.#handleMessage(event.data);
     });
     ws.addEventListener("close", () => {
-      if (this.#ws === ws) this.#ws = null;
+      // `restart()` / `stop()` may already have replaced or cleared this socket.
+      // A stale close must not mark the new connection disconnected or schedule
+      // another reconnect (which would leak a second WebSocket).
+      if (this.#ws !== ws) return;
+      this.#ws = null;
       this.wsConnected = false;
       this.#scheduleReconnect();
     });
