@@ -129,6 +129,16 @@ export class ConnectionStore {
     }
   }
 
+  /**
+   * Apply a token that the server already accepted (e.g. the auth token rotate
+   * response, which also sets the `fxg_session` cookie atomically).
+   */
+  async applyToken(token: string): Promise<void> {
+    this.client.setToken(token);
+    this.tokenRequired = false;
+    await this.probe();
+  }
+
   /** Invalidate the `fxg_session` Cookie. */
   async logout(): Promise<void> {
     try {

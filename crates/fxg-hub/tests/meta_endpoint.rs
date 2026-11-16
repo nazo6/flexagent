@@ -85,6 +85,57 @@ fn auth_token(home: &tempfile::TempDir) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn rotate_token_sets_the_new_session_cookie() {
+    let (home, server) = start_hub().await;
+    let http = reqwest::Client::new();
+    let old_token = auth_token(&home);
+
+    let response = http
+        .post(format!(
+            "http://{}/api/v1/auth/rotate-token",
+            server.listen_addr()
+        ))
+        .bearer_auth(&old_token)
+        .send()
+        .await
+        .expect("rotate");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let cookie = response
+        .headers()
+        .get(reqwest::header::SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .expect("Set-Cookie")
+        .to_owned();
+    let body: serde_json::Value = response.json().await.expect("json");
+    let new_token = body["token"].as_str().expect("token");
+    assert!(cookie.contains(&format!("fxg_session={new_token}")));
+    assert!(cookie.contains("HttpOnly"));
+    assert!(cookie.contains("SameSite=Strict"));
+
+    let old_response = http
+        .get(format!(
+            "http://{}/api/v1/system/info",
+            server.listen_addr()
+        ))
+        .bearer_auth(&old_token)
+        .send()
+        .await
+        .expect("old token");
+    assert_eq!(old_response.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let new_response = http
+        .get(format!(
+            "http://{}/api/v1/system/info",
+            server.listen_addr()
+        ))
+        .bearer_auth(new_token)
+        .send()
+        .await
+        .expect("new token");
+    assert_eq!(new_response.status(), reqwest::StatusCode::OK);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn diagnostics_expose_health_and_persisted_incidents() {
     let (home, server) = start_hub().await;
     let db = fxg_db::Db::open(
