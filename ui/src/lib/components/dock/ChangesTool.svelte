@@ -80,7 +80,9 @@
     statusLoading = true;
     statusError = null;
     try {
-      status = await sync.connection.client.workspaceGitStatus(ctx.nodeId, ctx.localPath);
+      const next = await sync.connection.client.workspaceGitStatus(ctx.nodeId, ctx.localPath);
+      if (token !== statusGeneration) return;
+      status = next;
     } catch (cause) {
       if (token !== statusGeneration) return;
       status = null;
@@ -95,9 +97,11 @@
     branchLoading = true;
     branchError = null;
     try {
-      branchDiff = await sync.connection.client.workspaceGitDiff(ctx.nodeId, ctx.localPath, {
+      const next = await sync.connection.client.workspaceGitDiff(ctx.nodeId, ctx.localPath, {
         scope: "branch_base",
       });
+      if (token !== branchGeneration) return;
+      branchDiff = next;
     } catch (cause) {
       if (token !== branchGeneration) return;
       branchDiff = null;

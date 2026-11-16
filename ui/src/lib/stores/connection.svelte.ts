@@ -153,11 +153,11 @@ export class ConnectionStore {
     }
   }
 
-  /** Register a switch target (duplicate URLs are not added). */
-  addTarget(label: string, url: string): void {
+  /** Register a switch target. Returns false when it was a duplicate / the current origin. */
+  addTarget(label: string, url: string): boolean {
     const normalized = normalizeUrl(url);
-    if (!normalized || normalized === this.origin) return;
-    if (this.targets.some((target) => target.url === normalized)) return;
+    if (!normalized || normalized === this.origin) return false;
+    if (this.targets.some((target) => target.url === normalized)) return false;
     this.targets = [
       ...this.targets,
       {
@@ -167,6 +167,7 @@ export class ConnectionStore {
       },
     ];
     persistTargets(this.targets);
+    return true;
   }
 
   removeTarget(id: string): void {

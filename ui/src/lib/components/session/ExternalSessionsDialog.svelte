@@ -26,6 +26,7 @@
   let error = $state<string | null>(null);
   let response = $state<ExternalSessionListResponse | null>(null);
   let selectedNodeId = $state("");
+  let loadGeneration = 0;
 
   const isHub = $derived(sync.connection.role === "hub");
   const onlineNodes = $derived(sync.nodes.filter((node) => node.is_online));
@@ -65,17 +66,21 @@
         return;
       }
     }
+    const token = ++loadGeneration;
     loading = true;
     error = null;
     try {
-      response = await sync.connection.client.listExternalSessions({
+      const next = await sync.connection.client.listExternalSessions({
         nodeId: isHub ? selectedNodeId : undefined,
         force,
       });
+      if (token !== loadGeneration) return;
+      response = next;
     } catch (err) {
+      if (token !== loadGeneration) return;
       error = errorMessage(err);
     } finally {
-      loading = false;
+      if (token === loadGeneration) loading = false;
     }
   }
 

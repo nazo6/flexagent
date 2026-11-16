@@ -63,6 +63,7 @@
   let error = $state<string | null>(null);
   let truncated = $state(false);
   let showHidden = $state(false);
+  let loadGeneration = 0;
 
   $effect(() => {
     if (!active || nodeId === "") return;
@@ -71,11 +72,13 @@
 
   async function loadDirectory(path?: string) {
     if (!nodeId) return;
+    const token = ++loadGeneration;
     loading = true;
     error = null;
     onloadingchange?.(true);
     try {
       const res = await sync.connection.client.browseFs(nodeId, path);
+      if (token !== loadGeneration) return;
       currentPath = res.current_path;
       parentPath = res.parent_path;
       entries = res.entries;
@@ -86,6 +89,7 @@
       onselectionchange?.(selectedPath);
       onpathchange?.(res.current_path);
     } catch (err) {
+      if (token !== loadGeneration) return;
       const message = err instanceof Error ? err.message : String(err);
       error = message;
       truncated = false;
@@ -93,8 +97,10 @@
       onselectionchange?.("");
       onerror?.(message);
     } finally {
-      loading = false;
-      onloadingchange?.(false);
+      if (token === loadGeneration) {
+        loading = false;
+        onloadingchange?.(false);
+      }
     }
   }
 

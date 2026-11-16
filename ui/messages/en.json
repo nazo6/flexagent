@@ -133,6 +133,7 @@
   "connection_role_local_node": "Local node",
   "connection_same_origin": "(same origin)",
   "connection_target_added": "Target added",
+  "connection_target_exists": "That target is already added.",
   "connection_targets_label": "Targets (switch to that origin's UI)",
   "connection_url_invalid": "Invalid URL",
   "connection_url_placeholder": "http://localhost:7860 or https://fxg.example.ts.net",
