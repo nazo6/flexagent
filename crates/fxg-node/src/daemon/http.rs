@@ -716,6 +716,10 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let first = body_json(response).await;
         assert_eq!(first["sessions"][0]["session_id"], a2);
+        assert!(
+            first["next_cursor"].is_string(),
+            "more sessions exist beyond the page"
+        );
         let project_cursors = first["project_cursors"]
             .as_array()
             .expect("project cursors");

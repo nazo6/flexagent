@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT agent_id, agent_session_id AS \"agent_session_id!\",\n               session_id AS \"session_id!: SessionId\"\n          FROM sessions\n         WHERE deleted_at IS NULL AND agent_session_id IS NOT NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "agent_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "agent_id"
+          }
+        }
+      },
+      {
+        "name": "agent_session_id!",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "agent_session_id"
+          }
+        }
+      },
+      {
+        "name": "session_id!: SessionId",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "session_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "13e38d4ee3f49a605130fd4137641457517ca6e80309e1d325bb134bf10d71c0"
+}

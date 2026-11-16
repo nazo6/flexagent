@@ -8,6 +8,7 @@ use fxg_protocol::common::{
     SearchHit, SessionSummary,
 };
 use fxg_protocol::events::{SessionEventBatch, SessionEventEnvelope, UnifiedEventPayload};
+use fxg_protocol::node_hub::SessionSyncState;
 use fxg_protocol::paths::Role;
 use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
@@ -287,6 +288,42 @@ impl Db {
         filter: &queries::SessionFilter,
     ) -> Result<queries::SessionPage, DbError> {
         queries::list_session_page(&self.pool, filter).await
+    }
+
+    /// Number of sessions matching the filter (no summary columns).
+    pub async fn count_sessions(&self, filter: &queries::SessionFilter) -> Result<u64, DbError> {
+        queries::count_sessions(&self.pool, filter).await
+    }
+
+    /// IDs of the sessions matching the filter.
+    pub async fn list_session_ids(
+        &self,
+        filter: &queries::SessionFilter,
+    ) -> Result<Vec<fxg_protocol::SessionId>, DbError> {
+        queries::list_session_ids(&self.pool, filter).await
+    }
+
+    /// `(session_id, project_id, last_node_seq)` of the sessions matching the filter.
+    pub async fn list_session_sync_states(
+        &self,
+        filter: &queries::SessionFilter,
+    ) -> Result<Vec<SessionSyncState>, DbError> {
+        queries::list_session_sync_states(&self.pool, filter).await
+    }
+
+    /// `local_path` values of the sessions matching the filter.
+    pub async fn list_session_local_paths(
+        &self,
+        filter: &queries::SessionFilter,
+    ) -> Result<Vec<String>, DbError> {
+        queries::list_session_local_paths(&self.pool, filter).await
+    }
+
+    /// `(agent_id, agent_session_id, session_id)` of live agent-bound sessions.
+    pub async fn list_agent_session_bindings(
+        &self,
+    ) -> Result<Vec<(String, String, fxg_protocol::SessionId)>, DbError> {
+        queries::list_agent_session_bindings(&self.pool).await
     }
 
     /// Retrieves a single session.

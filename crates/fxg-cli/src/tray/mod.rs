@@ -307,12 +307,12 @@ async fn collect_status(state: &DaemonState) -> TrayStatus {
     let unsynced = state.db().unsynced_event_count().await.unwrap_or(0);
     let active_sessions = state
         .db()
-        .list_sessions(&SessionFilter {
+        .count_sessions(&SessionFilter {
             statuses: DaemonState::active_statuses(),
             ..SessionFilter::default()
         })
         .await
-        .map(|sessions| sessions.len())
+        .map(|count| usize::try_from(count).unwrap_or(usize::MAX))
         .unwrap_or(0);
     TrayStatus {
         hub_connected: state.hub_link().is_connected(),

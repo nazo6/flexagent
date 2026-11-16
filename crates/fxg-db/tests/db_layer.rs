@@ -1164,6 +1164,26 @@ async fn session_filters_and_plan_projection() {
         .expect("filter by other project");
     assert!(by_other_project.is_empty());
 
+    let by_node = fixture
+        .db
+        .list_sessions(&SessionFilter {
+            node_id: Some(NODE_ID.into()),
+            ..SessionFilter::default()
+        })
+        .await
+        .expect("filter by node");
+    assert_eq!(by_node.len(), 1);
+
+    let by_other_node = fixture
+        .db
+        .list_sessions(&SessionFilter {
+            node_id: Some("other-node".into()),
+            ..SessionFilter::default()
+        })
+        .await
+        .expect("filter by other node");
+    assert!(by_other_node.is_empty());
+
     let running_only = fixture
         .db
         .list_sessions(&SessionFilter {
@@ -1379,6 +1399,263 @@ async fn session_list_returns_per_project_cursors() {
     );
     assert!(!b_page.has_more);
     assert!(b_page.project_cursors[0].next_cursor.is_none());
+}
+
+#[tokio::test]
+async fn session_list_has_more_is_false_at_exact_limit() {
+    let fixture = Fixture::new(Role::Node).await;
+    let ids = [SessionId::from(uuid_v7()), SessionId::from(uuid_v7())];
+    let events = ids
+        .iter()
+        .enumerate()
+        .map(|(index, session_id)| SessionEventEnvelope {
+            event_id: fxg_protocol::EventId::from(uuid_v7()),
+            session_id: session_id.clone(),
+            node_seq: 1,
+            created_at: 1_000 + index as i64,
+            payload: session_created_payload(),
+        })
+        .collect::<Vec<_>>();
+    fixture.db.append_events(&events).await.expect("append");
+
+    let page = fixture
+        .db
+        .list_session_page(&SessionFilter {
+            limit: Some(2),
+            ..SessionFilter::default()
+        })
+        .await
+        .expect("page");
+    assert_eq!(page.sessions.len(), 2);
+    assert!(
+        !page.has_more,
+        "a page exactly at the limit is not truncated"
+    );
+}
+
+#[tokio::test]
+async fn session_list_project_cursor_is_none_for_a_fully_loaded_project() {
+    let fixture = Fixture::new(Role::Node).await;
+    let project_a = PROJECT_ID;
+    let project_b = "other.example/project-b";
+    let entries = [
+        (project_a, LOCAL_PATH, 1_000_i64, "a1"),
+        (project_b, "/tmp/other", 2_000, "b1"),
+        (project_a, LOCAL_PATH, 3_000, "a2"),
+    ];
+    for (project_id, local_path, created_at, title) in entries {
+        fixture
+            .db
+            .append_events(&[SessionEventEnvelope {
+                event_id: fxg_protocol::EventId::from(uuid_v7()),
+                session_id: SessionId::from(uuid_v7()),
+                node_seq: 1,
+                created_at,
+                payload: UnifiedEventPayload::SessionCreated {
+                    node_id: NODE_ID.into(),
+                    project_id: project_id.into(),
+                    project_name: project_id.to_owned(),
+                    local_path: local_path.to_owned(),
+                    git_branch: Some("main".to_owned()),
+                    is_worktree: false,
+                    agent_id: "opencode2".to_owned(),
+                    parent_session_id: None,
+                    title: title.to_owned(),
+                },
+            }])
+            .await
+            .expect("append");
+    }
+
+    let page = fixture
+        .db
+        .list_session_page(&SessionFilter {
+            limit: Some(2),
+            ..SessionFilter::default()
+        })
+        .await
+        .expect("page");
+    assert_eq!(
+        page.sessions
+            .iter()
+            .map(|session| session.title.as_str())
+            .collect::<Vec<_>>(),
+        ["a2", "b1"]
+    );
+    assert!(page.has_more, "a1 is older than the page");
+
+    let cursor_a = page
+        .project_cursors
+        .iter()
+        .find(|cursor| cursor.project_id.as_str() == project_a)
+        .expect("project A cursor");
+    let cursor_b = page
+        .project_cursors
+        .iter()
+        .find(|cursor| cursor.project_id.as_str() == project_b)
+        .expect("project B cursor");
+    assert!(
+        cursor_a.next_cursor.is_some(),
+        "project A has an older session"
+    );
+    assert!(
+        cursor_b.next_cursor.is_none(),
+        "project B is fully loaded even though the global list has more"
+    );
+}
+
+#[tokio::test]
+async fn lightweight_session_queries_match_the_session_list() {
+    let fixture = Fixture::new(Role::Node).await;
+    let running_session = SessionId::from(uuid_v7());
+    let archived_session = SessionId::from(uuid_v7());
+
+    fixture
+        .db
+        .append_events(&[
+            SessionEventEnvelope {
+                event_id: fxg_protocol::EventId::from(uuid_v7()),
+                session_id: running_session.clone(),
+                node_seq: 1,
+                created_at: 1_000,
+                payload: session_created_payload(),
+            },
+            SessionEventEnvelope {
+                event_id: fxg_protocol::EventId::from(uuid_v7()),
+                session_id: running_session.clone(),
+                node_seq: 2,
+                created_at: 1_100,
+                payload: UnifiedEventPayload::SessionAgentBound {
+                    agent_session_id: "agent-session-1".to_owned(),
+                },
+            },
+            SessionEventEnvelope {
+                event_id: fxg_protocol::EventId::from(uuid_v7()),
+                session_id: running_session.clone(),
+                node_seq: 3,
+                created_at: 1_200,
+                payload: UnifiedEventPayload::StatusChanged {
+                    status: SessionStatus::Running,
+                    error_message: None,
+                },
+            },
+            SessionEventEnvelope {
+                event_id: fxg_protocol::EventId::from(uuid_v7()),
+                session_id: archived_session.clone(),
+                node_seq: 1,
+                created_at: 2_000,
+                payload: UnifiedEventPayload::SessionCreated {
+                    node_id: NODE_ID.into(),
+                    project_id: "other.example/project-b".into(),
+                    project_name: "project-b".to_owned(),
+                    local_path: "/tmp/other".to_owned(),
+                    git_branch: None,
+                    is_worktree: false,
+                    agent_id: "opencode2".to_owned(),
+                    parent_session_id: None,
+                    title: "archived".to_owned(),
+                },
+            },
+            SessionEventEnvelope {
+                event_id: fxg_protocol::EventId::from(uuid_v7()),
+                session_id: archived_session.clone(),
+                node_seq: 2,
+                created_at: 2_100,
+                payload: UnifiedEventPayload::StatusChanged {
+                    status: SessionStatus::Stopped,
+                    error_message: None,
+                },
+            },
+            SessionEventEnvelope {
+                event_id: fxg_protocol::EventId::from(uuid_v7()),
+                session_id: archived_session.clone(),
+                node_seq: 3,
+                created_at: 2_200,
+                payload: UnifiedEventPayload::SessionArchived { archived: true },
+            },
+        ])
+        .await
+        .expect("append");
+
+    // The default list hides the archived session.
+    assert_eq!(
+        fixture
+            .db
+            .count_sessions(&SessionFilter::default())
+            .await
+            .expect("count"),
+        1
+    );
+    assert_eq!(
+        fixture
+            .db
+            .count_sessions(&SessionFilter {
+                include_archived: true,
+                ..SessionFilter::default()
+            })
+            .await
+            .expect("count archived"),
+        2
+    );
+    assert_eq!(
+        fixture
+            .db
+            .count_sessions(&SessionFilter {
+                statuses: vec![SessionStatus::Running],
+                ..SessionFilter::default()
+            })
+            .await
+            .expect("count running"),
+        1
+    );
+
+    let ids = fixture
+        .db
+        .list_session_ids(&SessionFilter {
+            include_archived: true,
+            ..SessionFilter::default()
+        })
+        .await
+        .expect("session ids");
+    assert_eq!(ids.len(), 2);
+
+    let sync_states = fixture
+        .db
+        .list_session_sync_states(&SessionFilter {
+            include_archived: true,
+            limit: Some(1),
+            ..SessionFilter::default()
+        })
+        .await
+        .expect("sync states");
+    assert_eq!(sync_states.len(), 1);
+    assert_eq!(sync_states[0].last_node_seq, 3);
+
+    let mut paths = fixture
+        .db
+        .list_session_local_paths(&SessionFilter {
+            node_id: Some(NODE_ID.into()),
+            include_archived: true,
+            ..SessionFilter::default()
+        })
+        .await
+        .expect("local paths");
+    paths.sort();
+    assert_eq!(paths, vec![LOCAL_PATH.to_owned(), "/tmp/other".to_owned()]);
+
+    let bindings = fixture
+        .db
+        .list_agent_session_bindings()
+        .await
+        .expect("agent bindings");
+    assert_eq!(
+        bindings,
+        vec![(
+            "opencode2".to_owned(),
+            "agent-session-1".to_owned(),
+            running_session
+        )]
+    );
 }
 
 #[tokio::test]
