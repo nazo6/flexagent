@@ -113,6 +113,27 @@ pub async fn try_git(cwd: &Path, args: &[&str]) -> Result<Option<String>, NodeEr
     }
 }
 
+/// Validates a user-supplied ref / commit-ish before it is passed to Git.
+///
+/// `git check-ref-format --branch` accepts branch names, remote branches and
+/// commit SHAs while rejecting option-like values (`--output=...`) and range
+/// syntax (`a..b`). Callers must still put `--` before file paths.
+pub async fn validate_ref_name(cwd: &Path, value: &str) -> Result<(), NodeError> {
+    let value = value.trim();
+    if value.is_empty() || value.starts_with('-') || value.contains('\0') {
+        return Err(NodeError::InvalidState(format!(
+            "invalid git ref: {value:?}"
+        )));
+    }
+    let output = capture(cwd, &["check-ref-format", "--branch", value], &[]).await?;
+    if !output.success {
+        return Err(NodeError::InvalidState(format!(
+            "invalid git ref: {value:?}"
+        )));
+    }
+    Ok(())
+}
+
 /// Runs `git` and returns the raw standard output bytes on success.
 ///
 /// Used for parsing `-z` (NUL-separated) output and similar cases.
@@ -264,6 +285,10 @@ pub async fn workspace_diff_file(
             None => default_branch(cwd).await?,
         }),
     };
+
+    if let Some(base) = &base {
+        validate_ref_name(cwd, base).await?;
+    }
 
     if let Some(file) = file
         && is_untracked(cwd, file).await?
@@ -672,6 +697,21 @@ new file mode 100644\n\
         assert_eq!(file.additions, 2);
         assert_eq!(file.deletions, 0);
         assert!(file.unified_diff.contains("+++ b/new.txt"));
+    }
+
+    #[tokio::test]
+    async fn validate_ref_name_rejects_option_injection() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_test_repo(dir.path()).await;
+
+        assert!(validate_ref_name(dir.path(), "main").await.is_ok());
+        assert!(validate_ref_name(dir.path(), "origin/main").await.is_ok());
+        assert!(
+            validate_ref_name(dir.path(), "--output=/tmp/x")
+                .await
+                .is_err()
+        );
+        assert!(validate_ref_name(dir.path(), "a..b").await.is_err());
     }
 
     #[test]
