@@ -1156,7 +1156,7 @@ mod tests {
                 &host,
                 "/api/v1/push/subscribe",
                 Some(&token),
-                r#"{"endpoint":"https://push.example/sub/1","p256dh":"k","auth":"a","device_name":"phone"}"#,
+                r#"{"endpoint":"https://1.1.1.1/sub/1","p256dh":"k","auth":"a","device_name":"phone"}"#,
             ))
             .await
             .expect("push subscribe");
@@ -1170,7 +1170,7 @@ mod tests {
             .await
             .expect("list subscriptions");
         assert_eq!(subscriptions.len(), 1);
-        assert_eq!(subscriptions[0].endpoint, "https://push.example/sub/1");
+        assert_eq!(subscriptions[0].endpoint, "https://1.1.1.1/sub/1");
 
         daemon.shutdown();
         tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())

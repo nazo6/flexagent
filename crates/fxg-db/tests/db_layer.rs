@@ -748,7 +748,7 @@ async fn rebuild_projections_matches_incremental_apply() {
         .expect("sessions before");
     let request_before = fixture
         .db
-        .find_permission_request(&fixture.session_id, "req-1")
+        .find_permission_request(&parent_session_id, "req-1")
         .await
         .expect("request before")
         .expect("exists");
@@ -762,7 +762,7 @@ async fn rebuild_projections_matches_incremental_apply() {
         .expect("sessions after");
     let request_after = fixture
         .db
-        .find_permission_request(&fixture.session_id, "req-1")
+        .find_permission_request(&parent_session_id, "req-1")
         .await
         .expect("request after")
         .expect("exists");

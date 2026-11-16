@@ -149,7 +149,9 @@ pub async fn append_audit_log(pool: &SqlitePool, record: &AuditLogRecord) -> Res
     )
     .execute(pool)
     .await?;
-    if APPEND_COUNT.fetch_add(1, Ordering::Relaxed) % AUDIT_PRUNE_INTERVAL == 0
+    if APPEND_COUNT
+        .fetch_add(1, Ordering::Relaxed)
+        .is_multiple_of(AUDIT_PRUNE_INTERVAL)
         && let Err(err) = prune(pool).await
     {
         tracing::warn!("failed to prune the audit log: {err}");

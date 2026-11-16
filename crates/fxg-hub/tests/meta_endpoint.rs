@@ -100,12 +100,13 @@ async fn rotate_token_sets_the_new_session_cookie() {
         .await
         .expect("rotate");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
-    let cookie = response
-        .headers()
-        .get(reqwest::header::SET_COOKIE)
-        .and_then(|value| value.to_str().ok())
-        .expect("Set-Cookie")
-        .to_owned();
+    let cookie = match response.headers().get(reqwest::header::SET_COOKIE) {
+        Some(value) => match value.to_str() {
+            Ok(value) => value.to_owned(),
+            Err(err) => panic!("Set-Cookie is not ASCII: {err}"),
+        },
+        None => panic!("Set-Cookie is missing"),
+    };
     let body: serde_json::Value = response.json().await.expect("json");
     let new_token = body["token"].as_str().expect("token");
     assert!(cookie.contains(&format!("fxg_session={new_token}")));

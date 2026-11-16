@@ -478,10 +478,15 @@ async fn node_logging_to_custom_file_and_no_color() {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
 
-    // Verify that the log is written to custom_node.log and contains no ANSI
-    // escapes
-    assert!(custom_log_path.exists(), "custom log file must exist");
-    let content = std::fs::read_to_string(&custom_log_path).expect("read the custom node log");
+    // Verify that the log is written to custom_node.log (daily rotation appends
+    // the date) and contains no ANSI escapes
+    let rotated_log_path = fxg_hub::api::resolve_log_file(&custom_log_path);
+    assert!(
+        rotated_log_path.exists(),
+        "custom log file must exist: {}",
+        rotated_log_path.display()
+    );
+    let content = std::fs::read_to_string(&rotated_log_path).expect("read the custom node log");
     assert!(
         content.contains("fxg node start started"),
         "custom log file should contain startup message, got:\n{content}"
