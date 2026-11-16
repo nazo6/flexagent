@@ -560,6 +560,9 @@ impl AgentCatalog {
         // Resolve `env_secrets` from `<data>/node/secrets/<id>`. A missing
         // value aborts the launch (never start with an empty token).
         for (key, secret_id) in &custom.env_secrets {
+            if !secret_id.is_valid() || secret_id.is_system() {
+                anyhow::bail!("invalid env_secrets entry: {key}");
+            }
             let path = self.paths.secrets_dir().join(secret_id.as_str());
             let value = std::fs::read_to_string(&path).map_err(|err| {
                 anyhow!(

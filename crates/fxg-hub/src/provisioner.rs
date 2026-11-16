@@ -519,6 +519,12 @@ async fn spawn_child(state: &HubState, request: SpawnRequest) -> Result<SpawnHan
         command.env(key, value);
     }
     for (key, secret_id) in &request.config.env_secrets {
+        if secret_id.is_system() {
+            return Err(ApiError::bad_request(format!(
+                "system secret {} cannot be injected into a provisioner",
+                secret_id.as_str()
+            )));
+        }
         let value = fxg_db::secrets::read_secret(manager.paths(), secret_id)
             .map_err(|err| ApiError::internal(format!("failed to read secret {secret_id}: {err}")))?
             .ok_or_else(|| {

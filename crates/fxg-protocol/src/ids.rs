@@ -121,6 +121,14 @@ impl SecretId {
                 .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
             && !self.0.starts_with('.')
     }
+
+    /// Whether this is a reserved system secret (`system.*`).
+    ///
+    /// System secrets are owned by the node / hub and must never be injected
+    /// into user-defined agents or provisioners.
+    pub fn is_system(&self) -> bool {
+        self.0.starts_with("system.")
+    }
 }
 
 #[cfg(test)]
