@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT elicitation_id AS \"elicitation_id!\",\n               session_id, node_id, message, mode AS \"mode: ElicitationMode\", schema_json,\n               tool_call_id, status AS \"status: ElicitationRequestStatus\", content_json,\n               created_at, resolved_at, resolved_by AS \"resolved_by: ResolvedBy\"\n          FROM elicitation_requests\n         WHERE elicitation_id = ?\n        ",
+  "query": "\n        SELECT elicitation_id AS \"elicitation_id!\",\n               session_id, node_id, message, mode AS \"mode: ElicitationMode\", schema_json,\n               tool_call_id, status AS \"status: ElicitationRequestStatus\", content_json,\n               created_at, resolved_at, resolved_by AS \"resolved_by: ResolvedBy\"\n          FROM elicitation_requests\n         WHERE session_id = ? AND elicitation_id = ?\n        ",
   "describe": {
     "columns": [
       {
@@ -137,10 +137,10 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 2
     },
     "nullable": [
-      true,
+      false,
       false,
       false,
       false,
@@ -154,5 +154,5 @@
       true
     ]
   },
-  "hash": "81ec65a17f986aa50b30bcee3c9400e5d1ad2a2a860f4c139493e877405451f7"
+  "hash": "137d8f7b2dfc7cc81040a8e76a00e5a3bb42386b2135b3ade74aeb470dcba2ea"
 }

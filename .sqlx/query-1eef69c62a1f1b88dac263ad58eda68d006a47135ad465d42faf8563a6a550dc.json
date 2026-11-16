@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT details_json FROM permission_requests WHERE request_id = ?",
+  "query": "SELECT details_json FROM permission_requests\n                    WHERE session_id = ? AND request_id = ?",
   "describe": {
     "columns": [
       {
@@ -16,11 +16,11 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 2
     },
     "nullable": [
       false
     ]
   },
-  "hash": "4bcc21e69f1e4d8d23d92613396080a8e6fccc9408b23b0b0d3a6265be6ad1ae"
+  "hash": "1eef69c62a1f1b88dac263ad58eda68d006a47135ad465d42faf8563a6a550dc"
 }

@@ -583,7 +583,7 @@ async fn auto_approve_policy_responds_to_permission_requests() {
         entry = manager
             .bus()
             .db()
-            .find_permission_request("req-auto")
+            .find_permission_request(&outcome.session_id, "req-auto")
             .await
             .expect("permission row");
         if entry

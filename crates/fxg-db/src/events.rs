@@ -613,7 +613,7 @@ pub(crate) async fn apply_projections(
                 SELECT ?, ?, s.node_id, ?, ?, ?, ?, ?, NULL, NULL
                   FROM sessions s
                  WHERE s.session_id = ?
-                ON CONFLICT(request_id) DO UPDATE SET
+                ON CONFLICT(session_id, request_id) DO UPDATE SET
                     tool_name = excluded.tool_name,
                     summary = excluded.summary,
                     details_json = excluded.details_json,
@@ -639,7 +639,9 @@ pub(crate) async fn apply_projections(
             resolved_by,
         } => {
             let stored: Option<String> = sqlx::query_scalar!(
-                r#"SELECT details_json FROM permission_requests WHERE request_id = ?"#,
+                r#"SELECT details_json FROM permission_requests
+                    WHERE session_id = ? AND request_id = ?"#,
+                envelope.session_id,
                 request_id,
             )
             .fetch_optional(&mut *conn)
@@ -652,11 +654,12 @@ pub(crate) async fn apply_projections(
                     r#"
                 UPDATE permission_requests
                    SET status = ?, resolved_by = ?, resolved_at = ?
-                 WHERE request_id = ?
+                 WHERE session_id = ? AND request_id = ?
                 "#,
                     status.as_str(),
                     resolved_by.as_str(),
                     envelope.created_at,
+                    envelope.session_id,
                     request_id,
                 )
                 .execute(&mut *conn)
@@ -680,7 +683,7 @@ pub(crate) async fn apply_projections(
                 SELECT ?, ?, s.node_id, ?, ?, ?, ?, ?, 'null', ?, NULL, NULL
                   FROM sessions s
                  WHERE s.session_id = ?
-                ON CONFLICT(elicitation_id) DO UPDATE SET
+                ON CONFLICT(session_id, elicitation_id) DO UPDATE SET
                     message = excluded.message,
                     mode = excluded.mode,
                     schema_json = excluded.schema_json,
@@ -717,12 +720,13 @@ pub(crate) async fn apply_projections(
                 r#"
                 UPDATE elicitation_requests
                    SET status = ?, content_json = ?, resolved_by = ?, resolved_at = ?
-                 WHERE elicitation_id = ?
+                 WHERE session_id = ? AND elicitation_id = ?
                 "#,
                 status.as_str(),
                 content_json,
                 resolved_by.as_str(),
                 envelope.created_at,
+                envelope.session_id,
                 elicitation_id,
             )
             .execute(&mut *conn)

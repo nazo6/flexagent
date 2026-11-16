@@ -802,6 +802,7 @@ pub async fn pending_permissions(
 /// `PermissionResolved`).
 pub async fn find_permission_request(
     pool: &SqlitePool,
+    session_id: &str,
     request_id: &str,
 ) -> Result<Option<PermissionRequestEntry>, DbError> {
     let row = sqlx::query_as!(
@@ -812,8 +813,9 @@ pub async fn find_permission_request(
                status AS "status: PermissionRequestStatus", created_at, resolved_at,
                resolved_by AS "resolved_by: ResolvedBy"
           FROM permission_requests
-         WHERE request_id = ?
+         WHERE session_id = ? AND request_id = ?
         "#,
+        session_id,
         request_id,
     )
     .fetch_optional(pool)
@@ -847,6 +849,7 @@ pub async fn pending_elicitations(
 /// `ElicitationResolved`).
 pub async fn find_elicitation_request(
     pool: &SqlitePool,
+    session_id: &str,
     elicitation_id: &str,
 ) -> Result<Option<ElicitationRequestEntry>, DbError> {
     let row = sqlx::query_as!(
@@ -857,8 +860,9 @@ pub async fn find_elicitation_request(
                tool_call_id, status AS "status: ElicitationRequestStatus", content_json,
                created_at, resolved_at, resolved_by AS "resolved_by: ResolvedBy"
           FROM elicitation_requests
-         WHERE elicitation_id = ?
+         WHERE session_id = ? AND elicitation_id = ?
         "#,
+        session_id,
         elicitation_id,
     )
     .fetch_optional(pool)

@@ -437,12 +437,13 @@ impl Db {
         queries::pending_permissions(&self.pool).await
     }
 
-    /// Retrieves a single permission request.
+    /// Retrieves a single permission request inside a session.
     pub async fn find_permission_request(
         &self,
+        session_id: &str,
         request_id: &str,
     ) -> Result<Option<PermissionRequestEntry>, DbError> {
-        queries::find_permission_request(&self.pool, request_id).await
+        queries::find_permission_request(&self.pool, session_id, request_id).await
     }
 
     /// Unresolved (`pending`) elicitation requests (question inbox).
@@ -450,12 +451,13 @@ impl Db {
         queries::pending_elicitations(&self.pool).await
     }
 
-    /// Retrieves a single elicitation request.
+    /// Retrieves a single elicitation request inside a session.
     pub async fn find_elicitation_request(
         &self,
+        session_id: &str,
         elicitation_id: &str,
     ) -> Result<Option<ElicitationRequestEntry>, DbError> {
-        queries::find_elicitation_request(&self.pool, elicitation_id).await
+        queries::find_elicitation_request(&self.pool, session_id, elicitation_id).await
     }
 
     /// FTS5 full-text search (falls back to LIKE for queries shorter than 3 characters).
