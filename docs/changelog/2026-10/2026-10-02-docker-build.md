@@ -1,5 +1,10 @@
 # Docker イメージビルド (`mise run build:docker`) と docker compose の追加
 
+> **履歴メモ**: この文書は 2026-10-02 時点の実装ログです。現行のコマンドは
+> `fxg hub start` / `fxg node start`、データは `hub.db` / `node.db` です。
+> 最新の構成は [`docs/05-cli-and-config.md`](../../05-cli-and-config.md) と
+> リポジトリ直下の `Dockerfile` / `compose.yaml` を参照してください。
+
 - **日付**: 2026-10-02
 - **対象パッケージ**: ワークスペース全体 (`fxg-cli` / `fxg-ui-assets` / `ui`)
 - **対象スクリプト / 設定**: `Dockerfile`, `compose.yaml`, `.dockerignore`,

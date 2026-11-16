@@ -11,7 +11,8 @@
   セッションとイベントの一次ソースは各ノードの `node.db` (SQLite
   WAL)。イベントIDには `UUID v7` とセッション内連番 `node_seq`
   を用い、ハブ (`hub.db`) へは Store-and-Forward (Outbox パターン)
-  で非同期同期する。ストリーミングチャンクはメモリで即時配信しつつ、DBへは500msごとまたはターン区切りで結合フラッシュする。
+  で非同期同期する。ストリーミング途中のチャンクはメモリで即時配信し、DBへは
+  ストリーム境界またはターン完了時に完成イベント (`is_complete = true`) のみを保存する。
 - **同一プロトコル・同一API**:
   - Node ⇔ Hub 間通信は、常駐ノード (Outbound WS) も一時VMノード
     (`fxg internal stdio` の JSON Lines) も同一の `NodeToHubMsg` /
@@ -47,10 +48,12 @@
     解決し、表示名は自動導出する。Worktree の作成先は
     `<data>/node/worktrees/{project}/{branch}` に固定。
 - **セキュリティ原則**:
-  - `fxg node start` のローカルHTTP/WSは `127.0.0.1:7860` のみにバインドする。
+  - `fxg node start` のローカルHTTP/WSは既定で `127.0.0.1:7860` にバインドする
+    （`--listen` / `--port` / `node.toml` / `FXG_NODE_LISTEN_ADDR` で明示的に変更可能）。
   - 全HTTP/WSエンドポイントでトークン認証 (`Bearer` または
     `HttpOnly; SameSite=Strict` Cookie)、`Host` ヘッダ検証 (DNS
     Rebinding対策)、WS `Origin` ヘッダ検証 (CSWSH対策) を強制する。
+    例外は `GET /api/v1/meta` / `GET /healthz` / `GET /readyz` のみ。
 
 ## 2. ワークスペース・技術スタック
 
