@@ -1,14 +1,15 @@
 name: flexagent
 
 x-fxg: &fxg
-  platform: linux/amd64
   build:
     context: .
     dockerfile: Dockerfile
   image: fxg:dev
-  # To avoid zombie processes, the container runs with docker-init (tini) to handle PID 1 reaping for spawned child processes such as provisioners and agents.
-  init: true
+  # The image uses tini as PID 1 to reap spawned agents / provisioners.
   restart: unless-stopped
+  stop_grace_period: 30s
+  security_opt:
+    - no-new-privileges:true
 
 services:
   hub:
@@ -28,12 +29,14 @@ services:
     # Start as a node instead of hub.
     command: ["node", "start"]
     depends_on:
-      - hub
+      hub:
+        condition: service_healthy
     ports:
       - "127.0.0.1:7860:7860"
     volumes:
       - fxg-node-data:/var/lib/flexagent
       - ${FXG_WORKSPACE:-./workspace}:/workspace
+    working_dir: /workspace
     environment:
       FXG_NODE_LISTEN_ADDR: "0.0.0.0:7860"
       # Node specifier (if not specified, it will be automatically numbered based on the container ID)

@@ -41,20 +41,28 @@ LABEL org.opencontainers.image.title="FlexAgent (fxg)" \
       org.opencontainers.image.description="Self-hosted, local-first agent manager (CLI, node, hub and PWA in a single binary)" \
       org.opencontainers.image.source="https://github.com/nazo6/flexagent"
 
+# Agents and provisioners are not bundled: install the CLIs you use (opencode,
+# agy, npx/uvx, docker/incus, ...) in a derived image or mount them into the
+# container. bash/tini/curl are the runtime baseline.
 RUN apt-get update \
-  && apt-get install --yes --no-install-recommends ca-certificates git openssh-client \
+  && apt-get install --yes --no-install-recommends bash ca-certificates curl git openssh-client tini \
   && rm -rf /var/lib/apt/lists/* \
+  && git config --system --add safe.directory /workspace \
   && useradd --create-home --uid 1000 --user-group fxg
 
 COPY --from=build /usr/local/bin/fxg /usr/local/bin/fxg
 
 ENV FXG_HOME=/var/lib/flexagent
+ENV SHELL=/bin/bash
 RUN install --directory --owner=fxg --group=fxg --mode=0750 /var/lib/flexagent
 VOLUME ["/var/lib/flexagent"]
 WORKDIR /var/lib/flexagent
 USER fxg
 
-EXPOSE 8080
+EXPOSE 8080 7860
+STOPSIGNAL SIGTERM
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8080/healthz || curl -fsS http://127.0.0.1:7860/healthz || exit 1
 
-ENTRYPOINT ["fxg"]
+ENTRYPOINT ["/usr/bin/tini", "--", "fxg"]
 CMD ["hub", "start"]
