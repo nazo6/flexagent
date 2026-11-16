@@ -77,10 +77,23 @@ function sortSessions(sessions: SessionSummary[]): SessionSummary[] {
 
 function readCursor(): number | null {
   if (typeof localStorage === "undefined") return null;
-  const raw = localStorage.getItem(CURSOR_KEY);
-  if (raw === null) return null;
-  const value = Number.parseInt(raw, 10);
-  return Number.isFinite(value) && value >= 0 ? value : null;
+  try {
+    const raw = localStorage.getItem(CURSOR_KEY);
+    if (raw === null) return null;
+    const value = Number.parseInt(raw, 10);
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCursor(value: number): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(CURSOR_KEY, String(value));
+  } catch {
+    // Storage may be disabled or full; the cursor is only an optimization.
+  }
 }
 
 interface ReadState {
@@ -255,9 +268,7 @@ export class SyncStore {
         if (latest !== undefined) {
           since = latest;
           this.#cursor = latest;
-          if (typeof localStorage !== "undefined") {
-            localStorage.setItem(CURSOR_KEY, String(latest));
-          }
+          writeCursor(latest);
         }
       }
       this.#hasConnected = true;
@@ -1004,9 +1015,7 @@ export class SyncStore {
     }
     if (this.#cursor !== update.cursor) {
       this.#cursor = update.cursor;
-      if (typeof localStorage !== "undefined") {
-        localStorage.setItem(CURSOR_KEY, String(update.cursor));
-      }
+      writeCursor(update.cursor);
     }
     if (sessionsDirty) this.#queueSessionsRefresh();
     if (projectsDirty) this.#queueProjectsRefresh();

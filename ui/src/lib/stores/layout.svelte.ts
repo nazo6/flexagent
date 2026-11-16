@@ -7,9 +7,12 @@ class LayoutStore {
   rightRailCollapsed = $state(false);
 
   constructor() {
-    if (typeof localStorage !== "undefined") {
+    if (typeof localStorage === "undefined") return;
+    try {
       this.sidebarCollapsed = localStorage.getItem("fxg:sidebar_collapsed") === "true";
       this.rightRailCollapsed = localStorage.getItem("fxg:right_rail_collapsed") === "true";
+    } catch {
+      // Storage may be disabled; keep the defaults.
     }
   }
 

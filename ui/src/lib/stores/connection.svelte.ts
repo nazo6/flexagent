@@ -47,7 +47,11 @@ function loadStoredTargets(): ConnectionTarget[] {
 function persistTargets(targets: ConnectionTarget[]): void {
   if (typeof localStorage === "undefined") return;
   const stored: StoredTargets = { version: 1, targets };
-  localStorage.setItem(TARGETS_KEY, JSON.stringify(stored));
+  try {
+    localStorage.setItem(TARGETS_KEY, JSON.stringify(stored));
+  } catch {
+    // Storage may be disabled or full; the target list is a convenience.
+  }
 }
 
 /**
