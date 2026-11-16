@@ -41,6 +41,9 @@ use crate::state::HubState;
 /// Timeout for the handshake (`NodeHello`) after a node connects.
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Maximum node WS message size (event batches can be large).
+const NODE_WS_MAX_MESSAGE: usize = 16 * 1024 * 1024;
+
 /// Timeout for session commands (prompt submission, permission responses, control, resume).
 ///
 /// Sending to a stopped session and resuming start the agent on the node side, so a cold
@@ -907,7 +910,9 @@ pub(crate) async fn node_ws(
         .into_response();
     };
 
-    ws.on_upgrade(move |socket| handle_node_connection(state, owner, socket))
+    ws.max_message_size(NODE_WS_MAX_MESSAGE)
+        .max_frame_size(NODE_WS_MAX_MESSAGE)
+        .on_upgrade(move |socket| handle_node_connection(state, owner, socket))
 }
 
 /// Main loop for a node connection (NodeHello → register → bidirectional messaging).

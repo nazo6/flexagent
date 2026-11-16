@@ -91,6 +91,9 @@
   {#if error !== null}
     <p class="text-destructive text-sm">{error}</p>
   {/if}
+  {#if worktreeDiff?.truncated}
+    <p class="text-warning text-sm">{m.diff_truncated()}</p>
+  {/if}
 
   {#if scope === "session" && sessionFiles.length === 0}
     <p class="text-muted-foreground text-sm">

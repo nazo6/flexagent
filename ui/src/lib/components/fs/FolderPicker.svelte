@@ -61,6 +61,7 @@
   let filter = $state("");
   let loading = $state(false);
   let error = $state<string | null>(null);
+  let truncated = $state(false);
   let showHidden = $state(false);
 
   $effect(() => {
@@ -78,6 +79,7 @@
       currentPath = res.current_path;
       parentPath = res.parent_path;
       entries = res.entries;
+      truncated = res.truncated;
       inputPath = res.current_path;
       filter = "";
       selectedPath = mode === "select" ? res.current_path : "";
@@ -86,6 +88,7 @@
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       error = message;
+      truncated = false;
       selectedPath = "";
       onselectionchange?.("");
       onerror?.(message);
@@ -263,6 +266,9 @@
   </div>
 
   <div class={cn("bg-muted/20 flex flex-col overflow-y-auto rounded-md border p-1", listClass)}>
+    {#if truncated}
+      <p class="text-warning px-2 py-1 text-[11px]">{m.fs_truncated()}</p>
+    {/if}
     {#if loading}
       <div
         class="text-muted-foreground flex flex-1 items-center justify-center gap-2 py-12 text-[13px]"

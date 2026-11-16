@@ -7,6 +7,9 @@ use fxg_protocol::client_api::{FsBrowseResponse, FsEntry};
 
 use crate::error::NodeError;
 
+/// Maximum number of entries returned by one directory listing.
+const MAX_DIR_ENTRIES: usize = 2000;
+
 /// Resolves the path and browses the contents of the given directory.
 ///
 /// - If `path` is `None`, browse the default (the home directory, or the root if
@@ -22,6 +25,7 @@ pub fn browse_fs(path: Option<&str>) -> Result<FsBrowseResponse, NodeError> {
                     current_path: String::new(),
                     parent_path: None,
                     entries: list_windows_drives(),
+                    truncated: false,
                 })
             }
             #[cfg(not(windows))]
@@ -59,6 +63,7 @@ pub fn browse_fs(path: Option<&str>) -> Result<FsBrowseResponse, NodeError> {
                     current_path: String::new(),
                     parent_path: None,
                     entries: list_windows_drives(),
+                    truncated: false,
                 })
             }
             #[cfg(not(windows))]
@@ -99,6 +104,7 @@ fn browse_directory(dir: &Path) -> Result<FsBrowseResponse, NodeError> {
     })?;
 
     let mut entries = Vec::new();
+    let mut truncated = false;
     for item in read_dir {
         let entry = match item {
             Ok(entry) => entry,
@@ -123,6 +129,10 @@ fn browse_directory(dir: &Path) -> Result<FsBrowseResponse, NodeError> {
             is_dir,
             is_hidden,
         });
+        if entries.len() >= MAX_DIR_ENTRIES {
+            truncated = true;
+            break;
+        }
     }
 
     entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
@@ -135,6 +145,7 @@ fn browse_directory(dir: &Path) -> Result<FsBrowseResponse, NodeError> {
         current_path,
         parent_path,
         entries,
+        truncated,
     })
 }
 

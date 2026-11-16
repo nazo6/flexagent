@@ -156,6 +156,8 @@ pub struct WorkspaceDiffResponse {
     pub head_commit: String,
     /// Diff per changed file
     pub files: Vec<FileDiff>,
+    /// Whether the diff was capped (only the first 2 MiB is included)
+    pub truncated: bool,
 }
 
 /// Project projection exposed to clients (`GET /api/v1/projects`).

@@ -41,6 +41,9 @@ use crate::session::SessionEventBus;
 /// Upper bound on retained processed `command_id`s (idempotency history).
 const PROCESSED_COMMAND_HISTORY: usize = 256;
 
+/// Upper bound on prompts queued while a session is busy.
+const MAX_PENDING_PROMPTS: usize = 100;
+
 /// Batch size when paging through `session_events`.
 const EVENT_LOAD_BATCH: u32 = 200;
 

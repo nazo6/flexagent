@@ -171,6 +171,9 @@
   </div>
 
   <div class="app-scroll min-h-0 flex-1 overflow-y-auto p-1">
+    {#if branchDiff?.truncated}
+      <p class="text-warning p-2 text-[12px]">{m.diff_truncated()}</p>
+    {/if}
     {#if scope === "session"}
       {#if sessionFiles.length === 0}
         <p class="text-muted-foreground p-2 text-[12px]">{m.diff_session_empty()}</p>

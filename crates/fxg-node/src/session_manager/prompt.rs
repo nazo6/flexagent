@@ -159,6 +159,11 @@ impl SessionManager {
                     // driver merges the input into the active turn.
                     true
                 } else {
+                    if session.pending_prompts.len() >= MAX_PENDING_PROMPTS {
+                        return Err(NodeError::Busy(format!(
+                            "pending prompt queue is full (max {MAX_PENDING_PROMPTS})"
+                        )));
+                    }
                     session.pending_prompts.push_back(PendingPrompt {
                         input,
                         client_source,

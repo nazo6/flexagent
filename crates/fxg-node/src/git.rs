@@ -273,6 +273,7 @@ pub async fn workspace_diff_file(
             base_branch: base,
             head_commit: head,
             files: vec![untracked_file_diff(cwd, file).await?],
+            truncated: false,
         });
     }
 
@@ -300,12 +301,30 @@ pub async fn workspace_diff_file(
         });
     }
 
+    let (diff_text, truncated) = truncate_diff(&output.stdout, MAX_DIFF_BYTES);
     Ok(WorkspaceDiffResponse {
         scope,
         base_branch: base,
         head_commit: head,
-        files: parse_unified_diff(&String::from_utf8_lossy(&output.stdout)),
+        files: parse_unified_diff(&diff_text),
+        truncated,
     })
+}
+
+/// Maximum raw `git diff` output included in one response (2 MiB).
+const MAX_DIFF_BYTES: usize = 2 * 1024 * 1024;
+
+/// Truncates a unified diff at the last complete `diff --git` boundary.
+fn truncate_diff(bytes: &[u8], max_bytes: usize) -> (String, bool) {
+    if bytes.len() <= max_bytes {
+        return (String::from_utf8_lossy(bytes).into_owned(), false);
+    }
+    let text = String::from_utf8_lossy(&bytes[..max_bytes]).into_owned();
+    let truncated = match text.rfind("\ndiff --git ") {
+        Some(index) if index > 0 => text[..index].to_owned(),
+        _ => text,
+    };
+    (truncated, true)
 }
 
 /// Maximum untracked file size included in a synthetic diff (2 MiB).
@@ -653,5 +672,22 @@ new file mode 100644\n\
         assert_eq!(file.additions, 2);
         assert_eq!(file.deletions, 0);
         assert!(file.unified_diff.contains("+++ b/new.txt"));
+    }
+
+    #[test]
+    fn truncate_diff_keeps_complete_file_boundaries() {
+        let raw = b"diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n\
+diff --git a/b b/b\n--- a/b\n+++ b/b\n@@ -1 +1 @@\n-old\n+new\n";
+        let (text, truncated) = truncate_diff(raw, 70);
+        assert!(truncated);
+        assert!(text.starts_with("diff --git a/a"));
+        assert!(
+            !text.contains("a/b"),
+            "the incomplete second file must be dropped"
+        );
+
+        let (text, truncated) = truncate_diff(b"short diff", 1024);
+        assert!(!truncated);
+        assert_eq!(text, "short diff");
     }
 }
