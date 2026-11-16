@@ -30,7 +30,7 @@
 
   function openDiffInDock(tool: ToolItem): void {
     if (tool.diff === null || dock.context === null) return;
-    dock.openFile(joinPath(dock.context.localPath, tool.diff.path), "diff");
+    dock.openFile(joinPath(dock.context.localPath, tool.diff.path), { mode: "diff" });
   }
 
   function toggleDetail(toolCallId: string, event: MouseEvent) {

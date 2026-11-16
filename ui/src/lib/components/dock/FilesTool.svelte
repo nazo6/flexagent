@@ -247,11 +247,21 @@
       toggleDir(entry);
       return;
     }
-    dock.openFile(entry.path, "view");
+    dock.openFile(entry.path);
+  }
+
+  /** Double-click pins the tab so later preview opens keep it. */
+  function openEntryPinned(entry: WorkspaceFsEntry): void {
+    if (entry.kind === "directory") return;
+    dock.openFile(entry.path, { preview: false });
   }
 
   function openChanged(entry: { absolute_path: string }): void {
-    dock.openFile(entry.absolute_path, "diff");
+    dock.openFile(entry.absolute_path, { mode: "diff" });
+  }
+
+  function openChangedPinned(entry: { absolute_path: string }): void {
+    dock.openFile(entry.absolute_path, { mode: "diff", preview: false });
   }
 
   function refresh(): void {
@@ -429,6 +439,7 @@
                       class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
                       title={entry.path}
                       onclick={() => openChanged(entry)}
+                      ondblclick={() => openChangedPinned(entry)}
                     >
                       <GitStatusBadge status={entry.status} />
                       <span class="min-w-0 flex-1 truncate font-mono">{entry.path}</span>
@@ -446,6 +457,7 @@
                     style={`padding-left: ${row.depth * 12 + 6}px`}
                     title={row.entry.path}
                     onclick={() => openEntry(row.entry)}
+                    ondblclick={() => openEntryPinned(row.entry)}
                   >
                     {#if isDirectory(row.entry)}
                       {#if row.loading}
@@ -522,6 +534,7 @@
             activePath={dock.activeFile}
             onactivate={(path) => dock.activateFile(path)}
             onclose={(path) => dock.closeFile(path)}
+            onpin={(path) => dock.pinFile(path)}
           />
           {#if activePreview !== null}
             <FilePreview

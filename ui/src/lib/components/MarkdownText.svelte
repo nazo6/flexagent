@@ -107,7 +107,7 @@
     const resolved = resolveFileHref(href, fileBaseDir, workspaceRoot);
     if (resolved === null) return;
     event.preventDefault();
-    dock.openFile(resolved.path, "view", "uncommitted", resolved.line);
+    dock.openFile(resolved.path, { line: resolved.line });
   }
 
   /** Event delegation survives the DOM rebuilds caused by `{@html}`. */

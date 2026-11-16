@@ -61,7 +61,7 @@ describe("WorkspaceDockStore", () => {
     const { store } = newStore();
     store.setContext(context("s1", "/repo"));
     store.openTool("files");
-    store.openFile("/repo/src/main.ts", "view");
+    store.openFile("/repo/src/main.ts");
 
     store.setContext(context("s2", "/repo"));
 
@@ -88,18 +88,21 @@ describe("WorkspaceDockStore", () => {
     const { store } = newStore();
     store.setContext(context("s1"));
 
-    store.openFile("/repo/src/main.ts", "view");
+    store.openFile("/repo/src/main.ts", { preview: false });
     expect(store.activeTool).toBe("files");
     expect(store.activeFile).toBe("/repo/src/main.ts");
     expect(store.activeFileTab?.mode).toBe("view");
     expect(store.activeFileTab?.scope).toBe("uncommitted");
+    expect(store.activeFileTab?.preview).toBe(false);
 
-    store.openFile("/repo/src/main.ts", "diff", "branch_base");
+    store.openFile("/repo/src/main.ts", { mode: "diff", scope: "branch_base" });
     expect(store.files).toHaveLength(1);
     expect(store.activeFileTab?.mode).toBe("diff");
     expect(store.activeFileTab?.scope).toBe("branch_base");
+    // Reopening a pinned tab as a preview keeps it pinned.
+    expect(store.activeFileTab?.preview).toBe(false);
 
-    store.openFile("/repo/src/other.ts", "view");
+    store.openFile("/repo/src/other.ts", { preview: false });
     expect(store.files).toHaveLength(2);
     expect(store.activeFile).toBe("/repo/src/other.ts");
 
@@ -111,12 +114,63 @@ describe("WorkspaceDockStore", () => {
     expect(store.activeFileTab?.mode).toBe("view");
   });
 
+  it("replaces the preview tab instead of adding a new one", () => {
+    const { store } = newStore();
+    store.setContext(context("s1"));
+
+    store.openFile("/repo/a.ts");
+    expect(store.activeFileTab?.preview).toBe(true);
+
+    store.openFile("/repo/b.ts");
+    expect(store.files).toHaveLength(1);
+    expect(store.files[0]?.path).toBe("/repo/b.ts");
+    expect(store.files[0]?.preview).toBe(true);
+    expect(store.activeFile).toBe("/repo/b.ts");
+  });
+
+  it("replaces the preview tab in place and keeps pinned tabs", () => {
+    const { store } = newStore();
+    store.setContext(context("s1"));
+
+    store.openFile("/repo/a.ts", { preview: false });
+    store.openFile("/repo/b.ts");
+    store.openFile("/repo/c.ts");
+
+    expect(store.files.map((file) => file.path)).toEqual(["/repo/a.ts", "/repo/c.ts"]);
+    expect(store.files[1]?.preview).toBe(true);
+  });
+
+  it("promotes a preview tab when it is opened pinned", () => {
+    const { store } = newStore();
+    store.setContext(context("s1"));
+
+    store.openFile("/repo/a.ts");
+    store.openFile("/repo/a.ts", { preview: false });
+    expect(store.files).toHaveLength(1);
+    expect(store.activeFileTab?.preview).toBe(false);
+
+    store.openFile("/repo/b.ts");
+    expect(store.files.map((file) => file.path)).toEqual(["/repo/a.ts", "/repo/b.ts"]);
+  });
+
+  it("pins a preview tab explicitly", () => {
+    const { store } = newStore();
+    store.setContext(context("s1"));
+
+    store.openFile("/repo/a.ts");
+    store.pinFile("/repo/a.ts");
+    expect(store.activeFileTab?.preview).toBe(false);
+
+    store.openFile("/repo/b.ts");
+    expect(store.files.map((file) => file.path)).toEqual(["/repo/a.ts", "/repo/b.ts"]);
+  });
+
   it("selects a neighbor after closing the active file preview", () => {
     const { store } = newStore();
     store.setContext(context("s1"));
-    store.openFile("/repo/a.ts", "view");
-    store.openFile("/repo/b.ts", "view");
-    store.openFile("/repo/c.ts", "view");
+    store.openFile("/repo/a.ts", { preview: false });
+    store.openFile("/repo/b.ts", { preview: false });
+    store.openFile("/repo/c.ts", { preview: false });
 
     store.activateFile("/repo/b.ts");
     store.closeFile("/repo/b.ts");
@@ -168,13 +222,13 @@ describe("WorkspaceDockStore", () => {
     const { store, storage } = newStore();
     store.setContext(context("s1"));
 
-    store.openFile("/repo/src/main.ts", "view", "uncommitted", 12);
+    store.openFile("/repo/src/main.ts", { line: 12 });
     expect(store.activeFileTab?.line).toBe(12);
 
-    store.openFile("/repo/src/main.ts", "view");
+    store.openFile("/repo/src/main.ts");
     expect(store.activeFileTab?.line).toBeNull();
 
-    store.openFile("/repo/src/main.ts", "view", "uncommitted", 20);
+    store.openFile("/repo/src/main.ts", { line: 20 });
     store.setFileMode("/repo/src/main.ts", "diff");
     expect(store.activeFileTab?.line).toBe(20);
 
@@ -210,6 +264,35 @@ describe("WorkspaceDockStore", () => {
     store.setContext(context("s1"));
 
     expect(store.files.map((file) => file.line)).toEqual([null, null]);
+  });
+
+  it("restores preview tabs and keeps at most one", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: 2,
+        width: 42,
+        workspaces: {
+          [workspaceDockKey("node-1", "/repo")]: {
+            activeTool: "files",
+            files: [
+              { path: "/repo/a.ts", mode: "view", scope: "uncommitted", line: null, preview: true },
+              { path: "/repo/b.ts", mode: "view", scope: "uncommitted", line: null, preview: true },
+              { path: "/repo/c.ts", mode: "view", scope: "uncommitted", line: null },
+            ],
+            activeFile: "/repo/b.ts",
+            collapsed: false,
+            updatedAt: 1,
+          },
+        },
+      }),
+    );
+
+    const store = new WorkspaceDockStore(storage);
+    store.setContext(context("s1"));
+
+    expect(store.files.map((file) => file.preview)).toEqual([true, false, false]);
   });
 
   it("starts each workspace with one terminal tab", () => {
@@ -280,8 +363,8 @@ describe("WorkspaceDockStore", () => {
   it("restores the active tool, files, tree and width", () => {
     const { store, storage } = newStore();
     store.setContext(context("s1"));
-    store.openFile("/repo/src/main.ts", "diff", "branch_base");
-    store.openFile("/repo/README.md", "view");
+    store.openFile("/repo/src/main.ts", { mode: "diff", scope: "branch_base", preview: false });
+    store.openFile("/repo/README.md");
     store.setTreeVisible(false);
     store.setWidth(60);
     store.commitWidth();
@@ -299,6 +382,8 @@ describe("WorkspaceDockStore", () => {
     ]);
     expect(restored.files[0]?.mode).toBe("diff");
     expect(restored.files[0]?.scope).toBe("branch_base");
+    expect(restored.files[0]?.preview).toBe(false);
+    expect(restored.files[1]?.preview).toBe(true);
   });
 
   it("drops invalid persisted tools and file entries", () => {
@@ -381,7 +466,7 @@ describe("WorkspaceDockStore", () => {
     const { store } = newStore();
     store.setContext(context("s1"));
     for (let index = 0; index < 10; index += 1) {
-      store.openFile(`/repo/src/file-${index}.ts`, "view");
+      store.openFile(`/repo/src/file-${index}.ts`, { preview: false });
     }
 
     expect(store.files.length).toBeLessThanOrEqual(8);

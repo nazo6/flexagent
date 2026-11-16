@@ -20,6 +20,21 @@ export interface DockFileTab {
   scope: DockDiffScope;
   /** 1-based line to focus (from a chat file link), or `null`. */
   line: number | null;
+  /** Temporary tab that the next preview open replaces in place. */
+  preview: boolean;
+}
+
+/** How a file preview is opened. */
+export interface OpenFileOptions {
+  mode?: DockFileMode;
+  scope?: DockDiffScope;
+  line?: number | null;
+  /**
+   * `true` (default) opens a temporary tab that the next preview open replaces.
+   * `false` opens a permanent tab and promotes an existing preview tab instead
+   * of adding a second one.
+   */
+  preview?: boolean;
 }
 
 /** One shell tab inside the Terminal tool. */
@@ -74,6 +89,7 @@ interface PersistedFile {
   mode: DockFileMode;
   scope: DockDiffScope;
   line: number | null;
+  preview: boolean;
 }
 
 interface PersistedTerminal {
@@ -187,6 +203,7 @@ function restoreWorkspace(value: unknown): DockWorkspace | null {
   const activeTool = isDockToolId(value.activeTool) ? value.activeTool : null;
   const { terminals, activeTerminal, terminalSeq } = restoreTerminals(value);
   const files: DockFileTab[] = [];
+  let hasPreview = false;
   if (Array.isArray(value.files)) {
     for (const raw of value.files) {
       if (!isRecord(raw) || typeof raw.path !== "string" || raw.path.length === 0) continue;
@@ -197,7 +214,10 @@ function restoreWorkspace(value: unknown): DockWorkspace | null {
         typeof raw.line === "number" && Number.isInteger(raw.line) && raw.line > 0
           ? raw.line
           : null;
-      files.push({ path: raw.path, mode, scope, line });
+      // Only one preview tab may exist; older entries without the flag stay pinned.
+      const preview = raw.preview === true && !hasPreview;
+      if (preview) hasPreview = true;
+      files.push({ path: raw.path, mode, scope, line, preview });
       if (files.length >= MAX_FILES) break;
     }
   }
@@ -295,6 +315,7 @@ function serialize(workspaces: Record<string, DockWorkspace>, width: number): st
             mode: file.mode,
             scope: file.scope,
             line: file.line,
+            preview: file.preview,
           })),
           activeFile: workspace.activeFile,
           terminals: workspace.terminals.map((terminal) => ({
@@ -477,23 +498,41 @@ export class WorkspaceDockStore {
     this.update((current) => ({ ...current, terminals, activeTerminal }));
   }
 
-  /** Opens a file preview inside Files (or focuses and updates an existing one). */
-  openFile(
-    path: string,
-    mode: DockFileMode = "view",
-    scope: DockDiffScope = "uncommitted",
-    line: number | null = null,
-  ): void {
+  /**
+   * Opens a file preview inside Files.
+   *
+   * A preview tab is temporary: the next preview open replaces it in place so
+   * the tab bar does not grow while browsing. Opening the same path again
+   * updates and focuses its tab, and a pinned open promotes an existing preview
+   * tab instead of adding a second one.
+   */
+  openFile(path: string, options: OpenFileOptions = {}): void {
     if (this.currentKey === null) return;
+    const { mode = "view", scope = "uncommitted", line = null, preview = true } = options;
     this.fileOpenVersion += 1;
     this.update((workspace) => {
-      const existing = workspace.files.find((file) => file.path === path);
+      const existingIndex = workspace.files.findIndex((file) => file.path === path);
+      if (existingIndex !== -1) {
+        const files = workspace.files.map((file, index) =>
+          index === existingIndex
+            ? { ...file, mode, scope, line, preview: file.preview && preview }
+            : file,
+        );
+        return {
+          ...workspace,
+          files,
+          activeFile: path,
+          activeTool: "files",
+          collapsed: false,
+        };
+      }
+
+      const tab: DockFileTab = { path, mode, scope, line, preview };
+      const previewIndex = preview ? workspace.files.findIndex((file) => file.preview) : -1;
       const files =
-        existing === undefined
-          ? trimFiles([...workspace.files, { path, mode, scope, line }], path)
-          : workspace.files.map((file) =>
-              file.path === path ? { ...file, mode, scope, line } : file,
-            );
+        previewIndex !== -1
+          ? workspace.files.map((file, index) => (index === previewIndex ? tab : file))
+          : trimFiles([...workspace.files, tab], path);
       return {
         ...workspace,
         files,
@@ -502,6 +541,20 @@ export class WorkspaceDockStore {
         collapsed: false,
       };
     });
+  }
+
+  /** Makes a preview tab permanent so later preview opens no longer replace it. */
+  pinFile(path: string): void {
+    const workspace = this.workspace;
+    if (workspace === null) return;
+    const file = workspace.files.find((candidate) => candidate.path === path);
+    if (file === undefined || !file.preview) return;
+    this.update((current) => ({
+      ...current,
+      files: current.files.map((candidate) =>
+        candidate.path === path ? { ...candidate, preview: false } : candidate,
+      ),
+    }));
   }
 
   activateFile(path: string): void {

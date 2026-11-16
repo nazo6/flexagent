@@ -111,8 +111,12 @@
     refreshToken += 1;
   }
 
-  function openDiff(absolutePath: string, diffScope: DockDiffScope = "uncommitted"): void {
-    dock.openFile(absolutePath, "diff", diffScope);
+  function openDiff(
+    absolutePath: string,
+    diffScope: DockDiffScope = "uncommitted",
+    preview = true,
+  ): void {
+    dock.openFile(absolutePath, { mode: "diff", scope: diffScope, preview });
   }
 
   function sessionAbsolute(file: FileDiff): string {
@@ -179,6 +183,7 @@
             class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
             title={file.path}
             onclick={() => openDiff(absolute)}
+            ondblclick={() => openDiff(absolute, "uncommitted", false)}
           >
             {#if badge !== undefined}
               <GitStatusBadge status={badge} />
@@ -212,6 +217,7 @@
             class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
             title={entry.old_path === null ? entry.path : `${entry.old_path} → ${entry.path}`}
             onclick={() => openDiff(entry.absolute_path)}
+            ondblclick={() => openDiff(entry.absolute_path, "uncommitted", false)}
           >
             <GitStatusBadge status={entry.status} />
             <span class="min-w-0 flex-1 truncate font-mono">{entry.path}</span>
@@ -240,6 +246,7 @@
           class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
           title={file.path}
           onclick={() => openDiff(absolute, "branch_base")}
+          ondblclick={() => openDiff(absolute, "branch_base", false)}
         >
           <span class="min-w-0 flex-1 truncate font-mono">{file.path}</span>
           <span class="text-ok shrink-0 text-[11px]">+{file.additions}</span>

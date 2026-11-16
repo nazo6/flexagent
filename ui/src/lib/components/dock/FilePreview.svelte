@@ -26,6 +26,7 @@
   import EyeIcon from "@lucide/svelte/icons/eye";
   import FileCodeIcon from "@lucide/svelte/icons/file-code";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
+  import PinIcon from "@lucide/svelte/icons/pin";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
 
   interface Props {
@@ -195,6 +196,18 @@
   >
     <RefreshCwIcon class="size-3.5" />
   </button>
+
+  {#if tab.preview}
+    <button
+      type="button"
+      class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 items-center justify-center rounded-md transition-colors"
+      title={m.dock_file_pin_tab()}
+      aria-label={m.dock_file_pin_tab()}
+      onclick={() => dock.pinFile(tab.path)}
+    >
+      <PinIcon class="size-3.5" />
+    </button>
+  {/if}
 
   <span class="ml-auto flex shrink-0 items-center">
     {#if fileStatus !== null}

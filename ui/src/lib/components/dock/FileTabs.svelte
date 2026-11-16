@@ -11,9 +11,10 @@
     activePath: string | null;
     onactivate: (path: string) => void;
     onclose: (path: string) => void;
+    onpin: (path: string) => void;
   }
 
-  let { tabs, activePath, onactivate, onclose }: Props = $props();
+  let { tabs, activePath, onactivate, onclose, onpin }: Props = $props();
 
   function handleKeydown(event: KeyboardEvent, index: number): void {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -53,8 +54,9 @@
           aria-selected={isActive}
           tabindex={isActive ? 0 : -1}
           class="flex h-full max-w-56 items-center gap-1.5 pr-1 pl-1.5 text-[11px] font-medium outline-none"
-          title={tab.path}
+          title={tab.preview ? `${tab.path}\n${m.dock_file_preview_hint()}` : tab.path}
           onclick={() => onactivate(tab.path)}
+          ondblclick={() => onpin(tab.path)}
           onkeydown={(event) => handleKeydown(event, index)}
           onmousedown={(event) => {
             if (event.button === 1) event.preventDefault();
@@ -67,7 +69,7 @@
           }}
         >
           <FileIcon class="size-3 shrink-0" />
-          <span class="truncate">{basename(tab.path)}</span>
+          <span class={cn("truncate", tab.preview && "italic")}>{basename(tab.path)}</span>
         </button>
         <button
           type="button"
