@@ -534,7 +534,12 @@ pub fn find_repositories(root: &Path, max_depth: usize) -> Result<Vec<PathBuf>, 
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_dir() {
+            // `DirEntry::file_type()` does not follow symlinks, so a link inside
+            // the scan root cannot escape to an unrelated repository.
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if !file_type.is_dir() {
                 continue;
             }
             let name = entry.file_name();
@@ -619,6 +624,19 @@ mod tests {
         assert_eq!(found.len(), 2, "found: {found:?}");
         assert!(found.iter().any(|path| path.ends_with("a")));
         assert!(found.iter().any(|path| path.ends_with("b")));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn find_repositories_does_not_follow_symlinks() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let outside = tempfile::tempdir().expect("outside");
+        init_test_repo(outside.path()).await;
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("link"))
+            .expect("create symlink");
+
+        let found = find_repositories(dir.path(), 3).expect("scan");
+        assert!(found.is_empty(), "found: {found:?}");
     }
 
     #[test]
