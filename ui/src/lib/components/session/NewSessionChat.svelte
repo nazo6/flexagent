@@ -27,6 +27,7 @@
     ProvisionerTestResponse,
   } from "#lib/generated/bindings.ts";
   import { formatRelativeTime } from "#lib/format.ts";
+  import { randomUuid } from "#lib/uuid.ts";
   import {
     isModelOption,
     orderedConfigOptions,
@@ -713,7 +714,7 @@
 
     try {
       const response = await sync.connection.client.createSession({
-        command_id: crypto.randomUUID(),
+        command_id: randomUuid(),
         project_id: selectedProject.project_id,
         node_id: useProvisioner ? null : nodeId,
         provisioner: useProvisioner ? selectedProvisioner.name : null,

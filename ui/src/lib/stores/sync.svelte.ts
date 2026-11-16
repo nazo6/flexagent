@@ -25,6 +25,7 @@ import { problems } from "#lib/stores/problems.svelte.ts";
 import { mergeCursor } from "#lib/sync/cursor.ts";
 import { SessionTimeline } from "#lib/sync/timeline.svelte.ts";
 import type { PendingPrompt } from "#lib/sync/reducer.ts";
+import { randomUuid } from "#lib/uuid.ts";
 import type { ConnectionStore } from "./connection.svelte";
 
 const CURSOR_KEY = "fxg:sync_cursor";
@@ -721,7 +722,7 @@ export class SyncStore {
    * response timeout is extended to [`SEND_PROMPT_TIMEOUT_MS`].
    */
   sendPrompt(sessionId: string, input: PromptInput): Promise<CommandResult> {
-    const commandId = crypto.randomUUID();
+    const commandId = randomUuid();
     this.pendingPrompts.set(commandId, {
       commandId,
       sessionId,
@@ -780,7 +781,7 @@ export class SyncStore {
     return this.#dispatch(
       {
         op: "control_session",
-        command_id: crypto.randomUUID(),
+        command_id: randomUuid(),
         session_id: sessionId,
         action,
       },

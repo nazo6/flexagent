@@ -2,6 +2,7 @@ import { ApiError } from "#lib/api/errors.ts";
 import { ApiClient } from "#lib/api/client.ts";
 import type { ConnectionRole, SystemInfoResponse } from "#lib/generated/bindings.ts";
 import { m } from "#lib/paraglide/messages.js";
+import { randomUuid } from "#lib/uuid.ts";
 
 /** A switchable connection target (per origin). */
 export interface ConnectionTarget {
@@ -146,7 +147,7 @@ export class ConnectionStore {
     this.targets = [
       ...this.targets,
       {
-        id: `target-${crypto.randomUUID()}`,
+        id: `target-${randomUuid()}`,
         label: label.trim() || normalized,
         url: normalized,
       },

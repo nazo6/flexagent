@@ -13,6 +13,7 @@
   } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
+  import { randomUuid } from "#lib/uuid.ts";
   import DownloadIcon from "@lucide/svelte/icons/download";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
@@ -116,7 +117,7 @@
     importing = key;
     try {
       const result = await sync.connection.client.importSession({
-        command_id: crypto.randomUUID(),
+        command_id: randomUuid(),
         node_id: isHub ? targetNodeId : null,
         agent_id: session.agent_id,
         agent_session_id: session.agent_session_id,
