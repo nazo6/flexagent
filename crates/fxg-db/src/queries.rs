@@ -416,6 +416,21 @@ pub async fn get_session(
     row.map(SessionRow::into_summary).transpose()
 }
 
+/// Returns the node that owns a session, including tombstoned (deleted) rows.
+///
+/// The hub uses this to reject events sent by a node other than the session
+/// owner. Unlike [`get_session`], deleted sessions are included so a replayed
+/// `SessionDeleted` tombstone can still be attributed to its owner.
+pub async fn session_owner(pool: &SqlitePool, session_id: &str) -> Result<Option<NodeId>, DbError> {
+    let owner = sqlx::query_scalar!(
+        r#"SELECT node_id AS "node_id: NodeId" FROM sessions WHERE session_id = ?"#,
+        session_id,
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(owner)
+}
+
 /// Retrieves the event history after `after_cursor` in batches (for resuming incremental sync).
 ///
 /// The returned batch's `cursor` is the cursor of the last event that could be retrieved; if

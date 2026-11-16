@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT node_id AS \"node_id: NodeId\" FROM sessions WHERE session_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "node_id: NodeId",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "node_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "78b5087651d0f583d48e9eaba55b56ca9bfc88fa7219a363cef4c76ecf601e1b"
+}

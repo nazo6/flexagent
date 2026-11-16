@@ -124,6 +124,17 @@ struct HubInner {
     nodes: RwLock<HashMap<String, NodeConnection>>,
     pending: Mutex<HashMap<String, PendingEntry>>,
     ptys: Mutex<HashMap<String, PtyRoute>>,
+    /// Session owner cache used to validate high-frequency live deltas.
+    ///
+    /// The DB remains authoritative; entries are filled lazily and updated when
+    /// a `SessionCreated` batch is applied.
+    session_owners: RwLock<HashMap<String, NodeId>>,
+    /// PTY IDs that are being opened but do not have a route yet.
+    ///
+    /// The node may emit output immediately after `PtyOpened`, before the
+    /// `pty_open` task inserts the route. This map keeps the sender check valid
+    /// during that window.
+    pending_pty_owners: Mutex<HashMap<String, NodeId>>,
     /// Serializes workspace opens so two clients cannot spawn two shells for the
     /// same path.
     pty_open_gate: Mutex<()>,
@@ -145,6 +156,8 @@ impl NodeHub {
                 nodes: RwLock::new(HashMap::new()),
                 pending: Mutex::new(HashMap::new()),
                 ptys: Mutex::new(HashMap::new()),
+                session_owners: RwLock::new(HashMap::new()),
+                pending_pty_owners: Mutex::new(HashMap::new()),
                 pty_open_gate: Mutex::new(()),
             }),
         }
@@ -158,6 +171,62 @@ impl NodeHub {
     /// Broadcast for Client WS delivery.
     pub(crate) fn client_events(&self) -> &broadcast::Sender<ClientEvent> {
         &self.inner.client_events
+    }
+
+    /// Returns the node that owns a session (cached; the DB is authoritative).
+    ///
+    /// Deleted sessions are included so a replayed tombstone can still be
+    /// attributed to its owner.
+    pub(crate) async fn session_owner(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<NodeId>, fxg_db::DbError> {
+        if let Some(owner) = self.inner.session_owners.read().await.get(session_id) {
+            return Ok(Some(owner.clone()));
+        }
+        let owner = self.inner.db.session_owner(session_id).await?;
+        if let Some(owner) = &owner {
+            self.inner
+                .session_owners
+                .write()
+                .await
+                .insert(session_id.to_owned(), owner.clone());
+        }
+        Ok(owner)
+    }
+
+    /// Records the owner of a newly created session.
+    pub(crate) async fn remember_session_owner(&self, session_id: &str, node_id: &NodeId) {
+        self.inner
+            .session_owners
+            .write()
+            .await
+            .insert(session_id.to_owned(), node_id.clone());
+    }
+
+    /// Returns the node that owns a PTY route (including opens still in flight).
+    pub(crate) async fn pty_owner(&self, pty_id: &str) -> Option<NodeId> {
+        if let Some(route) = self.inner.ptys.lock().await.get(pty_id) {
+            return Some(route.node_id.clone());
+        }
+        self.inner
+            .pending_pty_owners
+            .lock()
+            .await
+            .get(pty_id)
+            .cloned()
+    }
+
+    async fn remember_pending_pty_owner(&self, pty_id: &str, node_id: &NodeId) {
+        self.inner
+            .pending_pty_owners
+            .lock()
+            .await
+            .insert(pty_id.to_owned(), node_id.clone());
+    }
+
+    async fn forget_pending_pty_owner(&self, pty_id: &str) {
+        self.inner.pending_pty_owners.lock().await.remove(pty_id);
     }
 
     /// Whether the node is connected.
@@ -188,9 +257,9 @@ impl NodeHub {
         (rx, conn_id)
     }
 
-    /// Detaches a temporary VM connection (when the child process exits).
+    /// Detaches a temporary VM connection unconditionally (shutdown / forced cleanup).
     pub(crate) async fn detach_ephemeral(&self, node_id: &NodeId, exit_code: Option<i32>) {
-        // The connection generation is unknown, so remove the registered connection and clean up
+        // The connection generation is unknown, so remove the registered connection and clean up.
         let conn_id = {
             let nodes = self.inner.nodes.read().await;
             nodes
@@ -200,6 +269,31 @@ impl NodeHub {
         if let Some(conn_id) = conn_id {
             self.disconnect(node_id, &conn_id).await;
         }
+        self.mark_ephemeral_terminated(node_id, exit_code).await;
+    }
+
+    /// Detaches a specific temporary VM connection (the child process exited).
+    ///
+    /// A stale process exiting after a reconnect must not terminate the new
+    /// connection's node row.
+    pub(crate) async fn detach_ephemeral_connection(
+        &self,
+        node_id: &NodeId,
+        conn_id: &str,
+        exit_code: Option<i32>,
+    ) {
+        if self.disconnect(node_id, conn_id).await {
+            self.mark_ephemeral_terminated(node_id, exit_code).await;
+        } else {
+            tracing::info!(
+                node_id = node_id.as_str(),
+                exit_code,
+                "stale ephemeral connection closed"
+            );
+        }
+    }
+
+    async fn mark_ephemeral_terminated(&self, node_id: &NodeId, exit_code: Option<i32>) {
         if let Err(err) = self.db().set_node_online(node_id.as_str(), false).await {
             tracing::debug!(
                 node_id = node_id.as_str(),
@@ -255,8 +349,12 @@ impl NodeHub {
     }
 
     /// Detaches a node connection (only for the same generation). Fails in-flight relays and PTYs.
-    async fn disconnect(&self, node_id: &NodeId, conn_id: &str) {
-        {
+    ///
+    /// Returns `true` when this was the current connection. A stale connection
+    /// closing after a reconnect must not mark the node offline or tear down the
+    /// new connection's pending relays / PTYs.
+    async fn disconnect(&self, node_id: &NodeId, conn_id: &str) -> bool {
+        let is_current = {
             let mut nodes = self.inner.nodes.write().await;
             let is_current = nodes
                 .get(node_id.as_str())
@@ -265,6 +363,10 @@ impl NodeHub {
             if is_current {
                 nodes.remove(node_id.as_str());
             }
+            is_current
+        };
+        if !is_current {
+            return false;
         }
 
         // Return NODE_OFFLINE for in-flight relays
@@ -304,6 +406,7 @@ impl NodeHub {
                 );
             }
         }
+        true
     }
 
     /// Sends a message to a node. Returns `NODE_OFFLINE` when not connected.
@@ -426,8 +529,25 @@ impl NodeHub {
     }
 
     /// Resolves a pending relay response.
-    async fn resolve(&self, correlation_id: &str, response: PendingResponse) {
-        let entry = self.inner.pending.lock().await.remove(correlation_id);
+    ///
+    /// A response is only accepted from the node the request was sent to; a
+    /// different node cannot spoof another node's command result.
+    async fn resolve(&self, node_id: &NodeId, correlation_id: &str, response: PendingResponse) {
+        let entry = {
+            let mut pending = self.inner.pending.lock().await;
+            match pending.get(correlation_id) {
+                Some(entry) if entry.node_id == *node_id => pending.remove(correlation_id),
+                Some(_) => {
+                    tracing::warn!(
+                        node_id = node_id.as_str(),
+                        correlation_id,
+                        "rejecting a relay response from a non-owning node"
+                    );
+                    return;
+                }
+                None => None,
+            }
+        };
         match entry {
             Some(entry) => {
                 if entry.tx.send(response).is_err() {
@@ -526,6 +646,9 @@ impl NodeHub {
         }
 
         let request_id = CommandId::from(uuid_v7());
+        let requested_pty_id = params.pty_id.clone();
+        self.remember_pending_pty_owner(&requested_pty_id, &params.node_id)
+            .await;
         let response = self
             .request(
                 &params.node_id,
@@ -542,15 +665,28 @@ impl NodeHub {
                 },
                 Duration::from_secs(30),
             )
-            .await
-            .map_err(|err| PtyChannelError::new(err.code.as_str(), err.message))?;
+            .await;
+        let response = match response {
+            Ok(response) => response,
+            Err(err) => {
+                self.forget_pending_pty_owner(&requested_pty_id).await;
+                return Err(PtyChannelError::new(err.code.as_str(), err.message));
+            }
+        };
         let reply = match response {
             PendingResponse::PtyOpen(Ok(reply)) => reply,
-            PendingResponse::PtyOpen(Err(err)) => return Err(err),
+            PendingResponse::PtyOpen(Err(err)) => {
+                self.forget_pending_pty_owner(&requested_pty_id).await;
+                return Err(err);
+            }
             PendingResponse::Failed { code, message } => {
+                self.forget_pending_pty_owner(&requested_pty_id).await;
                 return Err(PtyChannelError::new(code.as_str(), message));
             }
-            _ => return Err(PtyChannelError::internal("unexpected node response kind")),
+            _ => {
+                self.forget_pending_pty_owner(&requested_pty_id).await;
+                return Err(PtyChannelError::internal("unexpected node response kind"));
+            }
         };
 
         {
@@ -582,6 +718,7 @@ impl NodeHub {
             }
         }
 
+        self.forget_pending_pty_owner(&requested_pty_id).await;
         Ok(PtyOpenOutcome {
             pty_id: reply.pty_id,
             path: reply.path,
@@ -967,14 +1104,20 @@ async fn handle_node_connection(state: HubState, token_owner: String, socket: We
     }
 
     // 6. Disconnect handling (only valid for the same connection generation)
-    state.hub().disconnect(&node_id, &conn_id).await;
-    if let Err(err) = state.db().set_node_online(node_id.as_str(), false).await {
-        tracing::warn!(
+    if state.hub().disconnect(&node_id, &conn_id).await {
+        if let Err(err) = state.db().set_node_online(node_id.as_str(), false).await {
+            tracing::warn!(
+                node_id = node_id.as_str(),
+                "failed to mark node offline: {err}"
+            );
+        }
+        tracing::info!(node_id = node_id.as_str(), "node disconnected");
+    } else {
+        tracing::info!(
             node_id = node_id.as_str(),
-            "failed to mark node offline: {err}"
+            "stale node connection closed (a newer connection is active)"
         );
     }
-    tracing::info!(node_id = node_id.as_str(), "node disconnected");
 }
 
 /// Sends `HelloRejected` and closes the node WebSocket cleanly.
@@ -1112,13 +1255,39 @@ async fn handle_node_message_value(state: &HubState, node_id: &NodeId, message: 
             apply_event_batch(state, node_id, events, resync).await;
         }
         NodeToHubMsg::LiveStreamDelta { session_id, delta } => {
-            fxg_protocol::discard_with!(
-                state
-                    .hub()
-                    .client_events()
-                    .send(ClientEvent::StreamDelta { session_id, delta }),
-                "broadcast a live stream delta to clients"
-            );
+            match state.hub().session_owner(session_id.as_str()).await {
+                Ok(Some(owner)) if owner == *node_id => {
+                    fxg_protocol::discard_with!(
+                        state
+                            .hub()
+                            .client_events()
+                            .send(ClientEvent::StreamDelta { session_id, delta }),
+                        "broadcast a live stream delta to clients"
+                    );
+                }
+                Ok(Some(owner)) => {
+                    tracing::warn!(
+                        node_id = node_id.as_str(),
+                        owner = owner.as_str(),
+                        session_id = session_id.as_str(),
+                        "rejecting a live stream delta from a non-owning node"
+                    );
+                }
+                Ok(None) => {
+                    tracing::warn!(
+                        node_id = node_id.as_str(),
+                        session_id = session_id.as_str(),
+                        "rejecting a live stream delta for an unknown session"
+                    );
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        node_id = node_id.as_str(),
+                        session_id = session_id.as_str(),
+                        "failed to resolve the session owner for a live delta: {err}"
+                    );
+                }
+            }
         }
         NodeToHubMsg::CommandResult {
             command_id,
@@ -1138,7 +1307,11 @@ async fn handle_node_message_value(state: &HubState, node_id: &NodeId, message: 
             };
             state
                 .hub()
-                .resolve(command_id.as_str(), PendingResponse::Command(result))
+                .resolve(
+                    node_id,
+                    command_id.as_str(),
+                    PendingResponse::Command(result),
+                )
                 .await;
         }
         NodeToHubMsg::NodeRpcResult {
@@ -1147,10 +1320,18 @@ async fn handle_node_message_value(state: &HubState, node_id: &NodeId, message: 
         } => {
             state
                 .hub()
-                .resolve(request_id.as_str(), PendingResponse::Rpc(outcome))
+                .resolve(node_id, request_id.as_str(), PendingResponse::Rpc(outcome))
                 .await;
         }
         NodeToHubMsg::PtyOutput { pty_id, data_b64 } => {
+            if state.hub().pty_owner(&pty_id).await.as_ref() != Some(node_id) {
+                tracing::warn!(
+                    node_id = node_id.as_str(),
+                    pty_id,
+                    "rejecting pty output from a non-owning node"
+                );
+                return;
+            }
             use base64::Engine as _;
             match base64::engine::general_purpose::STANDARD.decode(data_b64.as_bytes()) {
                 Ok(data) => {
@@ -1183,6 +1364,7 @@ async fn handle_node_message_value(state: &HubState, node_id: &NodeId, message: 
             state
                 .hub()
                 .resolve(
+                    node_id,
                     request_id.as_str(),
                     PendingResponse::PtyOpen(Ok(PtyOpenedReply {
                         pty_id,
@@ -1205,12 +1387,21 @@ async fn handle_node_message_value(state: &HubState, node_id: &NodeId, message: 
             state
                 .hub()
                 .resolve(
+                    node_id,
                     request_id.as_str(),
                     PendingResponse::PtyOpen(Err(PtyChannelError::new(code, message))),
                 )
                 .await;
         }
         NodeToHubMsg::PtyExit { pty_id, exit_code } => {
+            if state.hub().pty_owner(&pty_id).await.as_ref() != Some(node_id) {
+                tracing::warn!(
+                    node_id = node_id.as_str(),
+                    pty_id,
+                    "rejecting pty exit from a non-owning node"
+                );
+                return;
+            }
             state
                 .hub()
                 .publish_pty(&pty_id, PtyChannelEvent::Exit { exit_code })
@@ -1222,6 +1413,14 @@ async fn handle_node_message_value(state: &HubState, node_id: &NodeId, message: 
             code,
             message,
         } => {
+            if state.hub().pty_owner(&pty_id).await.as_ref() != Some(node_id) {
+                tracing::warn!(
+                    node_id = node_id.as_str(),
+                    pty_id,
+                    "rejecting pty error from a non-owning node"
+                );
+                return;
+            }
             state
                 .hub()
                 .publish_pty(&pty_id, PtyChannelEvent::Error { code, message })
@@ -1229,6 +1428,14 @@ async fn handle_node_message_value(state: &HubState, node_id: &NodeId, message: 
             state.hub().remove_pty(&pty_id).await;
         }
         NodeToHubMsg::DrainComplete { node_id: drained } => {
+            if &drained != node_id {
+                tracing::warn!(
+                    node_id = node_id.as_str(),
+                    drained = drained.as_str(),
+                    "rejecting DrainComplete from a non-owning node"
+                );
+                return;
+            }
             tracing::info!(node_id = node_id.as_str(), "drain complete");
             crate::provisioner::on_drain_complete(state, drained.as_str());
         }
@@ -1331,7 +1538,11 @@ async fn apply_project_reports(
     for session in sessions {
         state
             .db()
-            .reassign_session_project(session.session_id.as_str(), session.project_id.as_str())
+            .reassign_session_project(
+                node_id.as_str(),
+                session.session_id.as_str(),
+                session.project_id.as_str(),
+            )
             .await?;
     }
 
@@ -1405,6 +1616,83 @@ async fn compute_resync(
     targets
 }
 
+/// Whether every event in the batch belongs to the sending node.
+///
+/// The hub DB is authoritative: an existing session may only receive events
+/// from its owning node. A new session must be introduced by a `SessionCreated`
+/// event whose `node_id` matches the sender. This prevents a compromised node
+/// from overwriting or tombstoning another node's session.
+async fn events_belong_to_sender(
+    state: &HubState,
+    node_id: &NodeId,
+    events: &[fxg_protocol::events::SessionEventEnvelope],
+) -> bool {
+    let mut session_ids: Vec<&str> = Vec::new();
+    for event in events {
+        if !session_ids.contains(&event.session_id.as_str()) {
+            session_ids.push(event.session_id.as_str());
+        }
+    }
+
+    for session_id in session_ids {
+        match state.hub().session_owner(session_id).await {
+            Ok(Some(owner)) if owner != *node_id => {
+                tracing::warn!(
+                    node_id = node_id.as_str(),
+                    owner = owner.as_str(),
+                    session_id,
+                    "rejecting event batch for a session owned by another node"
+                );
+                return false;
+            }
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                let created = events.iter().find_map(|event| {
+                    if event.session_id.as_str() != session_id {
+                        return None;
+                    }
+                    match &event.payload {
+                        fxg_protocol::events::UnifiedEventPayload::SessionCreated {
+                            node_id: event_node_id,
+                            ..
+                        } => Some(event_node_id),
+                        _ => None,
+                    }
+                });
+                match created {
+                    Some(event_node_id) if event_node_id == node_id => {}
+                    Some(event_node_id) => {
+                        tracing::warn!(
+                            node_id = node_id.as_str(),
+                            event_node_id = event_node_id.as_str(),
+                            session_id,
+                            "rejecting SessionCreated with a mismatched node_id"
+                        );
+                        return false;
+                    }
+                    None => {
+                        tracing::warn!(
+                            node_id = node_id.as_str(),
+                            session_id,
+                            "rejecting events for an unknown session without SessionCreated"
+                        );
+                        return false;
+                    }
+                }
+            }
+            Err(err) => {
+                tracing::warn!(
+                    node_id = node_id.as_str(),
+                    session_id,
+                    "failed to resolve the session owner: {err}"
+                );
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// Applies `EventBatchPush` idempotently, sends an ACK and delivers to Client WS.
 ///
 /// If application fails, no ACK is sent (the node's watermark does not advance and it retries).
@@ -1414,22 +1702,8 @@ async fn apply_event_batch(
     events: Vec<fxg_protocol::events::SessionEventEnvelope>,
     resync: bool,
 ) {
-    // Prevent impersonation: SessionCreated.node_id must match the connecting node
-    for event in &events {
-        if let fxg_protocol::events::UnifiedEventPayload::SessionCreated {
-            node_id: event_node_id,
-            ..
-        } = &event.payload
-            && event_node_id != node_id
-        {
-            tracing::warn!(
-                node_id = node_id.as_str(),
-                event_node_id = event_node_id.as_str(),
-                session_id = event.session_id.as_str(),
-                "rejecting event batch with mismatched node_id"
-            );
-            return;
-        }
+    if !events_belong_to_sender(state, node_id, &events).await {
+        return;
     }
 
     // Split by session (the protocol batches per session, but be defensive)
@@ -1451,6 +1725,10 @@ async fn apply_event_batch(
         let acked_up_to_node_seq = batch.last().map(|event| event.node_seq).unwrap_or(0);
         match state.db().append_events(&batch).await {
             Ok(outcomes) => {
+                state
+                    .hub()
+                    .remember_session_owner(&session_id, node_id)
+                    .await;
                 for (event, outcome) in batch.iter().zip(outcomes.iter()) {
                     if outcome.inserted {
                         fxg_protocol::discard_with!(
@@ -1581,5 +1859,102 @@ mod tests {
         assert_eq!(projects[0].name, "demo-repo");
         assert_eq!(projects[0].bindings.len(), 1);
         assert_eq!(projects[0].bindings[0].local_path, "/tmp/demo-repo");
+    }
+
+    #[tokio::test]
+    async fn event_batches_from_a_non_owning_node_are_rejected() {
+        use fxg_protocol::common::ClientSource;
+        use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
+        use fxg_protocol::{EventId, ProjectId, SessionId};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state = HubState::new(crate::state::HubOptions {
+            paths: Paths::portable(dir.path(), Role::Hub),
+            listen_addr: "127.0.0.1:0".to_owned(),
+            allowed_hosts: Vec::new(),
+            allowed_origins: Vec::new(),
+            log: Default::default(),
+        })
+        .await
+        .expect("hub state");
+
+        let owner = NodeId::from("node-owner");
+        let attacker = NodeId::from("node-attacker");
+        for node_id in [&owner, &attacker] {
+            state
+                .db()
+                .upsert_node(&fxg_db::NodeRecord {
+                    node_id: node_id.as_str().to_owned(),
+                    name: node_id.as_str().to_owned(),
+                    os: "linux".to_owned(),
+                    arch: "x86_64".to_owned(),
+                    version: "0.1.0".to_owned(),
+                    installed_agents: Vec::new(),
+                    is_ephemeral: false,
+                    provisioner: None,
+                    lifecycle_status: fxg_protocol::common::NodeLifecycleStatus::Ready,
+                    idle_timeout_secs: None,
+                    is_online: true,
+                    state_revision: 1,
+                })
+                .await
+                .expect("upsert node");
+        }
+        let session_id = SessionId::from("session-1");
+        let created = SessionEventEnvelope {
+            event_id: EventId::from("event-1"),
+            session_id: session_id.clone(),
+            node_seq: 1,
+            created_at: 1,
+            payload: UnifiedEventPayload::SessionCreated {
+                node_id: owner.clone(),
+                project_id: ProjectId::from("project-1"),
+                project_name: "project".to_owned(),
+                local_path: "/tmp/project".to_owned(),
+                git_branch: None,
+                is_worktree: false,
+                agent_id: "test-agent".to_owned(),
+                parent_session_id: None,
+                title: "session".to_owned(),
+            },
+        };
+        apply_event_batch(&state, &owner, vec![created], false).await;
+        assert_eq!(
+            state
+                .db()
+                .session_owner(session_id.as_str())
+                .await
+                .expect("owner"),
+            Some(owner.clone())
+        );
+
+        let forged = SessionEventEnvelope {
+            event_id: EventId::from("event-2"),
+            session_id: session_id.clone(),
+            node_seq: 2,
+            created_at: 2,
+            payload: UnifiedEventPayload::UserMessage {
+                text: "forged".to_owned(),
+                attachments: Vec::new(),
+                client_source: ClientSource::Web,
+                agent_message_id: None,
+            },
+        };
+        apply_event_batch(&state, &attacker, vec![forged], false).await;
+
+        let events = state
+            .db()
+            .session_events_after(session_id.as_str(), 0, 10)
+            .await
+            .expect("events");
+        assert_eq!(events.events.len(), 1, "the forged event must be dropped");
+        assert_eq!(
+            state
+                .db()
+                .session_owner(session_id.as_str())
+                .await
+                .expect("owner"),
+            Some(owner)
+        );
     }
 }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE sessions\n           SET project_id = ?, updated_at = ?\n         WHERE session_id = ? AND node_id = ? AND project_id != ?\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "264db8b35b9ae12f8f4687fc7e43316bca5d9637c9a4b0c71bb605ef4abfad07"
+}

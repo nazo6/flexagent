@@ -608,6 +608,7 @@ async fn spawn_child(state: &HubState, request: SpawnRequest) -> Result<SpawnHan
         let mut stdout_lines = BufReader::new(stdout).lines();
         let mut stderr_lines = BufReader::new(stderr).lines();
         let mut attached = false;
+        let mut attached_conn_id: Option<String> = None;
 
         loop {
             tokio::select! {
@@ -674,8 +675,9 @@ async fn spawn_child(state: &HubState, request: SpawnRequest) -> Result<SpawnHan
                             attached = true;
                             // Register the hub connection and forward commands (StartSession etc.)
                             // to the child process's stdin
-                            let (mut commands, _conn_id) =
+                            let (mut commands, conn_id) =
                                 pump_state.hub().attach_ephemeral(&NodeId::from(pump_node_id.as_str())).await;
+                            attached_conn_id = Some(conn_id);
                             if let Some(mut writer) = stdin_writer.take() {
                                 stdin_forwarder = Some(tokio::spawn(async move {
                                     while let Some(message) = commands.recv().await {
@@ -728,22 +730,28 @@ async fn spawn_child(state: &HubState, request: SpawnRequest) -> Result<SpawnHan
         }
         // If it exited before the handshake, notify the receiver (close the channel)
         drop(hello_tx.take());
-        pump_state
-            .hub()
-            .detach_ephemeral(
-                &NodeId::from(pump_node_id.as_str()),
-                match status {
-                    Ok(status) => status.code(),
-                    Err(err) => {
-                        tracing::warn!(
-                            node_id = pump_node_id,
-                            "failed to wait for the ephemeral node: {err}"
-                        );
-                        None
-                    }
-                },
-            )
-            .await;
+        let exit_code = match status {
+            Ok(status) => status.code(),
+            Err(err) => {
+                tracing::warn!(
+                    node_id = pump_node_id,
+                    "failed to wait for the ephemeral node: {err}"
+                );
+                None
+            }
+        };
+        let node_id = NodeId::from(pump_node_id.as_str());
+        match attached_conn_id {
+            Some(conn_id) => {
+                pump_state
+                    .hub()
+                    .detach_ephemeral_connection(&node_id, &conn_id, exit_code)
+                    .await;
+            }
+            None => {
+                pump_state.hub().detach_ephemeral(&node_id, exit_code).await;
+            }
+        }
         pump_manager.remove_instance(&pump_node_id);
         tracing::info!(node_id = pump_node_id, "ephemeral node instance ended");
     });
