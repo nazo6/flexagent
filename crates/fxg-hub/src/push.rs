@@ -12,8 +12,10 @@
 //!   [`web_push_native`] (`p256` / `aes-gcm` / `hkdf`) and do not depend on OpenSSL. HTTP
 //!   delivery uses the workspace `reqwest`.
 
+use std::net::IpAddr;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
@@ -54,6 +56,9 @@ pub enum PushError {
     /// The push endpoint URL is invalid
     #[error("invalid push endpoint: {0}")]
     InvalidEndpoint(String),
+    /// The HTTP client could not be configured
+    #[error("failed to build the push http client: {0}")]
+    Client(String),
     /// The subscription keys (`p256dh` / `auth`) are invalid
     #[error("invalid push subscription keys")]
     InvalidKeys,
@@ -66,6 +71,78 @@ pub enum PushError {
     /// The push service returned an error status
     #[error("push endpoint returned status {0}")]
     HttpStatus(u16),
+}
+
+/// Whether an address is loopback / private / otherwise unsafe for SSRF.
+fn is_forbidden_push_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            ip.is_private()
+                || ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_broadcast()
+                || ip.is_documentation()
+                || ip.is_multicast()
+                || ip.is_unspecified()
+        }
+        IpAddr::V6(ip) => {
+            if let Some(mapped) = ip.to_ipv4_mapped() {
+                return is_forbidden_push_ip(IpAddr::V4(mapped));
+            }
+            let segments = ip.segments();
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || ip.is_multicast()
+                || (segments[0] & 0xfe00) == 0xfc00 // fc00::/7 unique local
+                || (segments[0] & 0xffc0) == 0xfe80 // fe80::/10 link local
+        }
+    }
+}
+
+/// Validates a browser push endpoint before storing or contacting it.
+///
+/// Web Push endpoints are public HTTPS services. Requiring HTTPS and rejecting
+/// private / loopback addresses prevents an authenticated client from using the
+/// hub as an SSRF proxy. Redirects are disabled on the HTTP client as well.
+async fn validate_push_endpoint(endpoint: &str) -> Result<(), String> {
+    let url =
+        reqwest::Url::parse(endpoint).map_err(|err| format!("invalid push endpoint URL: {err}"))?;
+    if url.scheme() != "https" {
+        return Err("push endpoints must use https".to_owned());
+    }
+    let host = url
+        .host_str()
+        .ok_or_else(|| "push endpoint has no host".to_owned())?;
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return if is_forbidden_push_ip(ip) {
+            Err("push endpoint points at a private address".to_owned())
+        } else {
+            Ok(())
+        };
+    }
+    let port = url.port_or_known_default().unwrap_or(443);
+    let addresses = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|err| format!("failed to resolve push endpoint: {err}"))?;
+    let mut resolved = false;
+    for address in addresses {
+        resolved = true;
+        if is_forbidden_push_ip(address.ip()) {
+            return Err("push endpoint resolves to a private address".to_owned());
+        }
+    }
+    if !resolved {
+        return Err("push endpoint did not resolve".to_owned());
+    }
+    Ok(())
+}
+
+/// Short, non-secret label for logs (`https://host/…`).
+fn endpoint_label(endpoint: &str) -> String {
+    match reqwest::Url::parse(endpoint) {
+        Ok(url) => format!("{}://{}/…", url.scheme(), url.host_str().unwrap_or("?")),
+        Err(_) => "<invalid endpoint>".to_owned(),
+    }
 }
 
 /// Notification payload (interpreted by the Service Worker `push` handler).
@@ -134,8 +211,13 @@ impl PushService {
                 return Err(PushError::InvalidKeys);
             }
         };
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|err| PushError::Client(err.to_string()))?;
         Ok(Self {
-            client: reqwest::Client::new(),
+            client,
             key_pair: Arc::new(key_pair),
             public_key: keys.public_key,
             subject: Arc::new(std::sync::RwLock::new(VAPID_CONTACT.to_owned())),
@@ -200,6 +282,9 @@ impl PushService {
         subscription: &PushSubscriptionRecord,
         payload: &PushNotificationPayload,
     ) -> Result<PushSendOutcome, PushError> {
+        validate_push_endpoint(&subscription.endpoint)
+            .await
+            .map_err(PushError::InvalidEndpoint)?;
         let body = serde_json::to_vec(payload)?;
         let request = self.build_request(subscription, body)?;
 
@@ -387,6 +472,9 @@ pub async fn register_subscription(
     if request.endpoint.trim().is_empty() {
         return Err(crate::api::ApiError::bad_request("endpoint is required"));
     }
+    validate_push_endpoint(&request.endpoint)
+        .await
+        .map_err(crate::api::ApiError::bad_request)?;
     let record = PushSubscriptionRecord {
         endpoint: request.endpoint.clone(),
         p256dh: request.p256dh.clone(),
@@ -397,7 +485,7 @@ pub async fn register_subscription(
         .await
         .map_err(crate::api::ApiError::from)?;
     tracing::info!(
-        endpoint = %record.endpoint,
+        endpoint = %endpoint_label(&record.endpoint),
         device = record.device_name.as_deref().unwrap_or("unknown"),
         client_ip = %client.ip,
         "registered web push subscription"
@@ -486,10 +574,10 @@ async fn send_to_subscriptions(
     for subscription in subscriptions {
         match push.send(subscription, payload).await {
             Ok(PushSendOutcome::Sent) => {
-                tracing::debug!(endpoint = %subscription.endpoint, request_id = %payload.request_id, "push sent");
+                tracing::debug!(endpoint = %endpoint_label(&subscription.endpoint), request_id = %payload.request_id, "push sent");
             }
             Ok(PushSendOutcome::Gone) => {
-                tracing::info!(endpoint = %subscription.endpoint, "removing expired push subscription");
+                tracing::info!(endpoint = %endpoint_label(&subscription.endpoint), "removing expired push subscription");
                 if let Err(err) = db.delete_push_subscription(&subscription.endpoint).await {
                     tracing::warn!("failed to delete push subscription: {err}");
                 }
@@ -498,7 +586,7 @@ async fn send_to_subscriptions(
                 if let Some(counters) = counters {
                     counters.incr(crate::api::CounterKind::PushFailures);
                 }
-                tracing::warn!(endpoint = %subscription.endpoint, "push send failed: {err}");
+                tracing::warn!(endpoint = %endpoint_label(&subscription.endpoint), "push send failed: {err}");
             }
         }
     }
@@ -1074,5 +1162,39 @@ mod tests {
             notification_events(&events, &RunningTurns::default(), true).is_empty(),
             "resync must not wake devices"
         );
+    }
+
+    #[test]
+    fn rejects_private_push_addresses() {
+        for ip in [
+            "127.0.0.1",
+            "10.0.0.1",
+            "192.168.1.1",
+            "169.254.1.1",
+            "::1",
+            "fc00::1",
+            "fe80::1",
+        ] {
+            assert!(
+                is_forbidden_push_ip(ip.parse().expect("ip")),
+                "{ip} must be rejected"
+            );
+        }
+        assert!(!is_forbidden_push_ip("1.1.1.1".parse().expect("ip")));
+    }
+
+    #[tokio::test]
+    async fn push_endpoints_require_https_and_public_addresses() {
+        for endpoint in [
+            "http://example.com/push",
+            "https://127.0.0.1/push",
+            "https://[::1]/push",
+            "https://192.168.1.1/push",
+        ] {
+            assert!(
+                validate_push_endpoint(endpoint).await.is_err(),
+                "{endpoint} must be rejected"
+            );
+        }
     }
 }
