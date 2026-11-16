@@ -453,6 +453,27 @@ pub struct SessionListResponse {
     /// `updated_at` descending with `session_id` ascending as the tie-breaker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
+    /// Per-project continuation for the projects present in `sessions`.
+    ///
+    /// A project with `next_cursor = None` has no older sessions; a project
+    /// missing from this list was not part of the page (its continuation is
+    /// unknown to the client). The sidebar uses this to page each project
+    /// independently instead of loading every project's older sessions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub project_cursors: Vec<ProjectSessionCursor>,
+}
+
+/// Continuation of one project's session list (`SessionListResponse.project_cursors`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct ProjectSessionCursor {
+    /// Logical project ID
+    pub project_id: ProjectId,
+    /// Opaque cursor of the project's next (older) page (`None` when fully loaded).
+    ///
+    /// Pass it back as `?project_id=<id>&cursor=` to continue that project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
 }
 
 /// `GET /api/v1/agents` response (available agents plus import candidates).

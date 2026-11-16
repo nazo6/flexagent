@@ -1266,6 +1266,122 @@ async fn session_list_keyset_pagination() {
 }
 
 #[tokio::test]
+async fn session_list_returns_per_project_cursors() {
+    let fixture = Fixture::new(Role::Node).await;
+    let project_a = PROJECT_ID;
+    let project_b = "other.example/project-b";
+    let entries = [
+        (project_a, LOCAL_PATH, 1_000_i64, "a1"),
+        (project_b, "/tmp/other", 1_500, "b1"),
+        (project_a, LOCAL_PATH, 2_000, "a2"),
+        (project_b, "/tmp/other", 2_500, "b2"),
+        (project_a, LOCAL_PATH, 3_000, "a3"),
+    ];
+    for (project_id, local_path, created_at, title) in entries {
+        fixture
+            .db
+            .append_events(&[SessionEventEnvelope {
+                event_id: fxg_protocol::EventId::from(uuid_v7()),
+                session_id: SessionId::from(uuid_v7()),
+                node_seq: 1,
+                created_at,
+                payload: UnifiedEventPayload::SessionCreated {
+                    node_id: NODE_ID.into(),
+                    project_id: project_id.into(),
+                    project_name: project_id.to_owned(),
+                    local_path: local_path.to_owned(),
+                    git_branch: Some("main".to_owned()),
+                    is_worktree: false,
+                    agent_id: "opencode2".to_owned(),
+                    parent_session_id: None,
+                    title: title.to_owned(),
+                },
+            }])
+            .await
+            .expect("append");
+    }
+
+    let first = fixture
+        .db
+        .list_session_page(&SessionFilter {
+            limit: Some(2),
+            ..SessionFilter::default()
+        })
+        .await
+        .expect("first page");
+    assert_eq!(
+        first
+            .sessions
+            .iter()
+            .map(|session| session.title.as_str())
+            .collect::<Vec<_>>(),
+        ["a3", "b2"]
+    );
+    assert!(first.has_more);
+    assert_eq!(first.project_cursors.len(), 2);
+    let cursor_a = first
+        .project_cursors
+        .iter()
+        .find(|cursor| cursor.project_id.as_str() == project_a)
+        .expect("project A cursor");
+    let cursor_b = first
+        .project_cursors
+        .iter()
+        .find(|cursor| cursor.project_id.as_str() == project_b)
+        .expect("project B cursor");
+    assert!(cursor_a.next_cursor.is_some());
+    assert!(cursor_b.next_cursor.is_some());
+
+    // Continuing project A must return only A's older sessions.
+    let a_page = fixture
+        .db
+        .list_session_page(&SessionFilter {
+            project_id: Some(project_a.into()),
+            limit: Some(10),
+            cursor: cursor_a.next_cursor.clone(),
+            ..SessionFilter::default()
+        })
+        .await
+        .expect("project A page");
+    assert_eq!(
+        a_page
+            .sessions
+            .iter()
+            .map(|session| session.title.as_str())
+            .collect::<Vec<_>>(),
+        ["a2", "a1"]
+    );
+    assert!(!a_page.has_more);
+    assert_eq!(a_page.project_cursors.len(), 1);
+    assert!(
+        a_page.project_cursors[0].next_cursor.is_none(),
+        "project A is fully loaded"
+    );
+
+    // Same for project B.
+    let b_page = fixture
+        .db
+        .list_session_page(&SessionFilter {
+            project_id: Some(project_b.into()),
+            limit: Some(10),
+            cursor: cursor_b.next_cursor.clone(),
+            ..SessionFilter::default()
+        })
+        .await
+        .expect("project B page");
+    assert_eq!(
+        b_page
+            .sessions
+            .iter()
+            .map(|session| session.title.as_str())
+            .collect::<Vec<_>>(),
+        ["b1"]
+    );
+    assert!(!b_page.has_more);
+    assert!(b_page.project_cursors[0].next_cursor.is_none());
+}
+
+#[tokio::test]
 async fn registration_upserts_and_audit_logs() {
     let fixture = Fixture::new(Role::Hub).await;
 

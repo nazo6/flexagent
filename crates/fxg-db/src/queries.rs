@@ -64,6 +64,21 @@ pub struct SessionPage {
     pub sessions: Vec<SessionSummary>,
     /// Whether at least one more session matches the filter after this page
     pub has_more: bool,
+    /// Per-project continuation for the projects present in `sessions`.
+    ///
+    /// Projects that are not part of this page have no entry (their
+    /// continuation is unknown). A project with `next_cursor = None` has no
+    /// older sessions.
+    pub project_cursors: Vec<ProjectSessionCursor>,
+}
+
+/// Continuation of one project's session list ([`SessionPage::project_cursors`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectSessionCursor {
+    /// Logical project ID
+    pub project_id: ProjectId,
+    /// Cursor of the project's next (older) page (`None` when fully loaded)
+    pub next_cursor: Option<SessionCursor>,
 }
 
 /// Context character count for LIKE search and snippet generation.
@@ -169,8 +184,42 @@ pub async fn list_session_page(
     let remaining = sessions.split_off(start);
     let limit = filter.limit.map_or(usize::MAX, |limit| limit as usize);
     let has_more = remaining.len() > limit;
-    let sessions = remaining.into_iter().take(limit).collect();
-    Ok(SessionPage { sessions, has_more })
+    let mut remaining = remaining.into_iter();
+    let page_sessions: Vec<SessionSummary> = remaining.by_ref().take(limit).collect();
+    let older_sessions: Vec<SessionSummary> = remaining.collect();
+
+    // Projects present in the page get their own continuation cursor. A project
+    // with no session in `older_sessions` is fully loaded (`next_cursor = None`).
+    let mut project_cursors: Vec<ProjectSessionCursor> = Vec::new();
+    for session in &page_sessions {
+        if project_cursors
+            .iter()
+            .any(|cursor| cursor.project_id == session.project_id)
+        {
+            continue;
+        }
+        let last = page_sessions
+            .iter()
+            .rev()
+            .find(|candidate| candidate.project_id == session.project_id)
+            .expect("project is present in the page");
+        let has_older = older_sessions
+            .iter()
+            .any(|candidate| candidate.project_id == session.project_id);
+        project_cursors.push(ProjectSessionCursor {
+            project_id: session.project_id.clone(),
+            next_cursor: has_older.then(|| SessionCursor {
+                updated_at: last.updated_at,
+                session_id: last.session_id.clone(),
+            }),
+        });
+    }
+
+    Ok(SessionPage {
+        sessions: page_sessions,
+        has_more,
+        project_cursors,
+    })
 }
 
 /// Retrieves a single session (`None` if deleted).

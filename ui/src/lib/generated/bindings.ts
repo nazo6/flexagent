@@ -1547,6 +1547,18 @@ export type ProjectScanResponse = {
 	projects: ProjectSummary[],
 };
 
+/**  Continuation of one project's session list (`SessionListResponse.project_cursors`). */
+export type ProjectSessionCursor = {
+	/**  Logical project ID */
+	project_id: ProjectId,
+	/**
+	 *  Opaque cursor of the project's next (older) page (`None` when fully loaded).
+	 *
+	 *  Pass it back as `?project_id=<id>&cursor=` to continue that project.
+	 */
+	next_cursor?: string | null,
+};
+
 /**  Project projection exposed to clients (`GET /api/v1/projects`). */
 export type ProjectSummary = {
 	/**  Logical project ID */
@@ -2216,6 +2228,15 @@ export type SessionListResponse = {
 	 *  `updated_at` descending with `session_id` ascending as the tie-breaker.
 	 */
 	next_cursor?: string | null,
+	/**
+	 *  Per-project continuation for the projects present in `sessions`.
+	 *
+	 *  A project with `next_cursor = None` has no older sessions; a project
+	 *  missing from this list was not part of the page (its continuation is
+	 *  unknown to the client). The sidebar uses this to page each project
+	 *  independently instead of loading every project's older sessions.
+	 */
+	project_cursors?: ProjectSessionCursor[],
 };
 
 /**  `POST /api/v1/sessions/:id/title` request. */

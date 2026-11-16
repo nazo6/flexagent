@@ -72,10 +72,14 @@ function makeSessionCreatedEvent(sessionId: string, projectId: string): SessionE
   };
 }
 
-function makeSessionSummary(sessionId: string, lastNodeSeq: number): SessionSummary {
+function makeSessionSummary(
+  sessionId: string,
+  lastNodeSeq: number,
+  projectId = "local:node-1:demo",
+): SessionSummary {
   return {
     session_id: sessionId,
-    project_id: "local:node-1:demo",
+    project_id: projectId,
     node_id: "node-1",
     local_path: "/tmp/demo-repo",
     git_branch: "main",
@@ -300,29 +304,79 @@ describe("SyncStore session list pagination", () => {
     vi.stubGlobal("WebSocket", originalWebSocket);
   });
 
-  it("appends the next session page with the returned cursor", async () => {
+  it("appends the next page of one project with its own cursor", async () => {
     const { store, sessionsFn } = createStore();
+    const projectId = "local:node-1:demo";
     sessionsFn.mockResolvedValueOnce({
-      sessions: [makeSessionSummary("sess-1", 1)],
-      next_cursor: "cursor-1",
+      sessions: [makeSessionSummary("sess-1", 1, projectId)],
+      next_cursor: "global-cursor",
+      project_cursors: [{ project_id: projectId, next_cursor: "project-cursor" }],
     });
     sessionsFn.mockResolvedValueOnce({
-      sessions: [makeSessionSummary("sess-2", 1)],
+      sessions: [makeSessionSummary("sess-2", 1, projectId)],
       next_cursor: null,
+      project_cursors: [{ project_id: projectId, next_cursor: null }],
     });
 
     await store.refreshSessions();
     expect(store.sessions.map((session) => session.session_id)).toEqual(["sess-1"]);
-    expect(store.sessionsHasMore).toBe(true);
+    expect(store.hasMoreSessions(projectId)).toBe(true);
 
-    await store.loadMoreSessions();
+    await store.loadMoreSessions(projectId);
     expect(store.sessions.map((session) => session.session_id)).toEqual(["sess-1", "sess-2"]);
-    expect(store.sessionsHasMore).toBe(false);
+    expect(store.hasMoreSessions(projectId)).toBe(false);
     expect(sessionsFn).toHaveBeenLastCalledWith({
       includeArchived: true,
       limit: 100,
-      cursor: "cursor-1",
+      projectId,
+      cursor: "project-cursor",
     });
+  });
+
+  it("loads a project's first page when it has no cursor yet", async () => {
+    const { store, sessionsFn } = createStore();
+    const projectId = "local:node-1:empty";
+    sessionsFn.mockResolvedValueOnce({
+      sessions: [],
+      next_cursor: null,
+    });
+
+    expect(store.hasLoadedProjectSessions(projectId)).toBe(false);
+    expect(store.hasMoreSessions(projectId)).toBe(true);
+
+    await store.loadMoreSessions(projectId);
+    expect(store.hasLoadedProjectSessions(projectId)).toBe(true);
+    expect(store.hasMoreSessions(projectId)).toBe(false);
+    expect(sessionsFn).toHaveBeenLastCalledWith({
+      includeArchived: true,
+      limit: 100,
+      projectId,
+      cursor: null,
+    });
+  });
+
+  it("does not roll back a loaded project cursor on refresh", async () => {
+    const { store, sessionsFn } = createStore();
+    const projectId = "local:node-1:demo";
+    sessionsFn.mockResolvedValueOnce({
+      sessions: [makeSessionSummary("sess-1", 1, projectId)],
+      project_cursors: [{ project_id: projectId, next_cursor: "project-cursor" }],
+    });
+    sessionsFn.mockResolvedValueOnce({
+      sessions: [makeSessionSummary("sess-2", 1, projectId)],
+      next_cursor: null,
+    });
+    sessionsFn.mockResolvedValueOnce({
+      sessions: [makeSessionSummary("sess-1", 2, projectId)],
+      project_cursors: [{ project_id: projectId, next_cursor: "project-cursor" }],
+    });
+
+    await store.refreshSessions();
+    await store.loadMoreSessions(projectId);
+    expect(store.hasMoreSessions(projectId)).toBe(false);
+
+    await store.refreshSessions();
+    expect(store.hasMoreSessions(projectId)).toBe(false);
   });
 });
 

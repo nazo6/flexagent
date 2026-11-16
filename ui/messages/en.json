@@ -865,6 +865,7 @@
   "shell_kill_switch_tooltip": "Emergency stop all sessions",
   "shell_last_synced_tooltip": "Last synced: {time}",
   "shell_load_older_sessions": "Load older sessions",
+  "shell_load_sessions": "Load sessions",
   "shell_needs_attention": "Needs attention",
   "shell_new_session": "New session",
   "shell_new_session_page_title": "New session - FlexAgent",

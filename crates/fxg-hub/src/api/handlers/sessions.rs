@@ -9,10 +9,10 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use fxg_db::SessionFilter;
 use fxg_protocol::client_api::{
-    AuditLogsResponse, ControlSessionRequest, CreateSessionRequest, RespondElicitationRequest,
-    RespondPermissionRequest, ResumeSessionRequest, SearchResponse, SendPromptRequest,
-    SessionArchiveRequest, SessionDetail, SessionImportRequest, SessionListResponse,
-    SessionRenameRequest,
+    AuditLogsResponse, ControlSessionRequest, CreateSessionRequest, ProjectSessionCursor,
+    RespondElicitationRequest, RespondPermissionRequest, ResumeSessionRequest, SearchResponse,
+    SendPromptRequest, SessionArchiveRequest, SessionDetail, SessionImportRequest,
+    SessionListResponse, SessionRenameRequest,
 };
 use fxg_protocol::common::{DiffScope, SessionCursor, SessionStatus};
 
@@ -71,9 +71,18 @@ pub(crate) async fn list_sessions<B: ClientApiBackend>(
                     }
                     .encode()
                 });
+            let project_cursors = page
+                .project_cursors
+                .into_iter()
+                .map(|cursor| ProjectSessionCursor {
+                    project_id: cursor.project_id,
+                    next_cursor: cursor.next_cursor.map(|cursor| cursor.encode()),
+                })
+                .collect();
             Json(SessionListResponse {
                 sessions: page.sessions,
                 next_cursor,
+                project_cursors,
             })
             .into_response()
         }

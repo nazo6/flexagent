@@ -16,13 +16,17 @@
   `cursor` を追加し、応答に `next_cursor` を返す。順序は
   `updated_at` 降順 → `session_id` 昇順のキーセットで、`SessionCursor`
   （`updated_at:session_id`、クライアントには不透明）を次ページに渡す。
-  DB 側は `list_session_page` が `has_more` を返し、既存の
+  応答の `project_cursors` はページに含まれるプロジェクトごとの続き
+  カーソルで、プロジェクト単位の追加読み込みに使う。DB 側は
+  `list_session_page` が `has_more` と `project_cursors` を返し、既存の
   `list_sessions` はその `sessions` を返す薄いラッパーにした。
-- **サイドバー**: 最新100件を初期表示し、末尾の「Load older sessions」で
-  次ページを追記する。イベント反映時の再取得は先頭ページのみにし、明示的に
-  読み込んだ古いページは保持する（更新されたセッションは `updated_at` が
-  進むため先頭ページに現れる）。アーカイブは `updated_at` を進めないため、
-  `session_archived` で読み込み済みエントリを直接更新する。
+- **サイドバー**: 最新100件を初期表示し、各プロジェクトの
+  「Load older sessions」でそのプロジェクトの次ページだけを追記する。
+  セッションがまだ読み込まれていないプロジェクトは「Load sessions」で
+  先頭ページを取得する。イベント反映時の再取得は先頭ページのみにし、
+  明示的に読み込んだ古いページは保持する（更新されたセッションは
+  `updated_at` が進むため先頭ページに現れる）。アーカイブは `updated_at`
+  を進めないため、`session_archived` で読み込み済みエントリを直接更新する。
 - **チャット履歴の上方ページング**: `SessionEventBatch` に `first_cursor`
   を追加し、`before_cursor` に渡す次のカーソルを得られるようにした。
   `GET /api/v1/sessions/:id/events` に `tail=true`（最新ページ）を追加し、

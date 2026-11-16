@@ -663,6 +663,98 @@ mod tests {
         body["session_id"].as_str().expect("session id").to_owned()
     }
 
+    async fn create_seeded_session(
+        daemon: &NodeDaemon,
+        project_id: &str,
+        local_path: &str,
+        title: &str,
+    ) -> String {
+        let session_id = fxg_protocol::util::uuid_v7();
+        daemon
+            .state()
+            .bus()
+            .create_session(
+                &session_id,
+                fxg_protocol::events::UnifiedEventPayload::SessionCreated {
+                    node_id: daemon.state().node_id().into(),
+                    project_id: project_id.into(),
+                    project_name: project_id.to_owned(),
+                    local_path: local_path.to_owned(),
+                    git_branch: Some("main".to_owned()),
+                    is_worktree: false,
+                    agent_id: "mock".to_owned(),
+                    parent_session_id: None,
+                    title: title.to_owned(),
+                },
+            )
+            .await
+            .expect("create session");
+        session_id
+    }
+
+    #[tokio::test]
+    async fn rest_session_list_returns_project_cursors() {
+        let (daemon, _dir) = test_daemon().await;
+        let app = router(daemon.state().clone(), daemon.http_addr());
+        let host = host_of(&daemon);
+        let token = daemon.state().auth_token();
+
+        let project_a = "github.com/nazo6/flexagent";
+        let project_b = "other.example/project-b";
+        // Distinct `updated_at` values: B < A1 < A2.
+        let _b = create_seeded_session(&daemon, project_b, "/tmp/other", "b1").await;
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let a1 = create_seeded_session(&daemon, project_a, "/tmp/repo", "a1").await;
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let a2 = create_seeded_session(&daemon, project_a, "/tmp/repo", "a2").await;
+
+        let response = app
+            .clone()
+            .oneshot(get(&host, "/api/v1/sessions?limit=1", Some(&token)))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let first = body_json(response).await;
+        assert_eq!(first["sessions"][0]["session_id"], a2);
+        let project_cursors = first["project_cursors"]
+            .as_array()
+            .expect("project cursors");
+        assert_eq!(project_cursors.len(), 1);
+        assert_eq!(project_cursors[0]["project_id"], project_a);
+        let cursor = project_cursors[0]["next_cursor"]
+            .as_str()
+            .expect("project cursor");
+
+        let response = app
+            .clone()
+            .oneshot(get(
+                &host,
+                &format!("/api/v1/sessions?project_id={project_a}&cursor={cursor}&limit=10"),
+                Some(&token),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let page = body_json(response).await;
+        assert_eq!(
+            page["sessions"]
+                .as_array()
+                .expect("sessions")
+                .iter()
+                .map(|session| session["session_id"].as_str().expect("id"))
+                .collect::<Vec<_>>(),
+            vec![a1.as_str()]
+        );
+        assert!(page["next_cursor"].is_null());
+        assert_eq!(page["project_cursors"][0]["project_id"], project_a);
+        assert!(page["project_cursors"][0]["next_cursor"].is_null());
+
+        daemon.shutdown();
+        tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())
+            .await
+            .expect("stop");
+    }
+
     #[tokio::test]
     async fn rest_session_detail_and_event_tail() {
         let (daemon, _dir) = test_daemon().await;

@@ -139,10 +139,6 @@ export class SyncStore {
   sessions = $state<SessionSummary[]>([]);
   /** Whether the initial / latest session refresh is in flight. */
   sessionsLoading = $state(false);
-  /** Whether an older session page is being fetched. */
-  sessionsLoadingMore = $state(false);
-  /** Whether `GET /api/v1/sessions` has another page. */
-  sessionsHasMore = $state(false);
   /** Last session refresh error (null when the latest refresh succeeded). */
   sessionsError = $state<string | null>(null);
   nodes = $state<NodeSummary[]>([]);
@@ -185,8 +181,10 @@ export class SyncStore {
   #cursor: number | null = readCursor();
   /** Whether this page has already connected once (later connections resume from `#cursor`). */
   #hasConnected = false;
-  /** Cursor of the next older session-list page (`null` when fully loaded). */
-  #sessionsNextCursor: string | null = null;
+  /** Per-project cursor of the next older page (`null` = fully loaded; missing = not loaded). */
+  #projectCursors = new SvelteMap<string, string | null>();
+  /** Per-project "load older" in-flight flag. */
+  #projectLoading = new SvelteMap<string, boolean>();
   #pendingCommands = new Map<string, PendingCommand>();
   #sessionsRefreshQueued = false;
   #projectsRefreshQueued = false;
@@ -317,11 +315,14 @@ export class SyncStore {
       const firstPageIds = new Set(page.sessions.map((session) => session.session_id));
       const older = this.sessions.filter((session) => !firstPageIds.has(session.session_id));
       this.sessions = sortSessions([...page.sessions, ...older]);
-      if (older.length === 0) {
-        // No extra page is loaded: the cursor follows the refreshed first page.
-        this.#sessionsNextCursor = page.next_cursor ?? null;
+      // Only initialize a project's cursor. A project that already has a cursor
+      // keeps the deepest loaded page: rolling it back to the first page would
+      // make "Load older" re-fetch pages the reader already loaded.
+      for (const cursor of page.project_cursors ?? []) {
+        if (!this.#projectCursors.has(cursor.project_id)) {
+          this.#projectCursors.set(cursor.project_id, cursor.next_cursor ?? null);
+        }
       }
-      this.sessionsHasMore = this.#sessionsNextCursor !== null;
       if (!this.#sessionsInitialized) {
         // Mark sessions that this device has never opened as read, so a first
         // visit does not flag the entire history as unread.
@@ -343,35 +344,52 @@ export class SyncStore {
     }
   }
 
+  /** Whether the project has an older page (unknown projects are treated as having more). */
+  hasMoreSessions(projectId: string): boolean {
+    const cursor = this.#projectCursors.get(projectId);
+    return cursor === undefined ? true : cursor !== null;
+  }
+
+  /** Whether the project's session list has been loaded at least once. */
+  hasLoadedProjectSessions(projectId: string): boolean {
+    return this.#projectCursors.has(projectId);
+  }
+
+  /** Whether a per-project "load older" request is in flight. */
+  sessionsLoadingMore(projectId: string): boolean {
+    return this.#projectLoading.get(projectId) ?? false;
+  }
+
   /**
-   * Append the next page of sessions (older entries) to the sidebar list.
+   * Append the next page of one project's sessions (older entries).
    *
-   * `refreshSessions` keeps the loaded depth, so this only has to fetch once
-   * per explicit "load older" action.
+   * A project without a cursor loads its first page. `refreshSessions` keeps
+   * the loaded depth, so this only fetches when the reader asks for it.
    */
-  async loadMoreSessions(): Promise<void> {
-    const cursor = this.#sessionsNextCursor;
-    if (cursor === null || this.sessionsLoadingMore) return;
-    this.sessionsLoadingMore = true;
+  async loadMoreSessions(projectId: string): Promise<void> {
+    if (this.#projectLoading.get(projectId)) return;
+    const cursor = this.#projectCursors.get(projectId);
+    if (cursor === null) return;
+    this.#projectLoading.set(projectId, true);
     try {
       const page = await this.connection.client.sessions({
         includeArchived: true,
         limit: SESSION_PAGE_SIZE,
-        cursor,
+        projectId,
+        cursor: cursor ?? null,
       });
       const known = new Set(this.sessions.map((session) => session.session_id));
-      this.sessions = [
+      this.sessions = sortSessions([
         ...this.sessions,
         ...page.sessions.filter((session) => !known.has(session.session_id)),
-      ];
-      this.#sessionsNextCursor = page.next_cursor ?? null;
-      this.sessionsHasMore = this.#sessionsNextCursor !== null;
+      ]);
+      this.#projectCursors.set(projectId, page.next_cursor ?? null);
       this.sessionsError = null;
     } catch (error) {
       this.sessionsError = errorMessage(error);
       this.#warn("sessions", error);
     } finally {
-      this.sessionsLoadingMore = false;
+      this.#projectLoading.set(projectId, false);
     }
   }
 
@@ -953,18 +971,28 @@ export class SyncStore {
           });
           sessionsDirty = true;
           break;
-        case "session_deleted":
+        case "session_deleted": {
           // Deleted sessions disappear from the list, and the
           // local timeline is discarded (only the tombstone event remains after)
+          const deleted = this.sessions.find((session) => session.session_id === event.session_id);
           this.#timelines.delete(event.session_id);
           this.provisioningLogs.delete(event.session_id);
           this.#forgetSessionReadState(event.session_id);
           this.sessions = this.sessions.filter(
             (session) => session.session_id !== event.session_id,
           );
+          if (
+            deleted &&
+            !this.sessions.some((session) => session.project_id === deleted.project_id)
+          ) {
+            // No loaded session remains: re-fetch the project's first page
+            // instead of continuing from a cursor that may point at a deleted row.
+            this.#projectCursors.delete(deleted.project_id);
+          }
           sessionsDirty = true;
           projectsDirty = true;
           break;
+        }
         default:
           break;
       }
