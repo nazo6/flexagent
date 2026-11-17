@@ -231,6 +231,11 @@ async fn support_bundle_is_redacted() {
             .expect("path")
             .contains(&data_dir)
     );
+    let redacted_path = secret_path
+        .strip_prefix(&user_home)
+        .map(|rest| std::path::Path::new("~").join(rest))
+        .unwrap_or_else(|_| secret_path.clone());
+    let redacted_text = redacted_path.to_string_lossy();
     assert!(
         bundle["logs"]
             .as_array()
@@ -238,7 +243,7 @@ async fn support_bundle_is_redacted() {
             .iter()
             .any(|line| line
                 .as_str()
-                .is_some_and(|line| line.contains("~/secret.txt"))),
+                .is_some_and(|line| line.contains(redacted_text.as_ref()))),
         "the user home in logs must be redacted: {}",
         bundle["logs"]
     );
