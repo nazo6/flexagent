@@ -8,7 +8,9 @@ use axum::Json;
 use axum::extract::{Path as UrlPath, Query, State};
 use axum::response::{IntoResponse, Response};
 use fxg_protocol::NodeId;
-use fxg_protocol::client_api::{WorkspaceFsQuery, WorkspaceGitDiffQuery, WorkspaceGitStatusQuery};
+use fxg_protocol::client_api::{
+    WorkspaceFsQuery, WorkspaceGitCommitRequest, WorkspaceGitDiffQuery, WorkspaceGitStatusQuery,
+};
 use fxg_protocol::common::DiffScope;
 use fxg_protocol::node_hub::{NodeRpcRequest, NodeRpcResponse};
 
@@ -98,6 +100,30 @@ pub(crate) async fn workspace_git_diff<B: ClientApiBackend>(
         .await
     {
         Ok(NodeRpcResponse::WorkspaceGitDiff { diff }) => Json(diff).into_response(),
+        Ok(_) => ApiError::internal("unexpected node RPC response").into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+pub(crate) async fn workspace_git_commit<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(node_id): UrlPath<String>,
+    Extension(client): Extension<ClientInfo>,
+    Json(request): Json<WorkspaceGitCommitRequest>,
+) -> Response {
+    match state
+        .backend
+        .execute_node_rpc(
+            &NodeId::from(node_id),
+            NodeRpcRequest::WorkspaceGitCommit {
+                path: request.path,
+                message: request.message,
+            },
+            Some(client),
+        )
+        .await
+    {
+        Ok(NodeRpcResponse::WorkspaceGitCommit { response }) => Json(response).into_response(),
         Ok(_) => ApiError::internal("unexpected node RPC response").into_response(),
         Err(err) => err.into_response(),
     }

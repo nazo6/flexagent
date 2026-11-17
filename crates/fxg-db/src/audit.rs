@@ -50,6 +50,8 @@ pub mod actions {
     pub const WORKTREE_MANAGE: AuditAction = AuditAction::WorktreeManage;
     /// Worktree cleanup (prune)
     pub const WORKTREE_PRUNE: AuditAction = AuditAction::WorktreePrune;
+    /// Workspace Git commit created
+    pub const WORKSPACE_GIT_COMMIT: AuditAction = AuditAction::WorkspaceGitCommit;
     /// Project binding (manual Link / bulk Scan)
     pub const PROJECT_LINK: AuditAction = AuditAction::ProjectLink;
     /// Agent management (install / update / delete)

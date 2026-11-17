@@ -92,7 +92,8 @@ use handlers::stream::{client_ws, pty_ws};
 use handlers::system::{auth_login, auth_logout, diagnostics, healthz, meta, readyz, system_info};
 use handlers::terminals::list_terminals;
 use handlers::workspace::{
-    workspace_fs_file, workspace_fs_list, workspace_git_diff, workspace_git_status,
+    workspace_fs_file, workspace_fs_list, workspace_git_commit, workspace_git_diff,
+    workspace_git_status,
 };
 
 /// Returns a header value as `&str` (`None` for a missing or non-UTF-8 value).
@@ -247,6 +248,10 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route(
             "/api/v1/nodes/{node_id}/workspace/git/diff",
             get(workspace_git_diff::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/workspace/git/commit",
+            post(workspace_git_commit::<B>),
         )
         .route(
             "/api/v1/hub/settings",

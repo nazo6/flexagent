@@ -15,7 +15,8 @@ use crate::client_api::HubLinkStatus;
 use crate::client_api::{
     AgentCapabilitiesPreview, AgentsResponse, FsBrowseResponse, ProjectLinkResponse,
     ProjectPreview, ProjectScanResponse, ProjectUnlinkResponse, TerminalsResponse,
-    WorkspaceFileView, WorkspaceFsListResponse, WorkspaceGitStatusResponse, WorktreeInfo,
+    WorkspaceFileView, WorkspaceFsListResponse, WorkspaceGitCommitResponse,
+    WorkspaceGitStatusResponse, WorktreeInfo,
 };
 use crate::common::{
     AgentAction, AgentUsageLimits, ClientSource, DataSafety, DiffScope, ElicitationContent,
@@ -267,6 +268,13 @@ pub enum NodeRpcRequest {
         /// Absolute file path (omit for the whole workspace)
         file: Option<String>,
     },
+    /// Stage every change in a registered workspace and create a commit.
+    WorkspaceGitCommit {
+        /// Directory inside the workspace
+        path: String,
+        /// Commit message
+        message: String,
+    },
 }
 
 impl NodeRpcRequest {
@@ -279,6 +287,7 @@ impl NodeRpcRequest {
                 | Self::WorkspaceFsFile { .. }
                 | Self::WorkspaceGitStatus { .. }
                 | Self::WorkspaceGitDiff { .. }
+                | Self::WorkspaceGitCommit { .. }
         )
     }
 }
@@ -297,7 +306,8 @@ impl NodeRpcRequest {
             | Self::ImportSession { .. }
             | Self::ListExternalSessions { .. }
             | Self::ResumeSession { .. }
-            | Self::DeleteSession { .. } => Duration::from_secs(120),
+            | Self::DeleteSession { .. }
+            | Self::WorkspaceGitCommit { .. } => Duration::from_secs(120),
             Self::ManageAgent { .. } => Duration::from_secs(600),
             // A pairing test performs a WebSocket handshake with the hub.
             Self::TestPairing { .. } => Duration::from_secs(15),
@@ -344,6 +354,11 @@ pub enum NodeRpcResponse {
     WorkspaceGitDiff {
         /// Diff result
         diff: WorkspaceDiffResponse,
+    },
+    /// Workspace Git commit (`WorkspaceGitCommit`).
+    WorkspaceGitCommit {
+        /// Commit result
+        response: WorkspaceGitCommitResponse,
     },
     /// Project scan payload (`ProjectScan`).
     ProjectScan {

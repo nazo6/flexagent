@@ -1448,6 +1448,28 @@ pub struct WorkspaceGitDiffQuery {
     pub file: Option<String>,
 }
 
+/// Request body of `POST /api/v1/nodes/:id/workspace/git/commit`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct WorkspaceGitCommitRequest {
+    /// Directory inside a registered workspace
+    pub path: String,
+    /// Commit message (required)
+    pub message: String,
+}
+
+/// `POST /api/v1/nodes/:id/workspace/git/commit` response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct WorkspaceGitCommitResponse {
+    /// Created commit hash
+    pub commit: String,
+    /// Branch the commit was created on (`None` when detached)
+    pub branch: Option<String>,
+    /// Number of changed files included in the commit
+    pub files: u32,
+}
+
 /// Agent-native management snapshot (local node only).
 ///
 /// This is the generic seam for agent integrations that expose configuration

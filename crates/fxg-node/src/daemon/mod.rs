@@ -1831,6 +1831,38 @@ mod tests {
         );
         assert_eq!(sub_listing.root_path, path_str);
 
+        let before = workspace::workspace_git_status(daemon.state(), &path_str)
+            .await
+            .expect("status before commit");
+        let expected_files = before.entries.len() as u32;
+        let committed = workspace::workspace_git_commit(
+            daemon.state(),
+            &path_str,
+            "commit from the workspace panel",
+        )
+        .await
+        .expect("commit");
+        assert_eq!(committed.files, expected_files);
+        assert!(!committed.commit.is_empty());
+
+        let after = workspace::workspace_git_status(daemon.state(), &path_str)
+            .await
+            .expect("status after commit");
+        assert!(after.entries.is_empty());
+        let subject = crate::git::run_git(&path, &["log", "-1", "--pretty=%s"])
+            .await
+            .expect("git log");
+        assert_eq!(subject, "commit from the workspace panel");
+
+        let empty = workspace::workspace_git_commit(daemon.state(), &path_str, "  ")
+            .await
+            .expect_err("empty message");
+        assert!(matches!(empty, NodeError::InvalidState(_)));
+        let nothing = workspace::workspace_git_commit(daemon.state(), &path_str, "again")
+            .await
+            .expect_err("nothing to commit");
+        assert!(matches!(nothing, NodeError::InvalidState(_)));
+
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;

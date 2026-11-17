@@ -17,6 +17,7 @@
   import type { TimelineItem } from "#lib/sync/reducer.ts";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
+  import { toast } from "svelte-sonner";
 
   let { ctx, items }: { ctx: DockContext; items: TimelineItem[] } = $props();
 
@@ -34,6 +35,18 @@
   let refreshToken = $state(0);
   let statusGeneration = 0;
   let branchGeneration = 0;
+  let commitMessage = $state("");
+  let committing = $state(false);
+
+  const canCommit = $derived(
+    !remote &&
+      scope === "uncommitted" &&
+      status !== null &&
+      status.is_repository &&
+      status.entries.length > 0 &&
+      commitMessage.trim() !== "" &&
+      !committing,
+  );
 
   const scopes: { value: Scope; label: string }[] = [
     { value: "session", label: m.dock_changes_scope_session() },
@@ -113,6 +126,25 @@
 
   function refresh(): void {
     refreshToken += 1;
+  }
+
+  async function commit(): Promise<void> {
+    if (!canCommit) return;
+    committing = true;
+    try {
+      const result = await sync.connection.client.workspaceGitCommit(
+        ctx.nodeId,
+        ctx.localPath,
+        commitMessage.trim(),
+      );
+      commitMessage = "";
+      toast.success(m.dock_changes_commit_success({ commit: result.commit.slice(0, 8) }));
+      refresh();
+    } catch (cause) {
+      toast.error(errorMessage(cause));
+    } finally {
+      committing = false;
+    }
   }
 
   function openDiff(
@@ -262,4 +294,33 @@
       {/each}
     {/if}
   </div>
+
+  {#if scope === "uncommitted" && status?.is_repository && status.entries.length > 0}
+    <form
+      class="border-border flex shrink-0 items-center gap-1.5 border-t p-1.5"
+      onsubmit={(event) => {
+        event.preventDefault();
+        void commit();
+      }}
+    >
+      <input
+        class="border-border bg-background focus-visible:ring-ring min-w-0 flex-1 rounded-md border px-2 py-1 text-[12px] outline-none focus-visible:ring-1"
+        placeholder={m.dock_changes_commit_placeholder()}
+        aria-label={m.dock_changes_commit_placeholder()}
+        bind:value={commitMessage}
+        disabled={committing}
+      />
+      <button
+        type="submit"
+        class="bg-primary text-primary-foreground hover:bg-primary/90 flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium transition-colors disabled:opacity-50"
+        title={m.dock_changes_commit_hint()}
+        disabled={!canCommit}
+      >
+        {#if committing}
+          <LoaderCircleIcon class="size-3.5 animate-spin" />
+        {/if}
+        {m.dock_changes_commit_button()}
+      </button>
+    </form>
+  {/if}
 {/if}

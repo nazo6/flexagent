@@ -12,7 +12,8 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use fxg_protocol::client_api::{
     WorkspaceEntryKind, WorkspaceFileContent, WorkspaceFileView, WorkspaceFsEntry,
-    WorkspaceFsListResponse, WorkspaceGitEntry, WorkspaceGitFileStatus, WorkspaceGitStatusResponse,
+    WorkspaceFsListResponse, WorkspaceGitCommitResponse, WorkspaceGitEntry, WorkspaceGitFileStatus,
+    WorkspaceGitStatusResponse,
 };
 use fxg_protocol::common::{DiffScope, WorkspaceDiffResponse};
 use sha2::{Digest, Sha256};
@@ -222,6 +223,77 @@ pub async fn workspace_git_diff(
     };
 
     git::workspace_diff_file(&resolved.root, scope, base_branch, relative.as_deref()).await
+}
+
+/// Maximum commit message length accepted by the workspace commit endpoint (64 KiB).
+const MAX_COMMIT_MESSAGE_BYTES: usize = 64 * 1024;
+
+/// `POST /api/v1/nodes/:id/workspace/git/commit`
+///
+/// Stages every change in the worktree (`git add -A`) and creates one commit.
+/// Partial staging and pushing are intentionally out of scope.
+pub async fn workspace_git_commit(
+    state: &DaemonState,
+    requested: &str,
+    message: &str,
+) -> Result<WorkspaceGitCommitResponse, NodeError> {
+    let message = message.trim();
+    if message.is_empty() {
+        return Err(NodeError::InvalidState(
+            "a commit message is required".to_owned(),
+        ));
+    }
+    if message.len() > MAX_COMMIT_MESSAGE_BYTES {
+        return Err(NodeError::InvalidState(format!(
+            "the commit message is too long (max {MAX_COMMIT_MESSAGE_BYTES} bytes)"
+        )));
+    }
+    if message.contains('\0') {
+        return Err(NodeError::InvalidState(
+            "the commit message contains a NUL byte".to_owned(),
+        ));
+    }
+
+    let resolved = resolve_existing(state, requested).await?;
+    let metadata =
+        std::fs::metadata(&resolved.path).map_err(|err| NodeError::io(&resolved.path, err))?;
+    if !metadata.is_dir() {
+        return Err(NodeError::InvalidState(format!(
+            "not a directory: {}",
+            resolved.path.display()
+        )));
+    }
+    let root = resolved.root;
+    if !git::is_inside_work_tree(&root).await? {
+        return Err(NodeError::InvalidState(
+            "the workspace is not inside a Git work tree".to_owned(),
+        ));
+    }
+
+    let bytes = git::run_git_bytes(&root, &["status", "--porcelain=v2", "-z"]).await?;
+    let parsed = parse_status_z(&bytes, &root);
+    if parsed.entries.is_empty() {
+        return Err(NodeError::InvalidState("nothing to commit".to_owned()));
+    }
+    let files = parsed.entries.len() as u32;
+
+    git::run_git(&root, &["add", "-A"]).await?;
+    let output = git::capture(&root, &["commit", "-m", message], &[]).await?;
+    if !output.success {
+        return Err(NodeError::Git {
+            cwd: root.clone(),
+            args: "commit -m <message>".to_owned(),
+            message: output.stderr,
+        });
+    }
+
+    let commit = git::head_commit(&root).await?.unwrap_or_default();
+    let branch = git::current_branch(&root).await?;
+    Ok(WorkspaceGitCommitResponse {
+        commit,
+        branch,
+        files,
+    })
 }
 
 /// Resolves an existing path and its workspace access root.

@@ -78,6 +78,7 @@ import type {
   WorktreesResponse,
   WorkspaceFileView,
   WorkspaceFsListResponse,
+  WorkspaceGitCommitResponse,
   WorkspaceGitStatusResponse,
 } from "#lib/generated/bindings.ts";
 import { errorCodeMessage } from "./error-messages";
@@ -371,6 +372,19 @@ export class ApiClient {
           file: options.file,
         },
       },
+    );
+  }
+
+  /** `POST /api/v1/nodes/:id/workspace/git/commit` (stage all changes and commit). */
+  workspaceGitCommit(
+    nodeId: string,
+    path: string,
+    message: string,
+  ): Promise<WorkspaceGitCommitResponse> {
+    return this.#request<WorkspaceGitCommitResponse>(
+      "POST",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/workspace/git/commit`,
+      { body: { path, message } },
     );
   }
 

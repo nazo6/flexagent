@@ -3019,6 +3019,24 @@ export type WorkspaceFsQuery = {
 	path: string,
 };
 
+/**  Request body of `POST /api/v1/nodes/:id/workspace/git/commit`. */
+export type WorkspaceGitCommitRequest = {
+	/**  Directory inside a registered workspace */
+	path: string,
+	/**  Commit message (required) */
+	message: string,
+};
+
+/**  `POST /api/v1/nodes/:id/workspace/git/commit` response. */
+export type WorkspaceGitCommitResponse = {
+	/**  Created commit hash */
+	commit: string,
+	/**  Branch the commit was created on (`None` when detached) */
+	branch: string | null,
+	/**  Number of changed files included in the commit */
+	files: number,
+};
+
 /**  Query of `GET /api/v1/nodes/:id/workspace/git/diff`. */
 export type WorkspaceGitDiffQuery = {
 	/**  Directory inside a registered workspace */

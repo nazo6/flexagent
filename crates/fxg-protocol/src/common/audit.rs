@@ -109,6 +109,8 @@ crate::open_string_enum! {
         WorktreeManage => "worktree_manage",
         /// Worktree pruned
         WorktreePrune => "worktree_prune",
+        /// Workspace Git commit created
+        WorkspaceGitCommit => "workspace_git_commit",
         /// Project binding changed
         ProjectLink => "project_link",
         /// Agent managed

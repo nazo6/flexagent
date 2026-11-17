@@ -247,6 +247,7 @@ prune します。`sessions` は最大 1000 件で、超過時は
 | `GET /api/v1/nodes/:node_id/workspace/fs/file`                     | workspace 内のファイル内容（テキスト / 画像 / バイナリ / 大きすぎる）。 |
 | `GET /api/v1/nodes/:node_id/workspace/git/status`                  | workspace の `git status`（branch / ahead / behind / 変更一覧）。       |
 | `GET /api/v1/nodes/:node_id/workspace/git/diff`                    | workspace または 1 ファイルの diff（scope / base / file）。             |
+| `POST /api/v1/nodes/:node_id/workspace/git/commit`                 | worktree の全変更を stage して 1 コミット作成（ローカル接続のみ）。     |
 | `GET /api/v1/nodes/:node_id/settings`                              | ノード設定スナップショット（トークン値は返さない）。                    |
 | `PATCH /api/v1/nodes/:node_id/settings/node` / `.../agents`        | ノード所有設定の更新。                                                  |
 | `PUT/DELETE /api/v1/nodes/:node_id/settings/pairing`               | ハブ接続先の保存 / 解除。                                               |
