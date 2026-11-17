@@ -236,7 +236,9 @@ async fn support_bundle_is_redacted() {
             .as_array()
             .expect("logs")
             .iter()
-            .any(|line| line.as_str().is_some_and(|line| line.contains("~/secret.txt"))),
+            .any(|line| line
+                .as_str()
+                .is_some_and(|line| line.contains("~/secret.txt"))),
         "the user home in logs must be redacted: {}",
         bundle["logs"]
     );
