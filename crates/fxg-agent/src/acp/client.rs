@@ -5,6 +5,13 @@ use super::subagent::*;
 use super::terminal::*;
 use super::*;
 
+/// Maximum size of a text file the client reads or writes for an agent.
+///
+/// The ACP `fs/*` handlers run inside the node process, so an unbounded read
+/// would block a runtime worker and let an agent pull arbitrarily large files
+/// into memory.
+const MAX_ACP_TEXT_FILE_BYTES: u64 = 8 * 1024 * 1024;
+
 /// Handle for a started ACP session.
 pub(super) struct AcpSessionHandle {
     /// ACP (agent-side) session ID
@@ -377,6 +384,72 @@ fn elicitation_response(outcome: ElicitationOutcome) -> CreateElicitationRespons
     }
 }
 
+/// Reads a text file for an ACP `fs/read_text_file` request.
+///
+/// Files above [`MAX_ACP_TEXT_FILE_BYTES`] are rejected instead of being loaded,
+/// and the optional 1-based `line` / `limit` window is applied afterwards.
+async fn read_text_file(
+    path: &std::path::Path,
+    line: Option<u32>,
+    limit: Option<u32>,
+) -> anyhow::Result<String> {
+    let metadata = tokio::fs::metadata(path)
+        .await
+        .with_context(|| format!("failed to stat {}", path.display()))?;
+    if metadata.len() > MAX_ACP_TEXT_FILE_BYTES {
+        anyhow::bail!(
+            "refusing to read {}: {} bytes exceeds the {MAX_ACP_TEXT_FILE_BYTES} byte limit",
+            path.display(),
+            metadata.len()
+        );
+    }
+    let content = tokio::fs::read_to_string(path)
+        .await
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    if line.is_none() && limit.is_none() {
+        return Ok(content);
+    }
+    let start = line.unwrap_or(1).saturating_sub(1) as usize;
+    let take = limit.unwrap_or(u32::MAX) as usize;
+    Ok(content
+        .lines()
+        .skip(start)
+        .take(take)
+        .collect::<Vec<_>>()
+        .join("\n"))
+}
+
+/// Writes a text file for an ACP `fs/write_text_file` request.
+///
+/// Returns the previous content for the diff (empty when the file did not
+/// exist, `None` when it was too large to read for a diff).
+async fn write_text_file(path: &std::path::Path, content: &str) -> anyhow::Result<Option<String>> {
+    if content.len() as u64 > MAX_ACP_TEXT_FILE_BYTES {
+        anyhow::bail!(
+            "refusing to write {}: {} bytes exceeds the {MAX_ACP_TEXT_FILE_BYTES} byte limit",
+            path.display(),
+            content.len()
+        );
+    }
+    let old_text = match tokio::fs::metadata(path).await {
+        Ok(metadata) if metadata.len() > MAX_ACP_TEXT_FILE_BYTES => None,
+        Ok(_) => Some(
+            tokio::fs::read_to_string(path)
+                .await
+                .with_context(|| format!("failed to read {} before writing", path.display()))?,
+        ),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Some(String::new()),
+        Err(err) => {
+            return Err(err)
+                .with_context(|| format!("failed to stat {} before writing", path.display()));
+        }
+    };
+    tokio::fs::write(path, content)
+        .await
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(old_text)
+}
+
 /// Launch parameters for `run_acp_process`.
 pub(super) struct AcpProcessTaskParams {
     /// Agent to launch
@@ -525,23 +598,7 @@ pub(super) async fn run_acp_process(
                         return responder.respond_with_internal_error("unknown session");
                     };
                     let path = resolve_path(&context.cwd, &request.path);
-                    let result = (|| -> anyhow::Result<String> {
-                        let content = std::fs::read_to_string(&path)
-                            .with_context(|| format!("failed to read {}", path.display()))?;
-                        if request.line.is_some() || request.limit.is_some() {
-                            let start = request.line.unwrap_or(1).saturating_sub(1) as usize;
-                            let take = request.limit.unwrap_or(u32::MAX) as usize;
-                            Ok(content
-                                .lines()
-                                .skip(start)
-                                .take(take)
-                                .collect::<Vec<_>>()
-                                .join("\n"))
-                        } else {
-                            Ok(content)
-                        }
-                    })();
-                    match result {
+                    match read_text_file(&path, request.line, request.limit).await {
                         Ok(content) => responder.respond(ReadTextFileResponse::new(content)),
                         Err(err) => responder.respond_with_internal_error(err.to_string()),
                     }
@@ -557,20 +614,11 @@ pub(super) async fn run_acp_process(
                         return responder.respond_with_internal_error("unknown session");
                     };
                     let path = resolve_path(&context.cwd, &request.path);
-                    let old_text = match std::fs::read_to_string(&path) {
-                        Ok(text) => text,
-                        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
-                        Err(err) => {
-                            return responder.respond_with_internal_error(format!(
-                                "failed to read {} before writing: {err}",
-                                path.display()
-                            ));
-                        }
-                    };
-                    match std::fs::write(&path, &request.content) {
-                        Ok(()) => {
+                    match write_text_file(&path, &request.content).await {
+                        Ok(old_text) => {
                             let path_string = path.to_string_lossy().into_owned();
-                            let diff = build_file_diff(&path_string, &old_text, &request.content);
+                            let diff = old_text
+                                .map(|old| build_file_diff(&path_string, &old, &request.content));
                             fxg_protocol::discard_with!(
                                 context.events.send(DriverEvent::Event(
                                     UnifiedEventPayload::ToolCall {
@@ -579,7 +627,7 @@ pub(super) async fn run_acp_process(
                                         kind: FxgToolCallKind::Edit,
                                         status: FxgToolCallStatus::Completed,
                                         locations: vec![path_string],
-                                        diff: Some(diff),
+                                        diff,
                                         raw_output: None,
                                         subagent_id: context.subagent_id.clone(),
                                     },
@@ -588,10 +636,7 @@ pub(super) async fn run_acp_process(
                             );
                             responder.respond(WriteTextFileResponse::new())
                         }
-                        Err(err) => responder.respond_with_internal_error(format!(
-                            "failed to write {}: {err}",
-                            path.display()
-                        )),
+                        Err(err) => responder.respond_with_internal_error(err.to_string()),
                     }
                 }
             },

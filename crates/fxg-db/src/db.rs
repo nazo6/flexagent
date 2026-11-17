@@ -135,19 +135,26 @@ impl Db {
     // Watermark-based outbox (crate::outbox)
     // ------------------------------------------------------------------
 
-    /// Extracts unsent events grouped by session.
-    pub async fn extract_outbox(&self) -> Result<Vec<outbox::SessionOutboxBatch>, DbError> {
-        outbox::extract_outbox(&self.pool).await
+    /// Extracts one page of unsent events grouped by session.
+    ///
+    /// Repeat with [`OutboxPage::next`] until it is `None`.
+    pub async fn extract_outbox_page(
+        &self,
+        after: Option<&outbox::OutboxCursor>,
+        limit: u32,
+    ) -> Result<outbox::OutboxPage, DbError> {
+        outbox::extract_outbox_page(&self.pool, after, limit).await
     }
 
     /// For `ResyncRequest`: extracts the given session from `from_node_seq` onward regardless
-    /// of the watermark.
+    /// of the watermark (at most `limit` events).
     pub async fn extract_outbox_after(
         &self,
         session_id: &str,
         from_node_seq: u64,
+        limit: u32,
     ) -> Result<Vec<SessionEventEnvelope>, DbError> {
-        outbox::extract_outbox_after(&self.pool, session_id, from_node_seq).await
+        outbox::extract_outbox_after(&self.pool, session_id, from_node_seq, limit).await
     }
 
     /// Watermark update upon receiving `EventBatchAck` (`synced_up_to_node_seq`).

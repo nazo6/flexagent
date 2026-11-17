@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT event_id, session_id, node_seq, payload_json, created_at\n          FROM session_events\n         WHERE session_id = ? AND node_seq >= ?\n         ORDER BY node_seq ASC\n        ",
+  "query": "\n        SELECT event_id, session_id, node_seq, payload_json, created_at\n          FROM session_events\n         WHERE session_id = ? AND node_seq >= ?\n         ORDER BY node_seq ASC\n         LIMIT ?\n        ",
   "describe": {
     "columns": [
       {
@@ -60,7 +60,7 @@
       }
     ],
     "parameters": {
-      "Right": 2
+      "Right": 3
     },
     "nullable": [
       false,
@@ -70,5 +70,5 @@
       false
     ]
   },
-  "hash": "4c2b4d2788cb0000c55560571fe23612fee4d2573899e1e6aea3e7b79384bb6d"
+  "hash": "6a986b5656130a9ca52f47343086fa0807a373bb3de975894ae275bfd2dbf55a"
 }

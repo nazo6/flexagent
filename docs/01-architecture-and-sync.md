@@ -158,10 +158,17 @@ sequenceDiagram
     Note over Node,Hub: --- ハブ復旧・WebSocket再接続 ---
     Node->>Hub: WS: NodeHello (SessionSyncState 一覧を報告)
     Hub-->>Node: WS: ResyncRequest (ハブ側で欠落・遅延のあるセッションのみ)
-    Node->>Hub: WS: EventBatchPush (synced_up_to_node_seq より後のイベントを一括送信)
+    Node->>Hub: WS: EventBatchPush (synced_up_to_node_seq より後のイベントをページ単位で送信)
     Hub-->>Node: WS: EventBatchAck
     Node->>NodeDB: UPDATE sessions SET synced_up_to_node_seq = N
 ```
+
+未送信イベントは `(session_id, node_seq)` のキーセットカーソルでページ単位
+（既定 1000 件）に抽出し、1 ページずつ送信します。長期間オフラインだった
+ノードが再接続したときに Outbox 全体をメモリへ載せないための境界で、
+`ResyncRequest` による再送も同じカーソルでページングします。送信途中で
+切断しても水位は ACK でのみ進むため、再送は重複を含み得ますが
+`INSERT OR IGNORE` と水位の `MAX` 更新で吸収されます。
 
 ### 2.3 ストリーミングチャンクの配信と永続化方針
 

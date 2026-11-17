@@ -803,13 +803,37 @@ async fn rebuild_projections_matches_incremental_apply() {
     assert_eq!(sessions_twice, sessions_after);
 }
 
+/// Drains every outbox page (production pages; tests want the whole log).
+async fn drain_outbox(db: &Db) -> Vec<fxg_db::SessionOutboxBatch> {
+    let mut batches: Vec<fxg_db::SessionOutboxBatch> = Vec::new();
+    let mut cursor = None;
+    loop {
+        let page = db
+            .extract_outbox_page(cursor.as_ref(), 100)
+            .await
+            .expect("outbox page");
+        for mut batch in page.batches {
+            match batches.last_mut() {
+                Some(last) if last.session_id == batch.session_id => {
+                    last.events.append(&mut batch.events);
+                }
+                _ => batches.push(batch),
+            }
+        }
+        match page.next {
+            Some(next) => cursor = Some(next),
+            None => return batches,
+        }
+    }
+}
+
 #[tokio::test]
 async fn outbox_watermark_extraction_and_ack() {
     let mut fixture = Fixture::new(Role::Node).await;
     let events = fixture.seed_typical_stream().await;
 
     // Until ACKed, all events are in the outbox (batched per session)
-    let outbox = fixture.db.extract_outbox().await.expect("outbox");
+    let outbox = drain_outbox(&fixture.db).await;
     assert_eq!(outbox.len(), 1);
     assert_eq!(outbox[0].session_id, fixture.session_id);
     assert_eq!(outbox[0].events.len(), events.len());
@@ -823,7 +847,7 @@ async fn outbox_watermark_extraction_and_ack() {
         .ack_watermark(&fixture.session_id, 3)
         .await
         .expect("ack");
-    let outbox = fixture.db.extract_outbox().await.expect("outbox");
+    let outbox = drain_outbox(&fixture.db).await;
     assert_eq!(outbox[0].events.len(), 5);
     assert_eq!(outbox[0].events[0].node_seq, 4);
     assert_eq!(fixture.db.unsynced_event_count().await.expect("count"), 5);
@@ -846,20 +870,13 @@ async fn outbox_watermark_extraction_and_ack() {
         .ack_watermark(&fixture.session_id, 8)
         .await
         .expect("ack all");
-    assert!(
-        fixture
-            .db
-            .extract_outbox()
-            .await
-            .expect("outbox")
-            .is_empty()
-    );
+    assert!(drain_outbox(&fixture.db).await.is_empty());
     assert_eq!(fixture.db.unsynced_event_count().await.expect("count"), 0);
 
     // Range resend for ResyncRequest works regardless of the watermark
     let resend = fixture
         .db
-        .extract_outbox_after(&fixture.session_id, 6)
+        .extract_outbox_after(&fixture.session_id, 6, 100)
         .await
         .expect("resync");
     assert_eq!(resend.len(), 3);
@@ -867,7 +884,7 @@ async fn outbox_watermark_extraction_and_ack() {
     // from_node_seq = 1 resends everything including SessionCreated
     let full = fixture
         .db
-        .extract_outbox_after(&fixture.session_id, 1)
+        .extract_outbox_after(&fixture.session_id, 1, 100)
         .await
         .expect("full resync");
     assert_eq!(full.len(), 8);
@@ -879,6 +896,60 @@ async fn outbox_watermark_extraction_and_ack() {
         .await
         .expect_err("unknown session");
     assert!(matches!(err, DbError::SessionNotFound(_)));
+}
+
+#[tokio::test]
+async fn outbox_pages_bound_each_page_and_cover_every_event() {
+    let mut fixture = Fixture::new(Role::Node).await;
+    let first = fixture.seed_typical_stream().await;
+
+    // A second session interleaves with the first in `(session_id, node_seq)` order.
+    let second = SessionEventEnvelope {
+        event_id: uuid_v7().into(),
+        session_id: uuid_v7().into(),
+        node_seq: 1,
+        created_at: now_ms(),
+        payload: session_created_payload(),
+    };
+    fixture
+        .db
+        .append_events(&[second])
+        .await
+        .expect("append second session");
+
+    let mut cursor = None;
+    let mut seen = Vec::new();
+    let mut pages = 0;
+    loop {
+        let page = fixture
+            .db
+            .extract_outbox_page(cursor.as_ref(), 3)
+            .await
+            .expect("page");
+        let count: usize = page.batches.iter().map(|batch| batch.events.len()).sum();
+        assert!(count <= 3, "a page must not exceed the limit");
+        for batch in page.batches {
+            for event in batch.events {
+                seen.push((event.session_id.to_string(), event.node_seq));
+            }
+        }
+        pages += 1;
+        match page.next {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+
+    assert!(pages > 1, "the test must exercise more than one page");
+    assert_eq!(seen.len(), first.len() + 1);
+    let mut unique = seen.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), seen.len(), "pages must not repeat events");
+    assert!(
+        seen.windows(2).all(|pair| pair[0] < pair[1]),
+        "pages must be in (session_id, node_seq) order"
+    );
 }
 
 #[tokio::test]
@@ -2345,7 +2416,7 @@ async fn session_deletion_purges_content_and_keeps_tombstone() {
     );
 
     // Sync: only the tombstone goes into the outbox
-    let outbox = fixture.db.extract_outbox().await.expect("outbox");
+    let outbox = drain_outbox(&fixture.db).await;
     assert_eq!(outbox.len(), 1);
     assert_eq!(outbox[0].events.len(), 1);
     assert!(matches!(

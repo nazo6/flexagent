@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT e.event_id, e.session_id, e.node_seq, e.payload_json, e.created_at\n          FROM session_events e\n          JOIN sessions s ON s.session_id = e.session_id\n         WHERE e.node_seq > s.synced_up_to_node_seq\n         ORDER BY e.session_id ASC, e.node_seq ASC\n        ",
+  "query": "\n        SELECT e.event_id, e.session_id, e.node_seq, e.payload_json, e.created_at\n          FROM session_events e\n          JOIN sessions s ON s.session_id = e.session_id\n         WHERE e.node_seq > s.synced_up_to_node_seq\n           AND (e.session_id, e.node_seq) > (?, ?)\n         ORDER BY e.session_id ASC, e.node_seq ASC\n         LIMIT ?\n        ",
   "describe": {
     "columns": [
       {
@@ -60,7 +60,7 @@
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 3
     },
     "nullable": [
       false,
@@ -70,5 +70,5 @@
       false
     ]
   },
-  "hash": "09343f7104ce2afc932ce4484559cafff501e8754e7560c2aad617d63093a3a3"
+  "hash": "729819c8869e87f5c2db4cb337a77d27218ebdf1b6b1d3ab39aa9bbc43a2fce5"
 }

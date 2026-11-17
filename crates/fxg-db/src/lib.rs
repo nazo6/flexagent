@@ -48,7 +48,7 @@ pub use fxg_protocol::paths::Role;
 // Re-exported types (keeps imports on the caller side short)
 pub use audit::AuditLogRecord;
 pub use events::{AppendedEvent, ApplyOutcome};
-pub use outbox::SessionOutboxBatch;
+pub use outbox::{OutboxCursor, OutboxPage, SessionOutboxBatch};
 pub use push::PushSubscriptionRecord;
 pub use queries::ProjectSessionCursor;
 pub use queries::SessionFilter;

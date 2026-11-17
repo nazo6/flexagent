@@ -22,7 +22,7 @@ use std::time::Duration;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use futures_util::{SinkExt, StreamExt};
-use fxg_db::SessionFilter;
+use fxg_db::{OutboxCursor, SessionFilter};
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{HubLinkState, HubLinkStatus};
 use fxg_protocol::common::ErrorCode;
@@ -42,6 +42,11 @@ const RECONNECT_MIN: Duration = Duration::from_secs(1);
 const RECONNECT_MAX: Duration = Duration::from_secs(30);
 /// Maximum number of events per `EventBatchPush` message.
 const OUTBOX_BATCH_EVENTS: usize = 200;
+/// Maximum number of unsent events loaded per outbox page.
+///
+/// Paging bounds memory when a node reconnects after a long offline period; the
+/// watermark makes re-reading a page harmless.
+const OUTBOX_PAGE_EVENTS: u32 = 1000;
 /// Send queue capacity (including the PTY forwarder).
 const SEND_QUEUE_CAPACITY: usize = 1024;
 /// Maximum number of sessions reported in `NodeHello`.
@@ -427,9 +432,20 @@ pub(crate) async fn build_hello(state: &DaemonState) -> NodeToHubMsg {
 
 /// Turns unsent events (after `synced_up_to_node_seq`) into a sequence of outgoing
 /// messages.
-pub(crate) async fn outbox_messages(state: &DaemonState) -> anyhow::Result<Vec<NodeToHubMsg>> {
+///
+/// Loads one page at a time so a long offline backlog is never materialized in
+/// memory as a whole. Returns the messages and the cursor to continue from
+/// (`None` when the unsent log is exhausted).
+async fn outbox_page(
+    state: &DaemonState,
+    after: Option<&OutboxCursor>,
+) -> anyhow::Result<(Vec<NodeToHubMsg>, Option<OutboxCursor>)> {
+    let page = state
+        .db()
+        .extract_outbox_page(after, OUTBOX_PAGE_EVENTS)
+        .await?;
     let mut messages = Vec::new();
-    for batch in state.db().extract_outbox().await? {
+    for batch in page.batches {
         for chunk in batch.events.chunks(OUTBOX_BATCH_EVENTS) {
             messages.push(NodeToHubMsg::EventBatchPush {
                 events: chunk.to_vec(),
@@ -437,7 +453,7 @@ pub(crate) async fn outbox_messages(state: &DaemonState) -> anyhow::Result<Vec<N
             });
         }
     }
-    Ok(messages)
+    Ok((messages, page.next))
 }
 
 /// Pushes unsent events into the send queue (for the stdio transport).
@@ -445,12 +461,19 @@ pub(crate) async fn push_outbox(
     state: &DaemonState,
     out: &mpsc::Sender<NodeToHubMsg>,
 ) -> anyhow::Result<()> {
-    for message in outbox_messages(state).await? {
-        if out.send(message).await.is_err() {
-            anyhow::bail!("outbox sink closed");
+    let mut cursor = None;
+    loop {
+        let (messages, next) = outbox_page(state, cursor.as_ref()).await?;
+        for message in messages {
+            if out.send(message).await.is_err() {
+                anyhow::bail!("outbox sink closed");
+            }
+        }
+        match next {
+            Some(next) => cursor = Some(next),
+            None => return Ok(()),
         }
     }
-    Ok(())
 }
 
 /// Sends all unsent events (after `synced_up_to_node_seq`).
@@ -463,10 +486,53 @@ async fn flush_outbox(
         WsMessage,
     >,
 ) -> anyhow::Result<()> {
-    for message in outbox_messages(state).await? {
-        send_msg(sender, &message).await?;
+    let mut cursor = None;
+    loop {
+        let (messages, next) = outbox_page(state, cursor.as_ref()).await?;
+        for message in messages {
+            send_msg(sender, &message).await?;
+        }
+        match next {
+            Some(next) => cursor = Some(next),
+            None => return Ok(()),
+        }
     }
-    Ok(())
+}
+
+/// Resends every event of one session from `from_node_seq` onward, one page at a
+/// time (`ResyncRequest`).
+async fn resync_session(
+    state: &DaemonState,
+    out: &mpsc::Sender<NodeToHubMsg>,
+    session_id: &str,
+    from_node_seq: u64,
+) -> anyhow::Result<()> {
+    let mut from = from_node_seq;
+    loop {
+        let events = state
+            .db()
+            .extract_outbox_after(session_id, from, OUTBOX_PAGE_EVENTS)
+            .await?;
+        let Some(last) = events.last().map(|event| event.node_seq) else {
+            return Ok(());
+        };
+        for chunk in events.chunks(OUTBOX_BATCH_EVENTS) {
+            if out
+                .send(NodeToHubMsg::EventBatchPush {
+                    events: chunk.to_vec(),
+                    resync: true,
+                })
+                .await
+                .is_err()
+            {
+                anyhow::bail!("outbox sink closed");
+            }
+        }
+        if last == u64::MAX {
+            return Ok(());
+        }
+        from = last + 1;
+    }
 }
 
 /// Sends a single message over the WS.
@@ -513,31 +579,14 @@ pub(crate) async fn handle_server_message(
         }
         HubToNodeMsg::ResyncRequest { sessions } => {
             for target in sessions {
-                match state
-                    .db()
-                    .extract_outbox_after(target.session_id.as_str(), target.from_node_seq)
-                    .await
+                if let Err(err) =
+                    resync_session(state, out, target.session_id.as_str(), target.from_node_seq)
+                        .await
                 {
-                    Ok(events) => {
-                        for chunk in events.chunks(OUTBOX_BATCH_EVENTS) {
-                            if out
-                                .send(NodeToHubMsg::EventBatchPush {
-                                    events: chunk.to_vec(),
-                                    resync: true,
-                                })
-                                .await
-                                .is_err()
-                            {
-                                return Ok(());
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        tracing::warn!(
-                            session_id = target.session_id.as_str(),
-                            "failed to load events for resync: {err}"
-                        );
-                    }
+                    tracing::warn!(
+                        session_id = target.session_id.as_str(),
+                        "failed to load events for resync: {err}"
+                    );
                 }
             }
         }

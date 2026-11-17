@@ -125,15 +125,25 @@ macro_rules! discard_with {
 ///
 /// The inner future must resolve to `Result<(), E>` where `E: Display`.
 ///
+/// Aborting the returned handle also aborts the inner future.
+///
 /// ```ignore
 /// fxg_protocol::spawn_logged!("outbox sync", run(state, url, token, shutdown));
 /// ```
 #[macro_export]
 macro_rules! spawn_logged {
     ($name:expr, $future:expr $(,)?) => {{
+        // Abort the guarded future when the returned handle is aborted.
+        struct AbortOnDrop<T>(::tokio::task::JoinHandle<T>);
+        impl<T> ::std::ops::Drop for AbortOnDrop<T> {
+            fn drop(&mut self) {
+                self.0.abort();
+            }
+        }
         let future = $future;
         ::tokio::spawn(async move {
-            match ::tokio::spawn(future).await {
+            let mut inner = AbortOnDrop(::tokio::spawn(future));
+            match (&mut inner.0).await {
                 Ok(Ok(())) => {}
                 Ok(Err(err)) => {
                     ::tracing::error!(task = $name, "background task failed: {err}");
@@ -156,15 +166,25 @@ macro_rules! spawn_logged {
 /// `Result<(), E>`, use [`spawn_logged!`](crate::spawn_logged) instead so the
 /// error is logged as well.
 ///
+/// Aborting the returned handle also aborts the inner future.
+///
 /// ```ignore
 /// fxg_protocol::spawn_guarded!("tray event loop", run_tray(rx));
 /// ```
 #[macro_export]
 macro_rules! spawn_guarded {
     ($name:expr, $future:expr $(,)?) => {{
+        // Abort the guarded future when the returned handle is aborted.
+        struct AbortOnDrop<T>(::tokio::task::JoinHandle<T>);
+        impl<T> ::std::ops::Drop for AbortOnDrop<T> {
+            fn drop(&mut self) {
+                self.0.abort();
+            }
+        }
         let future = $future;
         ::tokio::spawn(async move {
-            if let Err(join) = ::tokio::spawn(future).await {
+            let mut inner = AbortOnDrop(::tokio::spawn(future));
+            if let Err(join) = (&mut inner.0).await {
                 ::tracing::error!(
                     task = $name,
                     panic = join.is_panic(),
@@ -178,6 +198,38 @@ macro_rules! spawn_guarded {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn spawn_guarded_abort_reaches_the_guarded_future() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct DropFlag(Arc<AtomicBool>);
+        impl Drop for DropFlag {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let dropped = Arc::new(AtomicBool::new(false));
+        let flag = DropFlag(Arc::clone(&dropped));
+        let handle = crate::spawn_guarded!("abort propagation test", async move {
+            let _flag = flag;
+            std::future::pending::<()>().await;
+        });
+        handle.abort();
+        let _join = handle.await;
+        for _ in 0..10 {
+            if dropped.load(Ordering::SeqCst) {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "aborting the handle must drop the guarded future"
+        );
+    }
 
     #[test]
     fn pty_output_log_assigns_monotonic_sequence_numbers() {

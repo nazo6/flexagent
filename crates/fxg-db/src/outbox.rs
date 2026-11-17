@@ -37,22 +37,70 @@ impl SessionOutboxBatch {
     }
 }
 
-/// Extracts unsent events grouped by session.
-pub async fn extract_outbox(pool: &SqlitePool) -> Result<Vec<SessionOutboxBatch>, DbError> {
+/// Keyset cursor for paged outbox extraction (`(session_id, node_seq)` ascending).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutboxCursor {
+    /// Session ID of the last extracted event.
+    pub session_id: String,
+    /// `node_seq` of the last extracted event.
+    pub node_seq: u64,
+}
+
+/// One page of unsent events grouped by session.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OutboxPage {
+    /// Unsent events in `(session_id, node_seq)` order.
+    pub batches: Vec<SessionOutboxBatch>,
+    /// Cursor to continue from; `None` when the unsent log is exhausted.
+    pub next: Option<OutboxCursor>,
+}
+
+/// Extracts up to `limit` unsent events after `after`, grouped by session.
+///
+/// Paging keeps a long offline backlog from being materialized in memory at once.
+/// Callers repeat with [`OutboxPage::next`] until it is `None`. A page may end in
+/// the middle of a session; the next page continues that session.
+pub async fn extract_outbox_page(
+    pool: &SqlitePool,
+    after: Option<&OutboxCursor>,
+    limit: u32,
+) -> Result<OutboxPage, DbError> {
+    let limit = limit.max(1);
+    // Session IDs are non-empty UUIDs and `node_seq` starts at 1, so `("", 0)` is
+    // before every row. A concrete value keeps the row-value comparison
+    // index-friendly; a `? IS NULL OR ...` form would force a full index scan
+    // for every page.
+    let after_session = after.map_or("", |cursor| cursor.session_id.as_str());
+    let after_node_seq = after.map_or(0, |cursor| cursor.node_seq);
+    let after_node_seq = i64::try_from(after_node_seq).map_err(|_| DbError::NodeSeqOutOfRange {
+        session_id: after_session.to_owned(),
+        node_seq: after_node_seq,
+    })?;
     let rows = sqlx::query!(
         r#"
         SELECT e.event_id, e.session_id, e.node_seq, e.payload_json, e.created_at
           FROM session_events e
           JOIN sessions s ON s.session_id = e.session_id
          WHERE e.node_seq > s.synced_up_to_node_seq
+           AND (e.session_id, e.node_seq) > (?, ?)
          ORDER BY e.session_id ASC, e.node_seq ASC
+         LIMIT ?
         "#,
+        after_session,
+        after_node_seq,
+        i64::from(limit),
     )
     .fetch_all(pool)
     .await?;
 
+    let full_page = rows.len() >= usize::try_from(limit).unwrap_or(usize::MAX);
     let mut batches: Vec<SessionOutboxBatch> = Vec::new();
+    let mut next = None;
     for row in rows {
+        let cursor = OutboxCursor {
+            session_id: row.session_id.clone(),
+            node_seq: u64::try_from(row.node_seq).unwrap_or(0),
+        };
         let envelope = envelope_from_row(
             row.event_id,
             row.session_id,
@@ -69,17 +117,24 @@ pub async fn extract_outbox(pool: &SqlitePool) -> Result<Vec<SessionOutboxBatch>
                 events: vec![envelope],
             }),
         }
+        next = Some(cursor);
     }
-    Ok(batches)
+    Ok(OutboxPage {
+        batches,
+        next: if full_page { next } else { None },
+    })
 }
 
 /// For `ResyncRequest`: extracts events of the given session from `from_node_seq`
 /// onward (`>=`) regardless of the watermark (`from_node_seq = 1` resends everything
 /// including `SessionCreated`).
+///
+/// Returns at most `limit` events; callers continue from the last `node_seq + 1`.
 pub async fn extract_outbox_after(
     pool: &SqlitePool,
     session_id: &str,
     from_node_seq: u64,
+    limit: u32,
 ) -> Result<Vec<SessionEventEnvelope>, DbError> {
     let from = i64::try_from(from_node_seq).map_err(|_| DbError::NodeSeqOutOfRange {
         session_id: session_id.to_owned(),
@@ -91,9 +146,11 @@ pub async fn extract_outbox_after(
           FROM session_events
          WHERE session_id = ? AND node_seq >= ?
          ORDER BY node_seq ASC
+         LIMIT ?
         "#,
         session_id,
         from,
+        i64::from(limit.max(1)),
     )
     .fetch_all(pool)
     .await?;
