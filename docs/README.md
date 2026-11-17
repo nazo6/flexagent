@@ -84,8 +84,9 @@ flexagent/
 │   ├── fxg-db/                 # SQLiteスキーマ管理・クエリレイヤー (hub.db / node.db 共用・分離)
 │   ├── fxg-pty/                # ConPTY/Unix PTY・Windows Job Object・プロセスツリー管理
 │   ├── fxg-agent/                # ACP Driver（extension 込） / ACP Registry / OpenCodeNativeDriver・AgentCatalog・ローカル PATH コマンド解決
-│   ├── fxg-node/               # ノード実装 (ローカルWeb/WS配信・Web Push・Outbox同期・Project解決)
-│   ├── fxg-hub/                # ハブ実装 (Axum・ノード管理・イベント集約・Web Push・PWA配信)
+│   ├── fxg-api/                # Client API 共通層 (REST/WS/PTY ルーター・ClientApiBackend・Web Push・静的UI配信)
+│   ├── fxg-node/               # ノード実装 (ローカルWeb/WS配信・Outbox同期・Project解決)
+│   ├── fxg-hub/                # ハブ実装 (Axum・ノード管理・イベント集約・プロビジョナー)
 │   ├── fxg-ui-assets/          # `ui/build` を rust-embed でバイナリに同梱
 │   └── fxg-cli/                # `fxg` バイナリエントリポイント (CLI / node / hub サブコマンド・Web UI自動オープン)
 └── ui/                         # 共通フロントエンド (SvelteKit / Svelte 5 SPA + TypeScript + Tailwind v4 + shadcn-svelte)

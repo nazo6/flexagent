@@ -480,7 +480,7 @@ async fn node_logging_to_custom_file_and_no_color() {
 
     // Verify that the log is written to custom_node.log (daily rotation appends
     // the date) and contains no ANSI escapes
-    let rotated_log_path = fxg_hub::api::resolve_log_file(&custom_log_path);
+    let rotated_log_path = fxg_api::resolve_log_file(&custom_log_path);
     assert!(
         rotated_log_path.exists(),
         "custom log file must exist: {}",

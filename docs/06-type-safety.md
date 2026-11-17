@@ -1,8 +1,8 @@
 # 型安全性ガイド (`serde_json::Value` / 文字列判定の禁止)
 
 - **日付**: 2026-11-08
-- **対象**: `fxg-protocol`, `fxg-db`, `fxg-agent`, `fxg-node`, `fxg-hub`,
-  `fxg-cli`, `ui`
+- **対象**: `fxg-protocol`, `fxg-db`, `fxg-agent`, `fxg-api`, `fxg-node`,
+  `fxg-hub`, `fxg-cli`, `ui`
 - **関連**: [`docs/proposals/2026-11-08-type-safety-plan.md`](./proposals/2026-11-08-type-safety-plan.md)
 
 ---

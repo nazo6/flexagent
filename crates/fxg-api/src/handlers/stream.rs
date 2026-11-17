@@ -3,7 +3,7 @@
 use axum::extract::{State, WebSocketUpgrade};
 use axum::response::Response;
 
-use crate::api::{ClientApiBackend, ClientApiState, pty, ws};
+use crate::{ClientApiBackend, ClientApiState, pty, ws};
 
 /// Client WS messages may carry inline attachments (base64 images).
 const CLIENT_WS_MAX_MESSAGE: usize = 16 * 1024 * 1024;

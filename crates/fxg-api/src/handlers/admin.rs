@@ -7,7 +7,7 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use fxg_protocol::client_api::{IssueNodeTokenRequest, KillSwitchRequest, PushSubscribeRequest};
 
-use crate::api::{ClientApiBackend, ClientApiState, ClientInfo};
+use crate::{ClientApiBackend, ClientApiState, ClientInfo};
 
 pub(crate) async fn rotate_auth_token<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,

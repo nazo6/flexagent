@@ -17,9 +17,9 @@ use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 
 use fxg_agent::AgentCatalog;
+use fxg_api::ClientEvent;
+use fxg_api::push::{PushService, RunningTurns};
 use fxg_db::Db;
-use fxg_hub::api::ClientEvent;
-use fxg_hub::push::{PushService, RunningTurns};
 use fxg_protocol::client_api::{HubLinkState, HubLinkStatus};
 use fxg_protocol::paths::{Paths, Role};
 use fxg_protocol::settings::{AgentSettings, NodeSettings};
@@ -231,7 +231,7 @@ struct Inner {
     hello_refresh: tokio::sync::Notify,
 
     /// Process-local delivery counters exposed by diagnostics
-    diagnostics_counters: std::sync::Arc<fxg_hub::api::DiagnosticsCounters>,
+    diagnostics_counters: std::sync::Arc<fxg_api::DiagnosticsCounters>,
     /// Shutdown sender used by `POST /api/v1/system/shutdown` (set at startup)
     shutdown_tx: std::sync::OnceLock<watch::Sender<bool>>,
 }
@@ -358,7 +358,7 @@ impl DaemonState {
                 hub_target: watch::channel(None).0,
                 sessions_truncated: std::sync::atomic::AtomicBool::new(false),
                 hello_refresh: tokio::sync::Notify::new(),
-                diagnostics_counters: std::sync::Arc::new(fxg_hub::api::DiagnosticsCounters::new()),
+                diagnostics_counters: std::sync::Arc::new(fxg_api::DiagnosticsCounters::new()),
                 shutdown_tx: std::sync::OnceLock::new(),
             }),
         };
@@ -375,7 +375,7 @@ impl DaemonState {
             loop {
                 match bus_rx.recv().await {
                     Ok(crate::session::SessionBroadcast::Persisted { event, cursor }) => {
-                        fxg_hub::push::dispatch_notifications(
+                        fxg_api::push::dispatch_notifications(
                             &push,
                             &push_db,
                             &running_turns,
@@ -400,8 +400,8 @@ impl DaemonState {
                     // Ephemeral events (keystrokes etc.) are delivered over the PTY WS
                     Ok(crate::session::SessionBroadcast::Ephemeral(_)) => {}
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        counters.add(fxg_hub::api::CounterKind::DroppedEvents, skipped);
-                        counters.incr(fxg_hub::api::CounterKind::LaggedBroadcasts);
+                        counters.add(fxg_api::CounterKind::DroppedEvents, skipped);
+                        counters.incr(fxg_api::CounterKind::LaggedBroadcasts);
                         tracing::debug!(skipped, "client event forwarder lagged");
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
@@ -438,12 +438,12 @@ impl DaemonState {
     }
 
     /// Process-local delivery counters exposed by diagnostics.
-    pub fn diagnostics_counters(&self) -> &fxg_hub::api::DiagnosticsCounters {
+    pub fn diagnostics_counters(&self) -> &fxg_api::DiagnosticsCounters {
         &self.inner.diagnostics_counters
     }
 
     /// Shared counter handle for spawned tasks.
-    pub fn diagnostics_counters_arc(&self) -> std::sync::Arc<fxg_hub::api::DiagnosticsCounters> {
+    pub fn diagnostics_counters_arc(&self) -> std::sync::Arc<fxg_api::DiagnosticsCounters> {
         std::sync::Arc::clone(&self.inner.diagnostics_counters)
     }
 
@@ -930,7 +930,7 @@ impl NodeDaemon {
         });
 
         // Request shutdown on Ctrl-C
-        fxg_hub::spawn_ctrl_c_handler(shutdown_tx.clone());
+        fxg_api::shutdown::spawn_ctrl_c_handler(shutdown_tx.clone());
 
         // Outbox sync worker (idle while standalone; reconnects when the pairing changes)
         if let Err(err) = state.refresh_hub_target().await {
@@ -1013,9 +1013,9 @@ impl NodeDaemon {
         }
 
         let task_timeout = std::time::Duration::from_secs(3);
-        fxg_hub::await_shutdown_task("http", self.http_task, task_timeout).await;
+        fxg_api::shutdown::await_shutdown_task("http", self.http_task, task_timeout).await;
         if let Some(sync_task) = self.sync_task {
-            fxg_hub::await_shutdown_task("sync", sync_task, task_timeout).await;
+            fxg_api::shutdown::await_shutdown_task("sync", sync_task, task_timeout).await;
         }
         tracing::info!("fxg node start stopped");
     }
@@ -1377,7 +1377,7 @@ mod tests {
 
     #[tokio::test]
     async fn opening_the_same_workspace_reuses_the_terminal() {
-        use fxg_hub::api::ClientApiBackend as _;
+        use fxg_api::ClientApiBackend as _;
 
         let (daemon, dir) = start_test_daemon().await;
         let workdir = dir.path().join("workspace");
@@ -1388,7 +1388,7 @@ mod tests {
             .await
             .expect("register project");
         let path = workdir.to_string_lossy().into_owned();
-        let params = fxg_hub::api::PtyOpenParams {
+        let params = fxg_api::PtyOpenParams {
             pty_id: "pty-a".to_owned(),
             node_id: daemon.state().node_id().into(),
             path: path.clone(),
@@ -1404,7 +1404,7 @@ mod tests {
         assert!(!first.attached);
         let second = daemon
             .state()
-            .pty_open(fxg_hub::api::PtyOpenParams {
+            .pty_open(fxg_api::PtyOpenParams {
                 pty_id: "pty-b".to_owned(),
                 ..params
             })
@@ -1432,7 +1432,7 @@ mod tests {
 
     #[tokio::test]
     async fn different_terminal_ids_open_separate_shells() {
-        use fxg_hub::api::ClientApiBackend as _;
+        use fxg_api::ClientApiBackend as _;
 
         let (daemon, dir) = start_test_daemon().await;
         let workdir = dir.path().join("workspace");
@@ -1442,7 +1442,7 @@ mod tests {
             .resolve_and_register_project(&workdir)
             .await
             .expect("register project");
-        let params = fxg_hub::api::PtyOpenParams {
+        let params = fxg_api::PtyOpenParams {
             pty_id: "pty-a".to_owned(),
             node_id: daemon.state().node_id().into(),
             path: workdir.to_string_lossy().into_owned(),
@@ -1461,7 +1461,7 @@ mod tests {
             .expect("open first");
         let second = daemon
             .state()
-            .pty_open(fxg_hub::api::PtyOpenParams {
+            .pty_open(fxg_api::PtyOpenParams {
                 pty_id: "pty-b".to_owned(),
                 terminal_id: Some("tab-2".to_owned()),
                 ..params.clone()
@@ -1475,7 +1475,7 @@ mod tests {
 
         let reopened = daemon
             .state()
-            .pty_open(fxg_hub::api::PtyOpenParams {
+            .pty_open(fxg_api::PtyOpenParams {
                 pty_id: "pty-c".to_owned(),
                 ..params
             })

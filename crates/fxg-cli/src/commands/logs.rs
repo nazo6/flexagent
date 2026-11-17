@@ -64,7 +64,7 @@ impl usage::RunAsync for LogsArgs {
             return Ok(());
         }
 
-        let mut path = fxg_hub::api::resolve_log_file(&paths.log_path());
+        let mut path = fxg_api::resolve_log_file(&paths.log_path());
         if !path.exists() {
             println!("({target} log not found: {})", path.display());
             return Ok(());
@@ -100,7 +100,7 @@ impl usage::RunAsync for LogsArgs {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             // Daily rotation may switch to a new file at midnight.
-            let current = fxg_hub::api::resolve_log_file(&paths.log_path());
+            let current = fxg_api::resolve_log_file(&paths.log_path());
             if current != path {
                 path = current;
                 file = std::fs::File::open(&path)

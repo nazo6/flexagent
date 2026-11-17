@@ -7,8 +7,8 @@ use axum::response::{IntoResponse, Response};
 use fxg_protocol::client_api::{AuthLoginRequest, MetaResponse, SystemInfoResponse};
 use fxg_protocol::common::ErrorCode;
 
-use crate::api::auth::token_matches;
-use crate::api::{ApiError, ClientApiBackend, ClientApiState};
+use crate::auth::token_matches;
+use crate::{ApiError, ClientApiBackend, ClientApiState};
 
 /// `GET /api/v1/meta`: connection metadata that needs no authentication.
 ///

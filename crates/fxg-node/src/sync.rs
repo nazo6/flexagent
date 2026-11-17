@@ -143,7 +143,7 @@ async fn run(
             Err(err) => {
                 state
                     .diagnostics_counters()
-                    .incr(fxg_hub::api::CounterKind::OutboxRetries);
+                    .incr(fxg_api::CounterKind::OutboxRetries);
                 let (link_state, message) = classify_failure(&err);
                 tracing::warn!(url = %target.ws_url, "hub connection failed: {message}");
                 state.set_hub_link(HubLinkStatus::new(
@@ -324,10 +324,10 @@ async fn connect_once(
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                     state
                         .diagnostics_counters()
-                        .add(fxg_hub::api::CounterKind::DroppedEvents, skipped);
+                        .add(fxg_api::CounterKind::DroppedEvents, skipped);
                     state
                         .diagnostics_counters()
-                        .incr(fxg_hub::api::CounterKind::LaggedBroadcasts);
+                        .incr(fxg_api::CounterKind::LaggedBroadcasts);
                     // Recover missed events from the Outbox (watermark based)
                     tracing::warn!(skipped, "session bus lagged; flushing outbox");
                     flush_outbox(state, &mut sender).await?;
@@ -915,9 +915,9 @@ async fn handle_remote_pty_spawn(
     rows: u16,
     new: bool,
 ) {
-    use fxg_hub::api::ClientApiBackend as _;
+    use fxg_api::ClientApiBackend as _;
 
-    let params = fxg_hub::api::PtyOpenParams {
+    let params = fxg_api::PtyOpenParams {
         pty_id: pty_id.clone(),
         node_id: state.node_id().into(),
         path,

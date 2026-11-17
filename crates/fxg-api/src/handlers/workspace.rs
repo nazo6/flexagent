@@ -12,7 +12,7 @@ use fxg_protocol::client_api::{WorkspaceFsQuery, WorkspaceGitDiffQuery, Workspac
 use fxg_protocol::common::DiffScope;
 use fxg_protocol::node_hub::{NodeRpcRequest, NodeRpcResponse};
 
-use crate::api::{ApiError, ClientApiBackend, ClientApiState, ClientInfo};
+use crate::{ApiError, ClientApiBackend, ClientApiState, ClientInfo};
 
 pub(crate) async fn workspace_fs_list<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,

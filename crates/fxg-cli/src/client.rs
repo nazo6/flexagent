@@ -171,7 +171,7 @@ async fn node_ready(base: &str) -> bool {
     let Ok(client) = probe_client() else {
         return false;
     };
-    let Ok(token) = fxg_hub::api::auth::load_or_create_token(&token_path()) else {
+    let Ok(token) = fxg_api::auth::load_or_create_token(&token_path()) else {
         return false;
     };
     let Ok(response) = client
@@ -242,7 +242,7 @@ impl NodeClient {
     }
 
     async fn from_base(base: String) -> Result<Self> {
-        let token = fxg_hub::api::auth::load_or_create_token(&token_path())
+        let token = fxg_api::auth::load_or_create_token(&token_path())
             .context("failed to load <data>/node/auth_token")?;
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(60))
@@ -583,7 +583,7 @@ impl NodeClient {
     /// `fxg node access-token show` / `fxg node access-token rotate`
     pub async fn auth_token(&mut self, rotate: bool) -> Result<String> {
         if !rotate {
-            return fxg_hub::api::auth::load_or_create_token(&token_path())
+            return fxg_api::auth::load_or_create_token(&token_path())
                 .context("failed to load <data>/node/auth_token");
         }
         let response: RotateAuthTokenResponse = self

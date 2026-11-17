@@ -12,7 +12,7 @@ use fxg_protocol::client_api::{
 };
 use fxg_protocol::settings::ProvisionerDefinition;
 
-use crate::api::{ApiError, ClientApiBackend, ClientApiState, ClientInfo};
+use crate::{ApiError, ClientApiBackend, ClientApiState, ClientInfo};
 
 pub(crate) async fn list_projects<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,

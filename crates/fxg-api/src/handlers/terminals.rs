@@ -11,7 +11,7 @@ use axum::response::{IntoResponse, Response};
 use fxg_protocol::client_api::TerminalsQuery;
 use fxg_protocol::node_hub::{NodeRpcRequest, NodeRpcResponse};
 
-use crate::api::{ApiError, ClientApiBackend, ClientApiState, ClientInfo};
+use crate::{ApiError, ClientApiBackend, ClientApiState, ClientInfo};
 
 pub(crate) async fn list_terminals<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,

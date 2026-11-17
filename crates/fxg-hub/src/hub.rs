@@ -24,6 +24,11 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
+use fxg_api::auth::{hash_token, token_matches};
+use fxg_api::{
+    ApiError, ClientEvent, PtyChannelError, PtyChannelEvent, PtyOpenOutcome, PtyOpenParams,
+    send_ws_json,
+};
 use fxg_db::Db;
 use fxg_protocol::common::{CommandResult, ErrorCode};
 use fxg_protocol::node_hub::{HubToNodeMsg, NodeToHubMsg, ResyncTarget};
@@ -31,11 +36,6 @@ use fxg_protocol::util::{PtyOutputLog, uuid_v7};
 use fxg_protocol::{CommandId, NodeId};
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc, oneshot};
 
-use crate::api::auth::{hash_token, token_matches};
-use crate::api::{
-    ApiError, ClientEvent, PtyChannelError, PtyChannelEvent, PtyOpenOutcome, PtyOpenParams,
-    send_ws_json,
-};
 use crate::state::HubState;
 
 /// Timeout for the handshake (`NodeHello`) after a node connects.
@@ -807,7 +807,7 @@ impl NodeHub {
             let (data, next_seq) = route.log.lock().await.snapshot();
             (live, data, next_seq)
         };
-        Some(crate::api::subscribe_with_replay(live, data, next_seq))
+        Some(fxg_api::subscribe_with_replay(live, data, next_seq))
     }
 
     /// Relays a message to the node that owns the PTY.
@@ -878,7 +878,7 @@ pub(crate) async fn node_ws(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let Some(provided) = crate::api::header_str(&headers, header::AUTHORIZATION)
+    let Some(provided) = fxg_api::header_str(&headers, header::AUTHORIZATION)
         .and_then(|value| value.strip_prefix("Bearer "))
         .map(str::trim)
         .filter(|token| !token.is_empty())
@@ -1777,7 +1777,7 @@ async fn apply_event_batch(
     // Sent asynchronously so they do not block the ACK. Historical events replayed during a
     // resync still update the running-turn state but never wake up devices
     // (`push::notification_events`).
-    crate::push::dispatch_notifications(
+    fxg_api::push::dispatch_notifications(
         state.push(),
         state.db(),
         state.running_turns(),

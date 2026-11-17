@@ -13,18 +13,17 @@
 
 use std::sync::Arc;
 
+use fxg_api::push::{PushService, RunningTurns};
+use fxg_api::{ApiError, ClientApiBackend, ClientEvent, ClientInfo, auth};
 use fxg_db::Db;
+use fxg_protocol::NodeId;
 use fxg_protocol::node_hub::{NodeRpcRequest, NodeRpcResponse};
 use fxg_protocol::paths::{Paths, Role};
 use tokio::sync::{broadcast, watch};
 
-use crate::api::{ApiError, ClientApiBackend, ClientEvent, ClientInfo, auth};
 use crate::error::HubError;
 use crate::hub::NodeHub;
 use crate::provisioner::ProvisionerManager;
-use crate::push::{PushService, RunningTurns};
-
-use fxg_protocol::NodeId;
 
 /// Broadcast capacity for Client WS / Node Hub delivery.
 const CLIENT_EVENT_CAPACITY: usize = 2048;
@@ -61,7 +60,7 @@ struct HubInner {
     /// Sessions whose current turn has been observed as `Running` (completion notifications).
     running_turns: RunningTurns,
     provisioners: ProvisionerManager,
-    diagnostics_counters: std::sync::Arc<crate::api::DiagnosticsCounters>,
+    diagnostics_counters: std::sync::Arc<fxg_api::DiagnosticsCounters>,
     /// Shutdown sender used by `POST /api/v1/system/shutdown` (set at startup)
     shutdown_tx: std::sync::OnceLock<watch::Sender<bool>>,
 }
@@ -124,7 +123,7 @@ impl HubState {
                 push,
                 running_turns,
                 provisioners,
-                diagnostics_counters: std::sync::Arc::new(crate::api::DiagnosticsCounters::new()),
+                diagnostics_counters: std::sync::Arc::new(fxg_api::DiagnosticsCounters::new()),
                 shutdown_tx: std::sync::OnceLock::new(),
             }),
         })
@@ -165,12 +164,12 @@ impl HubState {
     }
 
     /// Process-local delivery counters exposed by diagnostics.
-    pub fn diagnostics_counters(&self) -> &crate::api::DiagnosticsCounters {
+    pub fn diagnostics_counters(&self) -> &fxg_api::DiagnosticsCounters {
         &self.inner.diagnostics_counters
     }
 
     /// Shared counter handle for spawned tasks.
-    pub fn diagnostics_counters_arc(&self) -> std::sync::Arc<crate::api::DiagnosticsCounters> {
+    pub fn diagnostics_counters_arc(&self) -> std::sync::Arc<fxg_api::DiagnosticsCounters> {
         std::sync::Arc::clone(&self.inner.diagnostics_counters)
     }
 

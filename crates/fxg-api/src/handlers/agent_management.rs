@@ -5,7 +5,7 @@ use axum::extract::{Path as UrlPath, State};
 use axum::response::{IntoResponse, Response};
 use fxg_protocol::client_api::{AgentMcpAction, AgentMcpDefinition};
 
-use crate::api::{ClientApiBackend, ClientApiState};
+use crate::{ClientApiBackend, ClientApiState};
 
 pub(crate) async fn management<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
@@ -25,7 +25,7 @@ pub(crate) async fn mcp_action<B: ClientApiBackend>(
         "connect" => AgentMcpAction::Connect,
         "disconnect" => AgentMcpAction::Disconnect,
         _ => {
-            return crate::api::ApiError::from_code(
+            return crate::ApiError::from_code(
                 fxg_protocol::common::ErrorCode::InvalidState,
                 format!("unknown agent MCP action: {action}"),
             )

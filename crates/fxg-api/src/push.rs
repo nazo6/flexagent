@@ -467,14 +467,14 @@ impl RunningTurns {
 pub async fn register_subscription(
     db: &Db,
     request: &fxg_protocol::client_api::PushSubscribeRequest,
-    client: &crate::api::ClientInfo,
-) -> Result<fxg_protocol::client_api::PushSubscribeResponse, crate::api::ApiError> {
+    client: &crate::ClientInfo,
+) -> Result<fxg_protocol::client_api::PushSubscribeResponse, crate::ApiError> {
     if request.endpoint.trim().is_empty() {
-        return Err(crate::api::ApiError::bad_request("endpoint is required"));
+        return Err(crate::ApiError::bad_request("endpoint is required"));
     }
     validate_push_endpoint(&request.endpoint)
         .await
-        .map_err(crate::api::ApiError::bad_request)?;
+        .map_err(crate::ApiError::bad_request)?;
     let record = PushSubscriptionRecord {
         endpoint: request.endpoint.clone(),
         p256dh: request.p256dh.clone(),
@@ -483,7 +483,7 @@ pub async fn register_subscription(
     };
     fxg_db::push::upsert_push_subscription(db.pool(), &record)
         .await
-        .map_err(crate::api::ApiError::from)?;
+        .map_err(crate::ApiError::from)?;
     tracing::info!(
         endpoint = %endpoint_label(&record.endpoint),
         device = record.device_name.as_deref().unwrap_or("unknown"),
@@ -501,7 +501,7 @@ pub fn dispatch_notifications(
     running: &RunningTurns,
     events: &[fxg_protocol::events::SessionEventEnvelope],
     resync: bool,
-    counters: Option<Arc<crate::api::DiagnosticsCounters>>,
+    counters: Option<Arc<crate::DiagnosticsCounters>>,
 ) {
     let notify_events = notification_events(events, running, resync);
     if notify_events.is_empty() {
@@ -569,7 +569,7 @@ async fn send_to_subscriptions(
     db: &Db,
     subscriptions: &[PushSubscriptionRecord],
     payload: &PushNotificationPayload,
-    counters: Option<&crate::api::DiagnosticsCounters>,
+    counters: Option<&crate::DiagnosticsCounters>,
 ) {
     for subscription in subscriptions {
         match push.send(subscription, payload).await {
@@ -584,7 +584,7 @@ async fn send_to_subscriptions(
             }
             Err(err) => {
                 if let Some(counters) = counters {
-                    counters.incr(crate::api::CounterKind::PushFailures);
+                    counters.incr(crate::CounterKind::PushFailures);
                 }
                 tracing::warn!(endpoint = %endpoint_label(&subscription.endpoint), "push send failed: {err}");
             }
@@ -600,7 +600,7 @@ pub async fn notify_permission_requests(
     push: &PushService,
     db: &Db,
     events: &[fxg_protocol::events::SessionEventEnvelope],
-    counters: Option<&crate::api::DiagnosticsCounters>,
+    counters: Option<&crate::DiagnosticsCounters>,
 ) {
     use fxg_protocol::events::UnifiedEventPayload;
 
@@ -678,7 +678,7 @@ pub async fn notify_elicitations(
     push: &PushService,
     db: &Db,
     events: &[fxg_protocol::events::SessionEventEnvelope],
-    counters: Option<&crate::api::DiagnosticsCounters>,
+    counters: Option<&crate::DiagnosticsCounters>,
 ) {
     use fxg_protocol::events::UnifiedEventPayload;
 
@@ -741,7 +741,7 @@ pub async fn notify_turn_finished(
     push: &PushService,
     db: &Db,
     events: &[fxg_protocol::events::SessionEventEnvelope],
-    counters: Option<&crate::api::DiagnosticsCounters>,
+    counters: Option<&crate::DiagnosticsCounters>,
 ) {
     use fxg_protocol::common::SessionStatus;
     use fxg_protocol::events::UnifiedEventPayload;

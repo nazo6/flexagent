@@ -256,7 +256,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     /// Executes a generic node operation.
     ///
     /// A local node executes the operation in-process; the hub relays
-    /// it through [`NodeHub`](crate::hub::NodeHub). `client` is used by a local
+    /// it through the hub's `NodeHub`. `client` is used by a local
     /// node as the audit source and ignored by the hub (the node records the
     /// relayed operation itself).
     async fn execute_node_rpc(

@@ -1620,6 +1620,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "fxg-api"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64 0.23.1",
+ "fs4",
+ "futures-util",
+ "fxg-db",
+ "fxg-protocol",
+ "fxg-ui-assets",
+ "http",
+ "rand 0.10.3",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tower",
+ "tracing",
+ "web-push-native",
+]
+
+[[package]]
 name = "fxg-cli"
 version = "0.1.0"
 dependencies = [
@@ -1628,6 +1654,7 @@ dependencies = [
  "dunce",
  "futures-util",
  "fxg-agent",
+ "fxg-api",
  "fxg-db",
  "fxg-hub",
  "fxg-node",
@@ -1673,26 +1700,22 @@ dependencies = [
  "axum",
  "base64 0.23.1",
  "dirs 7.0.0",
- "fs4",
  "futures-util",
+ "fxg-api",
  "fxg-db",
  "fxg-protocol",
  "fxg-pty",
- "fxg-ui-assets",
  "http",
  "http-body-util",
- "rand 0.10.3",
  "reqwest",
  "serde",
  "serde_json",
- "sha2 0.11.1",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-tungstenite 0.30.0",
  "tower",
  "tracing",
- "web-push-native",
 ]
 
 [[package]]
@@ -1707,6 +1730,7 @@ dependencies = [
  "dunce",
  "futures-util",
  "fxg-agent",
+ "fxg-api",
  "fxg-db",
  "fxg-hub",
  "fxg-protocol",

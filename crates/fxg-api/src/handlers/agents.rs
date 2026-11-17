@@ -8,7 +8,7 @@ use fxg_protocol::client_api::{ImportRegistryAgentRequest, ProbeAgentRequest};
 use fxg_protocol::common::AgentAction;
 use fxg_protocol::settings::CustomAgentConfig;
 
-use crate::api::{ClientApiBackend, ClientApiState, ClientInfo};
+use crate::{ClientApiBackend, ClientApiState, ClientInfo};
 
 pub(crate) async fn list_agents<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,

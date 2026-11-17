@@ -11,7 +11,7 @@ use fxg_protocol::settings::{
 };
 use fxg_protocol::{NodeId, SecretId};
 
-use crate::api::{ApiError, ClientApiBackend, ClientApiState, ClientInfo};
+use crate::{ApiError, ClientApiBackend, ClientApiState, ClientInfo};
 
 // ----------------------------------------------------------------------
 // Settings, secrets and project profiles

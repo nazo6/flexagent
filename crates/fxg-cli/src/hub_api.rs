@@ -28,10 +28,9 @@ impl HubClient {
     /// `hub.toml` `listen_addr`.
     pub async fn local(env: EnvLookup<'_>, hub: Option<&str>) -> Result<Self> {
         let base = resolve_hub_base(env, hub).await?;
-        let token = fxg_hub::api::auth::load_or_create_token(
-            &Paths::resolve(env, Role::Hub).auth_token_path(),
-        )
-        .context("failed to load the hub's auth_token")?;
+        let token =
+            fxg_api::auth::load_or_create_token(&Paths::resolve(env, Role::Hub).auth_token_path())
+                .context("failed to load the hub's auth_token")?;
         Ok(Self {
             base,
             token,
