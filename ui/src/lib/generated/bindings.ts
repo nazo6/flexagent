@@ -1007,6 +1007,8 @@ export type FsBrowseResponse = {
 	parent_path: string | null,
 	/**  Child entries */
 	entries: FsEntry[],
+	/**  Whether the directory listing was capped (use the filter to narrow it) */
+	truncated: boolean,
 };
 
 /**  An entry inside the file system (a folder or a file). */
@@ -3056,6 +3058,8 @@ export type WorkspaceDiffResponse = {
 	head_commit: string,
 	/**  Diff per changed file */
 	files: FileDiff[],
+	/**  Whether the diff was capped (only the first 2 MiB is included) */
+	truncated: boolean,
 };
 
 /**  Kind of a file system entry inside a workspace. */

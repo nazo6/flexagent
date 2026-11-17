@@ -55,7 +55,7 @@ pub(crate) async fn list_sessions<B: ClientApiBackend>(
         node_id: params.node_id.map(fxg_protocol::NodeId::from),
         statuses,
         include_archived: params.include_archived.unwrap_or(false),
-        limit: Some(params.limit.unwrap_or(100)),
+        limit: Some(params.limit.unwrap_or(100).clamp(1, 200)),
         cursor,
     };
     match state.backend.db().list_session_page(&filter).await {
@@ -153,7 +153,7 @@ pub(crate) async fn session_events<B: ClientApiBackend>(
     UrlPath(session_id): UrlPath<String>,
     Query(params): Query<EventsQuery>,
 ) -> Response {
-    let limit = params.limit.unwrap_or(REPLAY_BATCH_SIZE);
+    let limit = params.limit.unwrap_or(REPLAY_BATCH_SIZE).clamp(1, 500);
     let db = state.backend.db();
     let result = if params.tail.unwrap_or(false) {
         db.session_events_before(&session_id, None, limit).await

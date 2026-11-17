@@ -186,7 +186,19 @@ pub fn init_logging(opts: &LoggingOptions, config: &LogConfig, paths: &Paths) ->
             .unwrap_or("fxg.log");
         let fallback_dir = paths.log_dir();
         let dir = path.parent().unwrap_or(fallback_dir.as_path());
-        let appender = tracing_appender::rolling::never(dir, file_name);
+        // Daily rotation with a bounded history: a long-running node must not
+        // grow one unbounded log file.
+        let appender = tracing_appender::rolling::Builder::new()
+            .rotation(tracing_appender::rolling::Rotation::DAILY)
+            .filename_prefix(file_name)
+            .max_log_files(7)
+            .build(dir)
+            .unwrap_or_else(|err| {
+                eprintln!(
+                    "fxg: failed to initialize daily log rotation (falling back to a single file): {err}"
+                );
+                tracing_appender::rolling::never(dir, file_name)
+            });
 
         if is_json {
             Some(

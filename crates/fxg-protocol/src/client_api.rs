@@ -1333,6 +1333,8 @@ pub struct FsBrowseResponse {
     pub parent_path: Option<String>,
     /// Child entries
     pub entries: Vec<FsEntry>,
+    /// Whether the directory listing was capped (use the filter to narrow it)
+    pub truncated: bool,
 }
 
 /// Query of `GET /api/v1/nodes/:id/workspace/fs/list` and

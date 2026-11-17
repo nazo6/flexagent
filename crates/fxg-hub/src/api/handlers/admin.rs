@@ -3,7 +3,7 @@
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path as UrlPath, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use fxg_protocol::client_api::{IssueNodeTokenRequest, KillSwitchRequest, PushSubscribeRequest};
 
@@ -14,7 +14,25 @@ pub(crate) async fn rotate_auth_token<B: ClientApiBackend>(
     Extension(client): Extension<ClientInfo>,
 ) -> Response {
     match state.backend.rotate_auth_token(client).await {
-        Ok(response) => Json(response).into_response(),
+        Ok(response) => {
+            // The old token is invalidated immediately. Set the new cookie in
+            // the same response so a browser never has to re-login (and cannot
+            // be locked out if a follow-up request fails).
+            let cookie = format!(
+                "fxg_session={}; HttpOnly; SameSite=Strict; Path=/",
+                response.token
+            );
+            let mut response = Json(response).into_response();
+            match cookie.parse() {
+                Ok(value) => {
+                    response.headers_mut().insert(header::SET_COOKIE, value);
+                }
+                Err(err) => {
+                    tracing::warn!("failed to build the rotated session cookie: {err}");
+                }
+            }
+            response
+        }
         Err(err) => err.into_response(),
     }
 }

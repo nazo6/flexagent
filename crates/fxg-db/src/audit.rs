@@ -6,11 +6,21 @@
 //! recorded in the executing node's `node.db`
 //! (design: `docs/01-architecture-and-sync.md` §7.5).
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use fxg_protocol::common::{AuditAction, RawJson};
 use fxg_protocol::util::now_ms;
 use sqlx::SqlitePool;
 
 use crate::error::DbError;
+
+/// Audit rows older than this are pruned.
+pub const AUDIT_RETENTION_DAYS: i64 = 90;
+/// Upper bound on retained audit rows.
+pub const AUDIT_MAX_ENTRIES: i64 = 100_000;
+/// Prune at most once per this many appends (plus the first append).
+const AUDIT_PRUNE_INTERVAL: u64 = 1_000;
+static APPEND_COUNT: AtomicU64 = AtomicU64::new(0);
 
 /// Audit log `action` kinds (kept for call-site readability).
 pub mod actions {
@@ -139,5 +149,69 @@ pub async fn append_audit_log(pool: &SqlitePool, record: &AuditLogRecord) -> Res
     )
     .execute(pool)
     .await?;
+    if APPEND_COUNT
+        .fetch_add(1, Ordering::Relaxed)
+        .is_multiple_of(AUDIT_PRUNE_INTERVAL)
+        && let Err(err) = prune(pool).await
+    {
+        tracing::warn!("failed to prune the audit log: {err}");
+    }
     Ok(result.last_insert_rowid())
+}
+
+/// Applies the audit retention period and the maximum row count.
+pub async fn prune(pool: &SqlitePool) -> Result<u64, DbError> {
+    let cutoff = now_ms() - AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    let expired = sqlx::query!(r#"DELETE FROM audit_logs WHERE created_at < ?"#, cutoff,)
+        .execute(pool)
+        .await?
+        .rows_affected();
+    let overflow = sqlx::query!(
+        r#"
+        DELETE FROM audit_logs
+         WHERE id NOT IN (
+             SELECT id
+               FROM audit_logs
+              ORDER BY created_at DESC, id DESC
+              LIMIT ?
+         )
+        "#,
+        AUDIT_MAX_ENTRIES,
+    )
+    .execute(pool)
+    .await?
+    .rows_affected();
+    Ok(expired + overflow)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Db, Role};
+
+    #[tokio::test]
+    async fn prune_removes_rows_older_than_the_retention_window() {
+        let db = Db::open_in_memory(Role::Hub).await.expect("db");
+        let old = now_ms() - (AUDIT_RETENTION_DAYS + 1) * 24 * 60 * 60 * 1000;
+        sqlx::query!(
+            r#"
+            INSERT INTO audit_logs
+                (action, session_id, node_id, client_ip, client_user_agent,
+                 auth_subject, details_json, created_at)
+            VALUES ('session_start', NULL, NULL, '127.0.0.1', NULL, 'local', '{}', ?)
+            "#,
+            old,
+        )
+        .execute(db.pool())
+        .await
+        .expect("insert old row");
+
+        let removed = prune(db.pool()).await.expect("prune");
+        assert_eq!(removed, 1);
+        let remaining = sqlx::query_scalar!(r#"SELECT COUNT(*) FROM audit_logs"#)
+            .fetch_one(db.pool())
+            .await
+            .expect("count");
+        assert_eq!(remaining, 0);
+    }
 }

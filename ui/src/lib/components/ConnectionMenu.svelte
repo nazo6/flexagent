@@ -55,7 +55,10 @@
       toast.error(error instanceof Error ? error.message : m.connection_url_invalid());
       return;
     }
-    connection.addTarget(newLabel, newUrl);
+    if (!connection.addTarget(newLabel, newUrl)) {
+      toast.error(m.connection_target_exists());
+      return;
+    }
     addOpen = false;
     newLabel = "";
     newUrl = "";

@@ -51,7 +51,9 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(CACHE_NAME);
-      await cache.addAll(APP_SHELL);
+      // Cache each asset independently: one missing file must not abort the
+      // whole service-worker install (and leave the old worker active forever).
+      await Promise.allSettled(APP_SHELL.map((path) => cache.add(path)));
       // Preserve the SPA fallback (adapter-static's index.html)
       try {
         await cache.add("/index.html");
@@ -67,7 +69,11 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
       const keys = await caches.keys();
-      await Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)));
+      // Keep the current cache and the previous one: an open tab may lazy-load
+      // a chunk from the previous build after this worker activates.
+      const fxgKeys = keys.filter((key) => key.startsWith("fxg-")).sort();
+      const keep = new Set([CACHE_NAME, ...fxgKeys.slice(-2)]);
+      await Promise.all(keys.filter((key) => !keep.has(key)).map((key) => caches.delete(key)));
       await self.clients.claim();
     })(),
   );
@@ -211,6 +217,13 @@ async function openApp(sessionId: string | undefined): Promise<void> {
   for (const client of windows) {
     if (new URL(client.url).origin === self.location.origin) {
       await client.focus();
+      if (sessionId !== undefined) {
+        try {
+          await client.navigate(target);
+        } catch (error) {
+          console.error("[fxg] failed to navigate the app window", error);
+        }
+      }
       return;
     }
   }
@@ -235,10 +248,21 @@ self.addEventListener("pushsubscriptionchange", (event) => {
           return;
         }
         const applicationServerKey = urlBase64ToUint8Array(body.vapid_public_key);
-        const subscription = await self.registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey,
-        });
+        const oldSubscription = (event as { oldSubscription?: PushSubscription }).oldSubscription;
+        if (oldSubscription !== undefined) {
+          try {
+            await oldSubscription.unsubscribe();
+          } catch (error) {
+            console.error("[fxg] failed to unsubscribe the old push subscription", error);
+          }
+        }
+        const existing = await self.registration.pushManager.getSubscription();
+        const subscription =
+          existing ??
+          (await self.registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey,
+          }));
         const keys = subscription.toJSON().keys ?? {};
         if (!keys.p256dh || !keys.auth) {
           console.error("[fxg] push subscription has no encryption keys");

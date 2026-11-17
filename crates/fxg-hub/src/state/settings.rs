@@ -260,6 +260,12 @@ fn validate_provisioner(name: &str, definition: &ProvisionerDefinition) -> Resul
                 "invalid env_secrets entry: {key}"
             )));
         }
+        if secret.is_system() {
+            return Err(ApiError::bad_request(format!(
+                "system secret {} cannot be injected into a provisioner",
+                secret.as_str()
+            )));
+        }
     }
     Ok(())
 }
@@ -310,5 +316,11 @@ mod tests {
             .env_secrets
             .insert("GH_TOKEN".to_owned(), SecretId::new("../escape"));
         assert!(validate_provisioner("local-docker", &invalid).is_err());
+
+        let mut system = definition("docker");
+        system
+            .env_secrets
+            .insert("TOKEN".to_owned(), SecretId::new("system.auth_token"));
+        assert!(validate_provisioner("local-docker", &system).is_err());
     }
 }

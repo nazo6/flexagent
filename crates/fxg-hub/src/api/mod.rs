@@ -41,7 +41,7 @@ use fxg_protocol::events::SessionEventBatch;
 
 pub use backend::{ClientApiBackend, ClientCommand, ClientEvent, ClientInfo, SystemExtras};
 pub use counters::{CounterKind, DiagnosticsCounters};
-pub use diagnostics::{incident_retention, log_tail};
+pub use diagnostics::{incident_retention, log_tail, resolve_log_file};
 pub use error::ApiError;
 pub use pty::{
     PTY_CHANNEL_CAPACITY, PtyChannelError, PtyChannelEvent, PtyOpenOutcome, PtyOpenParams,

@@ -331,6 +331,14 @@ impl Db {
         queries::get_session(&self.pool, session_id).await
     }
 
+    /// Returns the node that owns a session (including deleted / tombstoned rows).
+    pub async fn session_owner(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<fxg_protocol::NodeId>, DbError> {
+        queries::session_owner(&self.pool, session_id).await
+    }
+
     /// Finds the live session that already owns an agent-side session.
     pub async fn find_session_by_agent_session(
         &self,
@@ -429,12 +437,13 @@ impl Db {
         queries::pending_permissions(&self.pool).await
     }
 
-    /// Retrieves a single permission request.
+    /// Retrieves a single permission request inside a session.
     pub async fn find_permission_request(
         &self,
+        session_id: &str,
         request_id: &str,
     ) -> Result<Option<PermissionRequestEntry>, DbError> {
-        queries::find_permission_request(&self.pool, request_id).await
+        queries::find_permission_request(&self.pool, session_id, request_id).await
     }
 
     /// Unresolved (`pending`) elicitation requests (question inbox).
@@ -442,12 +451,13 @@ impl Db {
         queries::pending_elicitations(&self.pool).await
     }
 
-    /// Retrieves a single elicitation request.
+    /// Retrieves a single elicitation request inside a session.
     pub async fn find_elicitation_request(
         &self,
+        session_id: &str,
         elicitation_id: &str,
     ) -> Result<Option<ElicitationRequestEntry>, DbError> {
-        queries::find_elicitation_request(&self.pool, elicitation_id).await
+        queries::find_elicitation_request(&self.pool, session_id, elicitation_id).await
     }
 
     /// FTS5 full-text search (falls back to LIKE for queries shorter than 3 characters).
@@ -789,12 +799,13 @@ impl Db {
         registration::reassign_sessions_project(&self.pool, node_id, assignments).await
     }
 
-    /// Reassigns a single session to a logical project.
+    /// Reassigns a single session to a logical project (scoped to its owning node).
     pub async fn reassign_session_project(
         &self,
+        node_id: &str,
         session_id: &str,
         project_id: &str,
     ) -> Result<u64, DbError> {
-        registration::reassign_session_project(&self.pool, session_id, project_id).await
+        registration::reassign_session_project(&self.pool, node_id, session_id, project_id).await
     }
 }

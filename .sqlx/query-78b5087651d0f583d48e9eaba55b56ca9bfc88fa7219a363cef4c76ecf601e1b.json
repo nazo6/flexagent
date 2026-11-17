@@ -1,16 +1,16 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT details_json FROM permission_requests WHERE request_id = ?",
+  "query": "SELECT node_id AS \"node_id: NodeId\" FROM sessions WHERE session_id = ?",
   "describe": {
     "columns": [
       {
-        "name": "details_json",
+        "name": "node_id: NodeId",
         "ordinal": 0,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "permission_requests",
-            "name": "details_json"
+            "table": "sessions",
+            "name": "node_id"
           }
         }
       }
@@ -22,5 +22,5 @@
       false
     ]
   },
-  "hash": "4bcc21e69f1e4d8d23d92613396080a8e6fccc9408b23b0b0d3a6265be6ad1ae"
+  "hash": "78b5087651d0f583d48e9eaba55b56ca9bfc88fa7219a363cef4c76ecf601e1b"
 }

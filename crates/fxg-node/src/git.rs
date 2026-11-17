@@ -113,6 +113,27 @@ pub async fn try_git(cwd: &Path, args: &[&str]) -> Result<Option<String>, NodeEr
     }
 }
 
+/// Validates a user-supplied ref / commit-ish before it is passed to Git.
+///
+/// `git check-ref-format --branch` accepts branch names, remote branches and
+/// commit SHAs while rejecting option-like values (`--output=...`) and range
+/// syntax (`a..b`). Callers must still put `--` before file paths.
+pub async fn validate_ref_name(cwd: &Path, value: &str) -> Result<(), NodeError> {
+    let value = value.trim();
+    if value.is_empty() || value.starts_with('-') || value.contains('\0') {
+        return Err(NodeError::InvalidState(format!(
+            "invalid git ref: {value:?}"
+        )));
+    }
+    let output = capture(cwd, &["check-ref-format", "--branch", value], &[]).await?;
+    if !output.success {
+        return Err(NodeError::InvalidState(format!(
+            "invalid git ref: {value:?}"
+        )));
+    }
+    Ok(())
+}
+
 /// Runs `git` and returns the raw standard output bytes on success.
 ///
 /// Used for parsing `-z` (NUL-separated) output and similar cases.
@@ -265,6 +286,10 @@ pub async fn workspace_diff_file(
         }),
     };
 
+    if let Some(base) = &base {
+        validate_ref_name(cwd, base).await?;
+    }
+
     if let Some(file) = file
         && is_untracked(cwd, file).await?
     {
@@ -273,6 +298,7 @@ pub async fn workspace_diff_file(
             base_branch: base,
             head_commit: head,
             files: vec![untracked_file_diff(cwd, file).await?],
+            truncated: false,
         });
     }
 
@@ -300,12 +326,30 @@ pub async fn workspace_diff_file(
         });
     }
 
+    let (diff_text, truncated) = truncate_diff(&output.stdout, MAX_DIFF_BYTES);
     Ok(WorkspaceDiffResponse {
         scope,
         base_branch: base,
         head_commit: head,
-        files: parse_unified_diff(&String::from_utf8_lossy(&output.stdout)),
+        files: parse_unified_diff(&diff_text),
+        truncated,
     })
+}
+
+/// Maximum raw `git diff` output included in one response (2 MiB).
+const MAX_DIFF_BYTES: usize = 2 * 1024 * 1024;
+
+/// Truncates a unified diff at the last complete `diff --git` boundary.
+fn truncate_diff(bytes: &[u8], max_bytes: usize) -> (String, bool) {
+    if bytes.len() <= max_bytes {
+        return (String::from_utf8_lossy(bytes).into_owned(), false);
+    }
+    let text = String::from_utf8_lossy(&bytes[..max_bytes]).into_owned();
+    let truncated = match text.rfind("\ndiff --git ") {
+        Some(index) if index > 0 => text[..index].to_owned(),
+        _ => text,
+    };
+    (truncated, true)
 }
 
 /// Maximum untracked file size included in a synthetic diff (2 MiB).
@@ -490,7 +534,12 @@ pub fn find_repositories(root: &Path, max_depth: usize) -> Result<Vec<PathBuf>, 
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_dir() {
+            // `DirEntry::file_type()` does not follow symlinks, so a link inside
+            // the scan root cannot escape to an unrelated repository.
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if !file_type.is_dir() {
                 continue;
             }
             let name = entry.file_name();
@@ -577,6 +626,19 @@ mod tests {
         assert!(found.iter().any(|path| path.ends_with("b")));
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn find_repositories_does_not_follow_symlinks() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let outside = tempfile::tempdir().expect("outside");
+        init_test_repo(outside.path()).await;
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("link"))
+            .expect("create symlink");
+
+        let found = find_repositories(dir.path(), 3).expect("scan");
+        assert!(found.is_empty(), "found: {found:?}");
+    }
+
     #[test]
     fn parse_unified_diff_splits_files_and_counts_lines() {
         let diff = "diff --git a/src/main.rs b/src/main.rs\n\
@@ -653,5 +715,37 @@ new file mode 100644\n\
         assert_eq!(file.additions, 2);
         assert_eq!(file.deletions, 0);
         assert!(file.unified_diff.contains("+++ b/new.txt"));
+    }
+
+    #[tokio::test]
+    async fn validate_ref_name_rejects_option_injection() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_test_repo(dir.path()).await;
+
+        assert!(validate_ref_name(dir.path(), "main").await.is_ok());
+        assert!(validate_ref_name(dir.path(), "origin/main").await.is_ok());
+        assert!(
+            validate_ref_name(dir.path(), "--output=/tmp/x")
+                .await
+                .is_err()
+        );
+        assert!(validate_ref_name(dir.path(), "a..b").await.is_err());
+    }
+
+    #[test]
+    fn truncate_diff_keeps_complete_file_boundaries() {
+        let raw = b"diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n\
+diff --git a/b b/b\n--- a/b\n+++ b/b\n@@ -1 +1 @@\n-old\n+new\n";
+        let (text, truncated) = truncate_diff(raw, 70);
+        assert!(truncated);
+        assert!(text.starts_with("diff --git a/a"));
+        assert!(
+            !text.contains("a/b"),
+            "the incomplete second file must be dropped"
+        );
+
+        let (text, truncated) = truncate_diff(b"short diff", 1024);
+        assert!(!truncated);
+        assert_eq!(text, "short diff");
     }
 }

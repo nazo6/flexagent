@@ -25,6 +25,20 @@ fn agent_error(err: anyhow::Error) -> NodeError {
     NodeError::Agent(format!("{err:#}"))
 }
 
+/// Rejects unsafe or reserved secret references in a custom agent definition.
+fn validate_custom_agent_env_secrets(
+    config: &fxg_protocol::settings::CustomAgentConfig,
+) -> Result<(), NodeError> {
+    for (key, secret) in &config.env_secrets {
+        if key.trim().is_empty() || !secret.is_valid() || secret.is_system() {
+            return Err(NodeError::Agent(format!(
+                "invalid env_secrets entry: {key}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Audit log source (client information).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditSource {
@@ -555,6 +569,7 @@ impl DaemonState {
                         "custom agent {agent_id} references an unknown extension: {extension}"
                     )));
                 }
+                validate_custom_agent_env_secrets(config)?;
                 self.db().upsert_custom_agent(agent_id, config).await?;
                 self.refresh_agent_catalog().await?;
                 Ok(format!(
@@ -601,6 +616,7 @@ impl DaemonState {
                     .registry()
                     .import_custom_config(agent, extension.clone())
                     .map_err(agent_error)?;
+                validate_custom_agent_env_secrets(&config)?;
                 self.db().upsert_custom_agent(&id, &config).await?;
                 self.refresh_agent_catalog().await?;
                 Ok(format!(
@@ -991,5 +1007,31 @@ impl DaemonState {
     /// Deletes a node-owned secret after checking references.
     pub async fn delete_node_secret(&self, id: &SecretId) -> Result<Vec<SecretSummary>, NodeError> {
         Ok(fxg_db::secrets::delete_secret(self.db(), self.paths(), id).await?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fxg_protocol::SecretId;
+    use fxg_protocol::settings::CustomAgentConfig;
+
+    #[test]
+    fn rejects_system_and_traversal_secret_ids() {
+        let mut config = CustomAgentConfig::default();
+        config
+            .env_secrets
+            .insert("TOKEN".to_owned(), SecretId::new("system.auth_token"));
+        assert!(validate_custom_agent_env_secrets(&config).is_err());
+
+        config
+            .env_secrets
+            .insert("TOKEN".to_owned(), SecretId::new("../auth_token"));
+        assert!(validate_custom_agent_env_secrets(&config).is_err());
+
+        config
+            .env_secrets
+            .insert("TOKEN".to_owned(), SecretId::new("OPENAI_API_KEY"));
+        assert!(validate_custom_agent_env_secrets(&config).is_ok());
     }
 }

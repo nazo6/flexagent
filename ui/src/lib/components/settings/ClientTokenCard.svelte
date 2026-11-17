@@ -18,8 +18,10 @@
     rotateBusy = true;
     try {
       const result = await sync.connection.client.rotateAuthToken();
-      // The old token is invalidated immediately, so re-authenticate with the new token right away.
-      await sync.connection.login(result.token);
+      // The rotate response also sets the new `fxg_session` cookie, so no
+      // second login round-trip is needed (a network failure here must not
+      // leave the browser locked out).
+      await sync.connection.applyToken(result.token);
       sync.restart();
       toast.success(m.settings_token_regenerated());
       rotateOpen = false;

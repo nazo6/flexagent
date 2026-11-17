@@ -349,7 +349,7 @@ async fn event_application_updates_session_projections() {
     // The permission is projected as resolved
     let request = fixture
         .db
-        .find_permission_request("req-1")
+        .find_permission_request(&fixture.session_id, "req-1")
         .await
         .expect("find request")
         .expect("request exists");
@@ -539,12 +539,92 @@ async fn permission_rejection_is_projected_from_option_kind() {
 
     let request = fixture
         .db
-        .find_permission_request("req-reject")
+        .find_permission_request(&fixture.session_id, "req-reject")
         .await
         .expect("find")
         .expect("exists");
     assert_eq!(request.status, PermissionRequestStatus::Rejected);
     assert_eq!(request.resolved_by, Some(ResolvedBy::AndroidPush));
+}
+
+#[tokio::test]
+async fn permission_ids_are_scoped_to_their_session() {
+    let mut first = Fixture::new(Role::Hub).await;
+    let first_id = first.session_id.clone();
+    let second_id = uuid_v7();
+    let mut second = Fixture {
+        db: first.db.clone(),
+        session_id: second_id.clone(),
+        seq: 0,
+    };
+
+    let first_created = first.session_created();
+    let second_created = second.session_created();
+    let options = vec![PermissionOption {
+        option_id: "allow_once".to_owned(),
+        name: "Allow once".to_owned(),
+        kind: PermissionOptionKind::AllowOnce,
+    }];
+    let first_request = first.event(UnifiedEventPayload::PermissionRequest {
+        request_id: "same-id".to_owned(),
+        tool_name: "terminal/create".to_owned(),
+        summary: "first".to_owned(),
+        options: options.clone(),
+        details: serde_json::json!({}).into(),
+        subagent_id: None,
+    });
+    let second_request = second.event(UnifiedEventPayload::PermissionRequest {
+        request_id: "same-id".to_owned(),
+        tool_name: "terminal/create".to_owned(),
+        summary: "second".to_owned(),
+        options,
+        details: serde_json::json!({}).into(),
+        subagent_id: None,
+    });
+    first
+        .db
+        .append_events(&[first_created, first_request, second_created, second_request])
+        .await
+        .expect("append");
+
+    let pending = first.db.pending_permissions().await.expect("pending");
+    assert_eq!(pending.len(), 2, "both sessions keep their own request");
+    assert!(
+        pending
+            .iter()
+            .any(|entry| entry.session_id.as_str() == first_id)
+    );
+    assert!(
+        pending
+            .iter()
+            .any(|entry| entry.session_id.as_str() == second_id)
+    );
+
+    let resolved = first.event(UnifiedEventPayload::PermissionResolved {
+        request_id: "same-id".to_owned(),
+        selected_option_id: "allow_once".to_owned(),
+        resolved_by: ResolvedBy::Web,
+    });
+    first.db.append_event(&resolved).await.expect("resolve");
+
+    let first_entry = first
+        .db
+        .find_permission_request(&first_id, "same-id")
+        .await
+        .expect("find first")
+        .expect("first exists");
+    assert_eq!(first_entry.status, PermissionRequestStatus::Approved);
+    let second_entry = first
+        .db
+        .find_permission_request(&second_id, "same-id")
+        .await
+        .expect("find second")
+        .expect("second exists");
+    assert_eq!(
+        second_entry.status,
+        PermissionRequestStatus::Pending,
+        "resolving one session must not resolve the other"
+    );
 }
 
 #[tokio::test]
@@ -591,7 +671,7 @@ async fn elicitation_projection_tracks_pending_and_resolved() {
 
     let entry = fixture
         .db
-        .find_elicitation_request("elic-1")
+        .find_elicitation_request(&fixture.session_id, "elic-1")
         .await
         .expect("find")
         .expect("exists");
@@ -616,7 +696,7 @@ async fn elicitation_projection_tracks_pending_and_resolved() {
     fixture.db.rebuild_projections().await.expect("rebuild");
     let rebuilt = fixture
         .db
-        .find_elicitation_request("elic-1")
+        .find_elicitation_request(&fixture.session_id, "elic-1")
         .await
         .expect("find after rebuild")
         .expect("exists");
@@ -668,7 +748,7 @@ async fn rebuild_projections_matches_incremental_apply() {
         .expect("sessions before");
     let request_before = fixture
         .db
-        .find_permission_request("req-1")
+        .find_permission_request(&parent_session_id, "req-1")
         .await
         .expect("request before")
         .expect("exists");
@@ -682,7 +762,7 @@ async fn rebuild_projections_matches_incremental_apply() {
         .expect("sessions after");
     let request_after = fixture
         .db
-        .find_permission_request("req-1")
+        .find_permission_request(&parent_session_id, "req-1")
         .await
         .expect("request after")
         .expect("exists");
@@ -1086,12 +1166,12 @@ async fn node_and_hub_return_identical_client_responses() {
     assert_eq!(
         node_fixture
             .db
-            .find_permission_request("req-1")
+            .find_permission_request(&session_id, "req-1")
             .await
             .expect("node request"),
         hub_fixture
             .db
-            .find_permission_request("req-1")
+            .find_permission_request(&session_id, "req-1")
             .await
             .expect("hub request")
     );
@@ -2238,7 +2318,7 @@ async fn session_deletion_purges_content_and_keeps_tombstone() {
     assert!(
         fixture
             .db
-            .find_permission_request("req-1")
+            .find_permission_request(&fixture.session_id, "req-1")
             .await
             .expect("find")
             .is_none()

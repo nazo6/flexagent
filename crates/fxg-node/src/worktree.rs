@@ -189,6 +189,10 @@ pub async fn ensure_worktree(
     request: &WorktreeAddRequest<'_>,
 ) -> Result<WorktreeAddOutcome, NodeError> {
     ensure_repository(request.repo).await?;
+    git::validate_ref_name(request.repo, request.branch).await?;
+    if let Some(base) = request.base_branch {
+        git::validate_ref_name(request.repo, base).await?;
+    }
 
     // Reuse an existing worktree (same branch)
     let existing = list_worktrees(request.repo).await?;

@@ -600,8 +600,9 @@ Web PTY（対話シェル起動）は最も権限が強いため、以下の防�
   - 経路によらず、PTY の cwd はそのノードに登録済みのプロジェクトパス
     (`project_node_bindings` / `project_path_links`) または既存セッションの
     `local_path` に完全一致するものだけを許可します（任意ディレクトリでのシェル起動を防ぐ）。
-  - ターミナルは `(node_id, local_path)` 単位で 1 本に集約され、socket 切断では
-    停止しません。無操作 TTL の経過・明示 kill・プロセス終了・キルスイッチで終了します。
+  - ターミナルは `(node_id, local_path, terminal_id)` 単位で管理され、
+    `terminal_id` ごとに独立したシェルを持ちます。socket 切断では停止しません。
+    無操作 TTL の経過・明示 kill・プロセス終了・キルスイッチで終了します。
 
 ### 7.5 緊急キルスイッチ（Panic Button）と監査ログ
 

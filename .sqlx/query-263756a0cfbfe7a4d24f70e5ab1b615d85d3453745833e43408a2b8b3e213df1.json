@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT request_id AS \"request_id!\",\n               session_id, node_id, tool_name, summary, details_json,\n               status AS \"status: PermissionRequestStatus\", created_at, resolved_at,\n               resolved_by AS \"resolved_by: ResolvedBy\"\n          FROM permission_requests\n         WHERE request_id = ?\n        ",
+  "query": "\n        SELECT request_id AS \"request_id!\",\n               session_id, node_id, tool_name, summary, details_json,\n               status AS \"status: PermissionRequestStatus\", created_at, resolved_at,\n               resolved_by AS \"resolved_by: ResolvedBy\"\n          FROM permission_requests\n         WHERE session_id = ? AND request_id = ?\n        ",
   "describe": {
     "columns": [
       {
@@ -115,10 +115,10 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 2
     },
     "nullable": [
-      true,
+      false,
       false,
       false,
       false,
@@ -130,5 +130,5 @@
       true
     ]
   },
-  "hash": "75dd1b79e5eb7850c561658346a076fd22ab19e28dd9a94d542de4ff1c1d4a37"
+  "hash": "263756a0cfbfe7a4d24f70e5ab1b615d85d3453745833e43408a2b8b3e213df1"
 }

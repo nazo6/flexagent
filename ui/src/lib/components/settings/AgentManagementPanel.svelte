@@ -51,13 +51,15 @@
     }
   }
 
-  async function run(name: string, task: () => Promise<AgentManagementSnapshot>): Promise<void> {
-    if (busy !== null) return;
+  async function run(name: string, task: () => Promise<AgentManagementSnapshot>): Promise<boolean> {
+    if (busy !== null) return false;
     busy = name;
     try {
       snapshot = await task();
+      return true;
     } catch (cause) {
       toast.error(errorMessage(cause));
+      return false;
     } finally {
       busy = null;
     }
@@ -66,7 +68,7 @@
   async function addMcp(): Promise<void> {
     const name = mcpName.trim();
     if (name === "" || targetNode === "") return;
-    await run("add", () =>
+    const added = await run("add", () =>
       sync.connection.client.upsertAgentMcp(targetNode, agentId, name, {
         kind: mcpKind,
         command:
@@ -81,6 +83,7 @@
         enabled: true,
       }),
     );
+    if (!added) return;
     mcpName = "";
     mcpCommand = "";
     mcpUrl = "";

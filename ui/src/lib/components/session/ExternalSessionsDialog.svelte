@@ -13,6 +13,7 @@
   } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
+  import { randomUuid } from "#lib/uuid.ts";
   import DownloadIcon from "@lucide/svelte/icons/download";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
@@ -25,6 +26,7 @@
   let error = $state<string | null>(null);
   let response = $state<ExternalSessionListResponse | null>(null);
   let selectedNodeId = $state("");
+  let loadGeneration = 0;
 
   const isHub = $derived(sync.connection.role === "hub");
   const onlineNodes = $derived(sync.nodes.filter((node) => node.is_online));
@@ -64,17 +66,21 @@
         return;
       }
     }
+    const token = ++loadGeneration;
     loading = true;
     error = null;
     try {
-      response = await sync.connection.client.listExternalSessions({
+      const next = await sync.connection.client.listExternalSessions({
         nodeId: isHub ? selectedNodeId : undefined,
         force,
       });
+      if (token !== loadGeneration) return;
+      response = next;
     } catch (err) {
+      if (token !== loadGeneration) return;
       error = errorMessage(err);
     } finally {
-      loading = false;
+      if (token === loadGeneration) loading = false;
     }
   }
 
@@ -116,7 +122,7 @@
     importing = key;
     try {
       const result = await sync.connection.client.importSession({
-        command_id: crypto.randomUUID(),
+        command_id: randomUuid(),
         node_id: isHub ? targetNodeId : null,
         agent_id: session.agent_id,
         agent_session_id: session.agent_session_id,

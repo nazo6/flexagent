@@ -43,6 +43,21 @@ fn ensure_parent(path: &Path) -> Result<(), DbError> {
     Ok(())
 }
 
+/// Rejects IDs that are not safe to use as a single file name.
+///
+/// Every filesystem entry point validates the ID, so a percent-decoded path
+/// parameter such as `..%2Fhub.db` can never escape `<data>/<role>/secrets`.
+fn validate_secret_id(id: &SecretId) -> Result<(), DbError> {
+    if id.is_valid() {
+        Ok(())
+    } else {
+        Err(DbError::SecretInvalid(format!(
+            "invalid secret id: {}",
+            id.as_str()
+        )))
+    }
+}
+
 #[cfg(unix)]
 fn set_owner_only(path: &Path) -> Result<(), DbError> {
     use std::os::unix::fs::PermissionsExt;
@@ -57,6 +72,7 @@ fn set_owner_only(_path: &Path) -> Result<(), DbError> {
 
 /// Writes a secret value (creating parent directories if needed) with mode `0600`.
 pub fn write_secret(paths: &Paths, id: &SecretId, value: &str) -> Result<(), DbError> {
+    validate_secret_id(id)?;
     let path = secret_path(paths, id);
     ensure_parent(&path)?;
     std::fs::write(&path, value).map_err(DbError::Io)?;
@@ -65,6 +81,7 @@ pub fn write_secret(paths: &Paths, id: &SecretId, value: &str) -> Result<(), DbE
 
 /// Reads a secret value (`None` when the file is missing).
 pub fn read_secret(paths: &Paths, id: &SecretId) -> Result<Option<String>, DbError> {
+    validate_secret_id(id)?;
     let path = secret_path(paths, id);
     match std::fs::read_to_string(&path) {
         Ok(value) => Ok(Some(value)),
@@ -75,6 +92,7 @@ pub fn read_secret(paths: &Paths, id: &SecretId) -> Result<Option<String>, DbErr
 
 /// Deletes a secret value file (missing files are not treated as errors).
 pub fn delete_secret_file(paths: &Paths, id: &SecretId) -> Result<(), DbError> {
+    validate_secret_id(id)?;
     let path = secret_path(paths, id);
     match std::fs::remove_file(&path) {
         Ok(()) => Ok(()),
@@ -85,7 +103,7 @@ pub fn delete_secret_file(paths: &Paths, id: &SecretId) -> Result<(), DbError> {
 
 /// Returns whether the value file exists on disk.
 pub fn is_configured(paths: &Paths, id: &SecretId) -> bool {
-    secret_path(paths, id).is_file()
+    id.is_valid() && secret_path(paths, id).is_file()
 }
 
 /// Registers metadata for a system secret so it appears in the secret list.
@@ -156,12 +174,7 @@ pub async fn upsert_secret(
     id: &SecretId,
     request: &UpsertSecretRequest,
 ) -> Result<Vec<SecretSummary>, DbError> {
-    if !id.is_valid() {
-        return Err(DbError::SecretInvalid(format!(
-            "invalid secret id: {}",
-            id.as_str()
-        )));
-    }
+    validate_secret_id(id)?;
     if system_secret_path(paths, id).is_some() {
         return Err(DbError::SecretInvalid(format!(
             "{} is a system secret and cannot be written through the secret API",
@@ -185,6 +198,7 @@ pub async fn delete_secret(
     paths: &Paths,
     id: &SecretId,
 ) -> Result<Vec<SecretSummary>, DbError> {
+    validate_secret_id(id)?;
     if system_secret_path(paths, id).is_some() {
         return Err(DbError::SecretInvalid(format!(
             "{} is a system secret and cannot be deleted through the secret API",
@@ -287,5 +301,44 @@ mod tests {
 
         let err = delete_secret(&db, &paths, &id).await.expect_err("in use");
         assert!(matches!(err, DbError::SecretInUse { .. }));
+    }
+
+    #[tokio::test]
+    async fn path_traversal_ids_are_rejected_before_touching_the_filesystem() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = Paths::portable(dir.path(), Role::Hub);
+        let db = Db::open_in_memory(Role::Hub).await.expect("db");
+        std::fs::create_dir_all(paths.data_dir()).expect("data dir");
+        let victim = paths.data_dir().join("hub.db");
+        std::fs::write(&victim, "database").expect("victim file");
+
+        let traversal = SecretId::new("../hub.db");
+        assert!(!is_configured(&paths, &traversal));
+        assert!(matches!(
+            read_secret(&paths, &traversal),
+            Err(DbError::SecretInvalid(_))
+        ));
+        assert!(matches!(
+            write_secret(&paths, &traversal, "overwritten"),
+            Err(DbError::SecretInvalid(_))
+        ));
+        assert!(matches!(
+            delete_secret(&db, &paths, &traversal).await,
+            Err(DbError::SecretInvalid(_))
+        ));
+        assert!(victim.is_file(), "the file outside secrets/ must survive");
+        assert_eq!(
+            std::fs::read_to_string(&victim).expect("victim content"),
+            "database"
+        );
+    }
+
+    #[test]
+    fn absolute_and_parent_relative_ids_are_invalid() {
+        for id in ["/etc/passwd", "../auth_token", "..", ".hidden", "a/b"] {
+            assert!(!SecretId::new(id).is_valid(), "{id} must be rejected");
+        }
+        assert!(SecretId::new("OPENAI_API_KEY").is_valid());
+        assert!(SecretId::new("agent.key-1_2").is_valid());
     }
 }

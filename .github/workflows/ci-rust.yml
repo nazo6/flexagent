@@ -4,8 +4,7 @@
 # and the generated TS bindings (the `types` job diffs them).
 #
 # Tests run on Linux / macOS / Windows. Windows validates ProcessTreeGuard (Job
-# Object kill of the whole tree), Named Pipe IPC and ConPTY I/O (Phase 2 exit
-# criteria).
+# Object kill of the whole tree) and ConPTY I/O (Phase 2 exit criteria).
 #
 # Draft pull requests are skipped; `ready_for_review` starts a full run.
 

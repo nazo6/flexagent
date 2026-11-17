@@ -25,6 +25,7 @@ import { problems } from "#lib/stores/problems.svelte.ts";
 import { mergeCursor } from "#lib/sync/cursor.ts";
 import { SessionTimeline } from "#lib/sync/timeline.svelte.ts";
 import type { PendingPrompt } from "#lib/sync/reducer.ts";
+import { randomUuid } from "#lib/uuid.ts";
 import type { ConnectionStore } from "./connection.svelte";
 
 const CURSOR_KEY = "fxg:sync_cursor";
@@ -76,10 +77,23 @@ function sortSessions(sessions: SessionSummary[]): SessionSummary[] {
 
 function readCursor(): number | null {
   if (typeof localStorage === "undefined") return null;
-  const raw = localStorage.getItem(CURSOR_KEY);
-  if (raw === null) return null;
-  const value = Number.parseInt(raw, 10);
-  return Number.isFinite(value) && value >= 0 ? value : null;
+  try {
+    const raw = localStorage.getItem(CURSOR_KEY);
+    if (raw === null) return null;
+    const value = Number.parseInt(raw, 10);
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCursor(value: number): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(CURSOR_KEY, String(value));
+  } catch {
+    // Storage may be disabled or full; the cursor is only an optimization.
+  }
 }
 
 interface ReadState {
@@ -254,9 +268,7 @@ export class SyncStore {
         if (latest !== undefined) {
           since = latest;
           this.#cursor = latest;
-          if (typeof localStorage !== "undefined") {
-            localStorage.setItem(CURSOR_KEY, String(latest));
-          }
+          writeCursor(latest);
         }
       }
       this.#hasConnected = true;
@@ -271,7 +283,11 @@ export class SyncStore {
       if (typeof event.data === "string") this.#handleMessage(event.data);
     });
     ws.addEventListener("close", () => {
-      if (this.#ws === ws) this.#ws = null;
+      // `restart()` / `stop()` may already have replaced or cleared this socket.
+      // A stale close must not mark the new connection disconnected or schedule
+      // another reconnect (which would leak a second WebSocket).
+      if (this.#ws !== ws) return;
+      this.#ws = null;
       this.wsConnected = false;
       this.#scheduleReconnect();
     });
@@ -721,7 +737,7 @@ export class SyncStore {
    * response timeout is extended to [`SEND_PROMPT_TIMEOUT_MS`].
    */
   sendPrompt(sessionId: string, input: PromptInput): Promise<CommandResult> {
-    const commandId = crypto.randomUUID();
+    const commandId = randomUuid();
     this.pendingPrompts.set(commandId, {
       commandId,
       sessionId,
@@ -780,7 +796,7 @@ export class SyncStore {
     return this.#dispatch(
       {
         op: "control_session",
-        command_id: crypto.randomUUID(),
+        command_id: randomUuid(),
         session_id: sessionId,
         action,
       },
@@ -999,9 +1015,7 @@ export class SyncStore {
     }
     if (this.#cursor !== update.cursor) {
       this.#cursor = update.cursor;
-      if (typeof localStorage !== "undefined") {
-        localStorage.setItem(CURSOR_KEY, String(update.cursor));
-      }
+      writeCursor(update.cursor);
     }
     if (sessionsDirty) this.#queueSessionsRefresh();
     if (projectsDirty) this.#queueProjectsRefresh();

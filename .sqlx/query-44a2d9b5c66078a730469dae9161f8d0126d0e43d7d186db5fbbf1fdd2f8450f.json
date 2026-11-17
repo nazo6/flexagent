@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO audit_logs\n                (action, session_id, node_id, client_ip, client_user_agent,\n                 auth_subject, details_json, created_at)\n            VALUES ('session_start', NULL, NULL, '127.0.0.1', NULL, 'local', '{}', ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "44a2d9b5c66078a730469dae9161f8d0126d0e43d7d186db5fbbf1fdd2f8450f"
+}

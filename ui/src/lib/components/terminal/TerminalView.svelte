@@ -190,16 +190,36 @@
 
   // Reconnect only when the *workspace* changes. Switching between sessions of
   // the same directory keeps the running shell (a session is the origin of the
-  // terminal, not its owner).
+  // terminal, not its owner). A hidden terminal is not connected at all, so
+  // opening the Files / Changes dock does not spawn a shell.
   $effect(() => {
     const key = workspaceKey();
+    const isActive = active;
     if (key === connectedWorkspace) {
       return;
     }
     const initial = connectedWorkspace === null;
     connectedWorkspace = key;
-    if (initial) return; // onMount performs the initial connection
+    if (initial) return; // the active effect performs the initial connection
+    if (!isActive) {
+      if (socket !== null) {
+        const current = socket;
+        socket = null;
+        current.close();
+      }
+      connectedWorkspace = null;
+      return;
+    }
     reconnect();
+  });
+
+  // Connect lazily when the terminal tab becomes visible for the first time.
+  $effect(() => {
+    if (!active) return;
+    if (socket === null) {
+      connectedWorkspace = workspaceKey();
+      connect();
+    }
   });
 
   // Refit when the terminal becomes the visible dock tab. When it is hidden,
@@ -225,7 +245,6 @@
     const resizeDisposer = adapter?.onResize(({ cols, rows }) => {
       send({ op: "resize", cols, rows });
     });
-    connect();
     onregister?.(() => {
       send({ op: "kill" });
       socket?.close();

@@ -8,7 +8,6 @@
 
 - [ ] A1.5（保留）: セッションコマンド variant の統合
 - [ ] 汎用ディスパッチャ化（REST の型付き RPC 化と合わせて判断）
-- [ ] `crates/fxg-cli/src/commands.rs` の純粋分割（B4a）
 - [ ] `fxg-db`: 1 対 1 の読み取りモデルを protocol DTO 直接返却へ移行、残る Row 構造体のマッピング整理、`metadata` 拡張カラムの適用範囲の文書化
 
 ## 2. 型安全性（ID newtype・allow 削減）
@@ -25,21 +24,21 @@
 - [ ] `fxg node status --verbose` / `stale_registry_served` の計測
 - [ ] `PreflightFailed { checks: [...] }` による起動前チェックの標準化
 - [ ] 部分成功レスポンス（`warnings: Vec<WarningInfo>` / `DataSafety`）の全境界への展開
-- [ ] `NodeHello` でのプロトコル / DB スキーマバージョン互換チェック強化
+- [ ] `NodeHello` での DB スキーマバージョン互換チェック（プロトコルバージョンは実装済み）
 
 ## 4. ACP 追加機能（未対応項目）
 
 出典: [`docs/proposals/2026-10-02-acp-enhancement-plan.md`](./proposals/2026-10-02-acp-enhancement-plan.md)
 
 - [ ] `ToolCallContent::Terminal` の `terminal_id` を `ToolCall` に保持し、UI のツールカードからターミナル出力へリンクする
-- [ ] `session.config_options.boolean` capability 広告・`terminal/output` の `truncated` 対応・`NewSessionRequest.additional_directories`・`session/close` 送信
+- [ ] `session.config_options.boolean` capability 広告・`terminal/output` の `truncated` 対応・`NewSessionRequest.additional_directories`（`session/close` は送信済み）
 - [ ] `AgentMessageChunk` / `AgentThoughtChunk` の Text 以外のコンテンツ対応
 
 ## 5. Web ターミナル（workspace スコープ化の残項目）
 
 出典: [`docs/proposals/2026-11-14-terminal-workspace-scope.md`](./proposals/2026-11-14-terminal-workspace-scope.md)
 
-- [ ] プロジェクト画面から workspace のターミナルを開く導線と、リロード後の自動復元（`GET /api/v1/terminals` を UI で利用する）
+- [ ] プロジェクト画面から workspace のターミナルを開く導線（リロード後のタブ復元は実装済み。`GET /api/v1/terminals` の UI 利用が残り）
 - [ ] worktree 削除時に、そのパスの workspace ターミナルを連動して kill する
 - [x] 複数ターミナル（タブ、workspace + `terminal_id` で独立シェル）
 - [ ] 共有中バッジ、read-only モード、複数クライアントの resize 調停

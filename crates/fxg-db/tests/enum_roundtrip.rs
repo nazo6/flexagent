@@ -213,8 +213,8 @@ async fn insert_permission(
     request_id
 }
 
-async fn permission(db: &Db, request_id: &str) -> PermissionRequestEntry {
-    db.find_permission_request(request_id)
+async fn permission(db: &Db, session_id: &str, request_id: &str) -> PermissionRequestEntry {
+    db.find_permission_request(session_id, request_id)
         .await
         .expect("find permission")
         .expect("permission exists")
@@ -225,7 +225,10 @@ async fn permission_status_and_resolved_by_roundtrip_all_variants() {
     let (db, session_id) = fixture().await;
     for status in PERMISSION_STATUSES {
         let request_id = insert_permission(db.pool(), &session_id, *status, None).await;
-        assert_eq!(permission(&db, &request_id).await.status, *status);
+        assert_eq!(
+            permission(&db, &session_id, &request_id).await.status,
+            *status
+        );
     }
     for resolved_by in resolved_by_values() {
         let request_id = insert_permission(
@@ -236,7 +239,7 @@ async fn permission_status_and_resolved_by_roundtrip_all_variants() {
         )
         .await;
         assert_eq!(
-            permission(&db, &request_id).await.resolved_by,
+            permission(&db, &session_id, &request_id).await.resolved_by,
             Some(resolved_by)
         );
     }
@@ -285,8 +288,8 @@ async fn insert_elicitation(
     elicitation_id
 }
 
-async fn elicitation(db: &Db, elicitation_id: &str) -> ElicitationRequestEntry {
-    db.find_elicitation_request(elicitation_id)
+async fn elicitation(db: &Db, session_id: &str, elicitation_id: &str) -> ElicitationRequestEntry {
+    db.find_elicitation_request(session_id, elicitation_id)
         .await
         .expect("find elicitation")
         .expect("elicitation exists")
@@ -304,7 +307,10 @@ async fn elicitation_mode_status_and_resolved_by_roundtrip_all_variants() {
             None,
         )
         .await;
-        assert_eq!(elicitation(&db, &elicitation_id).await.status, *status);
+        assert_eq!(
+            elicitation(&db, &session_id, &elicitation_id).await.status,
+            *status
+        );
     }
     for mode in elicitation_modes() {
         let elicitation_id = insert_elicitation(
@@ -315,7 +321,10 @@ async fn elicitation_mode_status_and_resolved_by_roundtrip_all_variants() {
             None,
         )
         .await;
-        assert_eq!(elicitation(&db, &elicitation_id).await.mode, mode);
+        assert_eq!(
+            elicitation(&db, &session_id, &elicitation_id).await.mode,
+            mode
+        );
     }
     for resolved_by in resolved_by_values() {
         let elicitation_id = insert_elicitation(
@@ -327,7 +336,9 @@ async fn elicitation_mode_status_and_resolved_by_roundtrip_all_variants() {
         )
         .await;
         assert_eq!(
-            elicitation(&db, &elicitation_id).await.resolved_by,
+            elicitation(&db, &session_id, &elicitation_id)
+                .await
+                .resolved_by,
             Some(resolved_by)
         );
     }

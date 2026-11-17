@@ -264,6 +264,9 @@
     </div>
   {/if}
 {:else}
+  {#if diff?.truncated}
+    <p class="text-warning px-2 pt-2 text-[12px]">{m.diff_truncated()}</p>
+  {/if}
   {#if diffLoading}
     <div class="text-muted-foreground flex flex-1 items-center justify-center gap-2 text-[12px]">
       <LoaderCircleIcon class="size-3.5 animate-spin" />

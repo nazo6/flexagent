@@ -27,6 +27,8 @@
   let secrets = $state<SecretSummary[]>([]);
   let loading = $state(false);
   let error = $state<string | null>(null);
+  /** Target whose snapshot / form is currently loaded (null = none). */
+  let loadedTarget = $state<string | null>(null);
 
   // Node settings form
   let nodeForm = $state({
@@ -63,24 +65,42 @@
     if (loading) return;
     // Capture the target: it can change while the requests are in flight.
     const node = targetNode;
+    if (loadedTarget !== node) {
+      // Never keep the previous node's snapshot / form around: a failed load
+      // must not let Save or Delete act on the new node with stale values.
+      nodeSnapshot = null;
+      hubSnapshot = null;
+      secrets = [];
+      loadedTarget = null;
+    }
     loading = true;
     error = null;
     try {
       if (section === "bootstrap" || section === "machine") {
-        nodeSnapshot = node !== "" ? await sync.connection.client.nodeSettings(node) : null;
+        const snapshot = node !== "" ? await sync.connection.client.nodeSettings(node) : null;
+        if (targetNode !== node) return;
+        nodeSnapshot = snapshot;
         syncNodeForm();
       }
       if (section === "bootstrap" || section === "machine" || section === "hub") {
         if (isHub) {
-          hubSnapshot = await sync.connection.client.hubSettings();
+          const snapshot = await sync.connection.client.hubSettings();
+          if (targetNode !== node) return;
+          hubSnapshot = snapshot;
           syncHubForm();
         }
       }
       if (section === "machine") {
-        secrets = node !== "" ? (await sync.connection.client.nodeSecrets(node)).secrets : [];
+        const response =
+          node !== "" ? await sync.connection.client.nodeSecrets(node) : { secrets: [] };
+        if (targetNode !== node) return;
+        secrets = response.secrets;
       } else if (section === "hub" && isHub) {
-        secrets = (await sync.connection.client.hubSecrets()).secrets;
+        const response = await sync.connection.client.hubSecrets();
+        if (targetNode !== node) return;
+        secrets = response.secrets;
       }
+      loadedTarget = node;
     } catch (cause) {
       error = errorMessage(cause);
     } finally {
@@ -111,6 +131,10 @@
   }
 
   async function saveNode(): Promise<void> {
+    if (targetNode === "" || loadedTarget !== targetNode || nodeSnapshot === null) {
+      toast.error(m.settings_node_not_loaded());
+      return;
+    }
     const request = {
       name: nodeForm.name.trim(),
       allow_remote_pty: nodeForm.allow_remote_pty,
@@ -123,7 +147,6 @@
       expected_revision: nodeForm.revision,
     };
     try {
-      if (targetNode === "") throw new Error("node is not selected");
       nodeSnapshot = await sync.connection.client.updateNodeSettings(targetNode, request);
       syncNodeForm();
       toast.success("Saved node settings.");
@@ -133,6 +156,10 @@
   }
 
   async function saveHub(): Promise<void> {
+    if (hubSnapshot === null || loadedTarget !== targetNode) {
+      toast.error(m.settings_hub_not_loaded());
+      return;
+    }
     try {
       hubSnapshot = await sync.connection.client.updateHubSettings({
         vapid_subject: hubForm.vapid_subject.trim() === "" ? null : hubForm.vapid_subject.trim(),
@@ -149,13 +176,17 @@
     event.preventDefault();
     const key = secretForm.key.trim();
     if (secretForm.value === "" || key === "") return;
+    if (loadedTarget !== targetNode) {
+      toast.error(m.settings_node_not_loaded());
+      return;
+    }
     try {
       const request = {
         description: secretForm.description.trim() === "" ? null : secretForm.description.trim(),
         value: secretForm.value,
       };
       if (!(section === "hub" && isHub) && targetNode === "") {
-        throw new Error("node is not selected");
+        throw new Error(m.settings_node_not_loaded());
       }
       const response =
         section === "hub" && isHub
@@ -170,10 +201,14 @@
   }
 
   async function deleteSecret(secret: SecretSummary): Promise<void> {
+    if (loadedTarget !== targetNode) {
+      toast.error(m.settings_node_not_loaded());
+      return;
+    }
     if (!confirm(`Delete secret "${secret.id}"?`)) return;
     try {
       if (!(section === "hub" && isHub) && targetNode === "") {
-        throw new Error("node is not selected");
+        throw new Error(m.settings_node_not_loaded());
       }
       const response =
         section === "hub" && isHub
@@ -431,7 +466,11 @@
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <Button size="sm" disabled={isHub && targetNode === ""} onclick={() => void saveNode()}>
+          <Button
+            size="sm"
+            disabled={(isHub && targetNode === "") || loadedTarget !== targetNode}
+            onclick={() => void saveNode()}
+          >
             Save
           </Button>
           <span class="text-muted-foreground text-[13px]">revision {nodeForm.revision}</span>
@@ -465,7 +504,9 @@
           />
         </div>
         <div class="flex items-center gap-2">
-          <Button size="sm" onclick={() => void saveHub()}>Save</Button>
+          <Button size="sm" disabled={hubSnapshot === null} onclick={() => void saveHub()}>
+            Save
+          </Button>
           <span class="text-muted-foreground text-[13px]">revision {hubForm.revision}</span>
         </div>
       </Card>

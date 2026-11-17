@@ -140,19 +140,31 @@ impl DaemonState {
     }
 
     /// Tries a hub address / token without saving it.
+    ///
+    /// The stored pairing token is only reused when `hub_url` points at the
+    /// currently configured hub. Testing a different address requires an
+    /// explicit token, so a local UI user (or a hub client) cannot make the
+    /// node send its pairing token to an attacker-controlled endpoint.
     pub async fn test_pairing(
         &self,
         request: &TestPairingRequest,
     ) -> Result<HubLinkStatus, NodeError> {
         let ws_url = fxg_protocol::config::node_ws_url(&request.hub_url)?;
-        let token = request
+        let origin = fxg_protocol::config::hub_http_origin(&ws_url);
+        let current = self.db().ensure_node_pairing().await?;
+        let same_hub = current.hub_url.as_deref() == Some(origin.as_str());
+        let token = match request
             .token
             .as_deref()
             .map(str::trim)
             .filter(|token| !token.is_empty())
-            .map(str::to_owned)
-            .or_else(|| self.pairing_token())
-            .ok_or(NodeError::PairingTokenRequired)?;
+        {
+            Some(token) => token.to_owned(),
+            None if same_hub => self
+                .pairing_token()
+                .ok_or(NodeError::PairingTokenRequired)?,
+            None => return Err(NodeError::PairingTokenRequired),
+        };
         Ok(sync::test_connection(&ws_url, &token).await)
     }
 

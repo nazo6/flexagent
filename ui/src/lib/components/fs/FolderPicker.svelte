@@ -61,7 +61,9 @@
   let filter = $state("");
   let loading = $state(false);
   let error = $state<string | null>(null);
+  let truncated = $state(false);
   let showHidden = $state(false);
+  let loadGeneration = 0;
 
   $effect(() => {
     if (!active || nodeId === "") return;
@@ -70,28 +72,35 @@
 
   async function loadDirectory(path?: string) {
     if (!nodeId) return;
+    const token = ++loadGeneration;
     loading = true;
     error = null;
     onloadingchange?.(true);
     try {
       const res = await sync.connection.client.browseFs(nodeId, path);
+      if (token !== loadGeneration) return;
       currentPath = res.current_path;
       parentPath = res.parent_path;
       entries = res.entries;
+      truncated = res.truncated;
       inputPath = res.current_path;
       filter = "";
       selectedPath = mode === "select" ? res.current_path : "";
       onselectionchange?.(selectedPath);
       onpathchange?.(res.current_path);
     } catch (err) {
+      if (token !== loadGeneration) return;
       const message = err instanceof Error ? err.message : String(err);
       error = message;
+      truncated = false;
       selectedPath = "";
       onselectionchange?.("");
       onerror?.(message);
     } finally {
-      loading = false;
-      onloadingchange?.(false);
+      if (token === loadGeneration) {
+        loading = false;
+        onloadingchange?.(false);
+      }
     }
   }
 
@@ -263,6 +272,9 @@
   </div>
 
   <div class={cn("bg-muted/20 flex flex-col overflow-y-auto rounded-md border p-1", listClass)}>
+    {#if truncated}
+      <p class="text-warning px-2 py-1 text-[11px]">{m.fs_truncated()}</p>
+    {/if}
     {#if loading}
       <div
         class="text-muted-foreground flex flex-1 items-center justify-center gap-2 py-12 text-[13px]"

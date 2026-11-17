@@ -9,6 +9,7 @@
     reason = "recursively redact intentionally opaque RawJson incident details at the diagnostics boundary"
 )]
 
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use axum::extract::{Request, State};
@@ -372,12 +373,13 @@ pub(crate) async fn build_support_bundle<B: ClientApiBackend>(
             .map_err(super::ApiError::from)?,
         ConnectionRole::Hub => 0,
     };
-    let home = backend.data_dir();
+    let home = dirs::home_dir();
+    let home = home.as_deref();
     let database_file = backend.db_path();
     let database = DatabaseStats {
         path: database_file
             .as_ref()
-            .map(|path| redact_text(&path.to_string_lossy(), home.as_deref()))
+            .map(|path| redact_text(&path.to_string_lossy(), home))
             .unwrap_or_default(),
         size_bytes: database_file
             .as_ref()
@@ -388,20 +390,20 @@ pub(crate) async fn build_support_bundle<B: ClientApiBackend>(
         incidents: counts.incidents,
         pending_outbox_events,
     };
-    let config = redact_config(backend.support_bundle_config(), home.as_deref());
+    let config = redact_config(backend.support_bundle_config(), home);
     let logs = backend
         .support_bundle_logs(SUPPORT_BUNDLE_LOG_LINES)
         .into_iter()
-        .map(|line| redact_text(&line, home.as_deref()))
+        .map(|line| redact_text(&line, home))
         .collect();
     Ok(SupportBundle {
         generated_at: now_ms(),
         version: backend.version().to_owned(),
         role: backend.connection_role(),
         config,
-        diagnostics: redact_diagnostics(diagnostics, home.as_deref()),
+        diagnostics: redact_diagnostics(diagnostics, home),
         database,
-        sessions,
+        sessions: redact_sessions(sessions, home),
         logs,
     })
 }
@@ -431,6 +433,20 @@ pub(crate) async fn build_diagnostics<B: ClientApiBackend>(
         health,
         incidents,
     })
+}
+
+fn redact_sessions(
+    mut sessions: Vec<fxg_protocol::common::SupportBundleSession>,
+    home: Option<&Path>,
+) -> Vec<fxg_protocol::common::SupportBundleSession> {
+    for entry in &mut sessions {
+        entry.session.local_path = redact_text(&entry.session.local_path, home);
+        entry.session.title = redact_text(&entry.session.title, home);
+        if let Some(branch) = entry.session.git_branch.as_mut() {
+            *branch = redact_text(branch, home);
+        }
+    }
+    sessions
 }
 
 fn redact_config(config: SupportBundleConfig, home: Option<&Path>) -> SupportBundleConfig {
@@ -483,8 +499,18 @@ pub(crate) fn redact_text(text: &str, home: Option<&Path>) -> String {
         ("bearer ", " \t\r\n"),
         ("fxg_session=", "; \t\r\n\""),
         ("token=", "& \t\r\n\""),
+        ("access_token=", "& \t\r\n\""),
+        ("refresh_token=", "& \t\r\n\""),
+        ("api_key=", "& \t\r\n\""),
+        ("apikey=", "& \t\r\n\""),
+        ("x-api-key:", " \t\r\n\""),
+        ("client_secret=", "& \t\r\n\""),
         ("password=", "& \t\r\n\""),
         ("secret=", "& \t\r\n\""),
+        ("sk-", " \t\r\n\"'"),
+        ("ghp_", " \t\r\n\"'"),
+        ("github_pat_", " \t\r\n\"'"),
+        ("akia", " \t\r\n\"'"),
     ] {
         value = redact_after(&value, marker, end_chars);
     }
@@ -527,12 +553,16 @@ fn redact_after(text: &str, marker: &str, end_chars: &str) -> String {
     while let Some(relative) = lower[cursor..].find(marker) {
         let marker_end = cursor + relative + marker.len();
         result.push_str(&text[cursor..marker_end]);
-        result.push_str("<redacted>");
         let after = &text[marker_end..];
-        let value_end = after
+        // `Header: value` / `key = value` may have whitespace after the marker.
+        let trimmed = after.trim_start_matches([' ', '\t']);
+        let whitespace = after.len() - trimmed.len();
+        result.push_str(&after[..whitespace]);
+        result.push_str("<redacted>");
+        let value_end = trimmed
             .find(|ch| end_chars.contains(ch))
-            .unwrap_or(after.len());
-        cursor = marker_end + value_end;
+            .unwrap_or(trimmed.len());
+        cursor = marker_end + whitespace + value_end;
     }
     result.push_str(&text[cursor..]);
     result
@@ -577,17 +607,83 @@ fn is_secret_key(key: &str) -> bool {
         || key.contains("secret")
         || key.contains("authorization")
         || key.contains("cookie")
+        || key.contains("api_key")
+        || key.contains("apikey")
+        || key.contains("access_key")
+        || key.contains("private_key")
+        || key.contains("client_secret")
+}
+
+/// Resolves the newest file for a logically named log (`node.log`).
+///
+/// Daily rotation writes `node.log.YYYY-MM-DD`, so callers that only know the
+/// configured path use this helper instead of assuming the exact file exists.
+pub fn resolve_log_file(path: &Path) -> std::path::PathBuf {
+    if path.is_file() {
+        return path.to_path_buf();
+    }
+    let Some(parent) = path.parent() else {
+        return path.to_path_buf();
+    };
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return path.to_path_buf();
+    };
+    let prefix = format!("{name}.");
+    let mut newest: Option<(std::time::SystemTime, std::path::PathBuf)> = None;
+    for entry in std::fs::read_dir(parent).into_iter().flatten().flatten() {
+        let file_name = entry.file_name();
+        if !file_name.to_string_lossy().starts_with(&prefix) {
+            continue;
+        }
+        let Ok(modified) = entry.metadata().and_then(|meta| meta.modified()) else {
+            continue;
+        };
+        if newest
+            .as_ref()
+            .is_none_or(|(current, _)| modified > *current)
+        {
+            newest = Some((modified, entry.path()));
+        }
+    }
+    newest
+        .map(|(_, path)| path)
+        .unwrap_or_else(|| path.to_path_buf())
 }
 
 /// Reads the tail of a log file (oldest first). Missing files yield an empty tail.
+///
+/// Only the last 1 MiB is read, so a large (non-rotated) log cannot make the
+/// diagnostics endpoint allocate the whole file.
 pub fn log_tail(path: &Path, lines: usize) -> Vec<String> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
+    const MAX_TAIL_BYTES: u64 = 1024 * 1024;
+    let path = resolve_log_file(path);
+    let mut file = match std::fs::File::open(&path) {
+        Ok(file) => file,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
         Err(err) => {
-            tracing::warn!(path = %path.display(), "failed to read the log file: {err}");
+            tracing::warn!(path = %path.display(), "failed to open the log file: {err}");
             return Vec::new();
         }
+    };
+    let length = file.metadata().map(|meta| meta.len()).unwrap_or(0);
+    let start = length.saturating_sub(MAX_TAIL_BYTES);
+    if start > 0
+        && let Err(err) = file.seek(SeekFrom::Start(start))
+    {
+        tracing::warn!(path = %path.display(), "failed to seek the log file: {err}");
+        return Vec::new();
+    }
+    let mut bytes = Vec::new();
+    if let Err(err) = file.read_to_end(&mut bytes) {
+        tracing::warn!(path = %path.display(), "failed to read the log file: {err}");
+        return Vec::new();
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    // Drop the first (possibly partial) line when the read started mid-file.
+    let text: &str = if start > 0 {
+        text.split_once('\n').map_or("", |(_, rest)| rest)
+    } else {
+        &text
     };
     let mut tail: Vec<String> = text.lines().rev().take(lines).map(str::to_owned).collect();
     tail.reverse();
@@ -612,6 +708,52 @@ mod tests {
         assert!(!redacted.contains("xyz"));
         assert!(!redacted.contains("secret"));
         assert!(redacted.contains("<redacted>"));
+    }
+
+    #[test]
+    fn redacts_api_keys_and_common_token_prefixes() {
+        let text = "api_key=abc123 sk-xyz ghp_123 AKIA456 x-api-key: xyz789";
+        let redacted = redact_text(text, None);
+        for secret in ["abc123", "xyz", "123", "456", "xyz789"] {
+            assert!(!redacted.contains(secret), "{secret} leaked: {redacted}");
+        }
+        assert!(redacted.contains("<redacted>"));
+    }
+
+    #[test]
+    fn secret_json_keys_include_api_key_variants() {
+        for key in [
+            "api_key",
+            "apikey",
+            "access_key",
+            "private_key",
+            "client_secret",
+        ] {
+            assert!(is_secret_key(key), "{key} must be treated as a secret key");
+        }
+    }
+
+    #[test]
+    fn resolve_log_file_finds_a_rotated_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = dir.path().join("node.log");
+        let rotated = dir.path().join("node.log.2026-11-16");
+        std::fs::write(&rotated, "rotated").expect("write rotated");
+        assert_eq!(resolve_log_file(&base), rotated);
+    }
+
+    #[test]
+    fn log_tail_reads_only_the_last_megabyte() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("node.log");
+        let mut text = String::new();
+        for index in 0..200_000 {
+            text.push_str(&format!("line {index:06}\n"));
+        }
+        std::fs::write(&path, text).expect("write log");
+
+        let tail = log_tail(&path, 2);
+        assert_eq!(tail, vec!["line 199998", "line 199999"]);
     }
 
     #[test]

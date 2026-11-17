@@ -559,8 +559,12 @@ pub async fn reassign_sessions_project(
 }
 
 /// Reassigns a single session to a logical project (used by `SessionSyncState`).
+///
+/// The update is scoped to `node_id` so a node cannot reassign another node's
+/// session by reporting its ID.
 pub async fn reassign_session_project(
     pool: &SqlitePool,
+    node_id: &str,
     session_id: &str,
     project_id: &str,
 ) -> Result<u64, DbError> {
@@ -568,11 +572,12 @@ pub async fn reassign_session_project(
         r#"
         UPDATE sessions
            SET project_id = ?, updated_at = ?
-         WHERE session_id = ? AND project_id != ?
+         WHERE session_id = ? AND node_id = ? AND project_id != ?
         "#,
         project_id,
         now_ms(),
         session_id,
+        node_id,
         project_id,
     )
     .execute(pool)

@@ -2,6 +2,7 @@ import { ApiError } from "#lib/api/errors.ts";
 import { ApiClient } from "#lib/api/client.ts";
 import type { ConnectionRole, SystemInfoResponse } from "#lib/generated/bindings.ts";
 import { m } from "#lib/paraglide/messages.js";
+import { randomUuid } from "#lib/uuid.ts";
 
 /** A switchable connection target (per origin). */
 export interface ConnectionTarget {
@@ -46,7 +47,11 @@ function loadStoredTargets(): ConnectionTarget[] {
 function persistTargets(targets: ConnectionTarget[]): void {
   if (typeof localStorage === "undefined") return;
   const stored: StoredTargets = { version: 1, targets };
-  localStorage.setItem(TARGETS_KEY, JSON.stringify(stored));
+  try {
+    localStorage.setItem(TARGETS_KEY, JSON.stringify(stored));
+  } catch {
+    // Storage may be disabled or full; the target list is a convenience.
+  }
 }
 
 /**
@@ -128,6 +133,16 @@ export class ConnectionStore {
     }
   }
 
+  /**
+   * Apply a token that the server already accepted (e.g. the auth token rotate
+   * response, which also sets the `fxg_session` cookie atomically).
+   */
+  async applyToken(token: string): Promise<void> {
+    this.client.setToken(token);
+    this.tokenRequired = false;
+    await this.probe();
+  }
+
   /** Invalidate the `fxg_session` Cookie. */
   async logout(): Promise<void> {
     try {
@@ -138,20 +153,21 @@ export class ConnectionStore {
     }
   }
 
-  /** Register a switch target (duplicate URLs are not added). */
-  addTarget(label: string, url: string): void {
+  /** Register a switch target. Returns false when it was a duplicate / the current origin. */
+  addTarget(label: string, url: string): boolean {
     const normalized = normalizeUrl(url);
-    if (!normalized || normalized === this.origin) return;
-    if (this.targets.some((target) => target.url === normalized)) return;
+    if (!normalized || normalized === this.origin) return false;
+    if (this.targets.some((target) => target.url === normalized)) return false;
     this.targets = [
       ...this.targets,
       {
-        id: `target-${crypto.randomUUID()}`,
+        id: `target-${randomUuid()}`,
         label: label.trim() || normalized,
         url: normalized,
       },
     ];
     persistTargets(this.targets);
+    return true;
   }
 
   removeTarget(id: string): void {
