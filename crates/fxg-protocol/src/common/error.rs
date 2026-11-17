@@ -277,7 +277,7 @@ pub struct ErrorInfo {
     /// Recovery actions the client can offer as buttons
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recovery: Vec<RecoveryAction>,
-    /// Correlation ID shared with logs / incidents
+    /// Correlation ID shared with logs
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
     /// What happened to the user's data (unchanged / not sent / recoverable / lost)
@@ -386,8 +386,6 @@ pub enum RecoveryAction {
         /// Target session ID (all logs when omitted)
         session_id: Option<SessionId>,
     },
-    /// Export a support bundle
-    ExportDiagnostics,
 }
 
 /// Non-fatal warning attached to a successful / partially successful response.

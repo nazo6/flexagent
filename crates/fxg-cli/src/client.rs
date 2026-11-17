@@ -16,11 +16,10 @@ use fxg_protocol::client_api::{
     CreateWorktreeRequest, DiagnosticsResponse, ProjectPreview, ProjectPreviewRequest,
     RotateAuthTokenResponse, SendPromptRequest, SessionArchiveRequest, SessionArchiveResponse,
     SessionDetail, SessionForkSpec, SessionImportRequest, SessionImportResponse,
-    SessionListResponse, SupportBundle, SystemInfoResponse, WorktreeInfo, WorktreesResponse,
+    SessionListResponse, SystemInfoResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
-    ClientSource, CommandResult, IncidentListResponse, PromptInput, SessionControlAction,
-    SessionStatus, SessionSummary,
+    ClientSource, CommandResult, PromptInput, SessionControlAction, SessionStatus, SessionSummary,
 };
 use fxg_protocol::config::{EnvLookup, NodeConfig, env_keys, process_env};
 use fxg_protocol::paths::{Paths, Role};
@@ -677,23 +676,6 @@ impl NodeClient {
     /// `fxg doctor` / `fxg logs --session` (local diagnostics).
     pub async fn diagnostics(&mut self) -> Result<DiagnosticsResponse> {
         self.get("/api/v1/diagnostics").await
-    }
-
-    /// `fxg support bundle` (redacted support bundle).
-    pub async fn support_bundle(&mut self) -> Result<SupportBundle> {
-        self.get("/api/v1/diagnostics/bundle").await
-    }
-
-    /// `fxg support incidents` (persisted incidents).
-    pub async fn incidents(
-        &mut self,
-        limit: u32,
-        include_resolved: bool,
-    ) -> Result<IncidentListResponse> {
-        self.get(&format!(
-            "/api/v1/diagnostics/incidents?limit={limit}&include_resolved={include_resolved}"
-        ))
-        .await
     }
 
     /// `fxg session prompt` (headless send).

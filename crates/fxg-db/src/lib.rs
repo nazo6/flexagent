@@ -31,7 +31,6 @@
 pub mod audit;
 pub mod error;
 pub mod events;
-pub mod incidents;
 pub mod outbox;
 pub mod push;
 pub mod queries;
@@ -49,7 +48,6 @@ pub use fxg_protocol::paths::Role;
 // Re-exported types (keeps imports on the caller side short)
 pub use audit::AuditLogRecord;
 pub use events::{AppendedEvent, ApplyOutcome};
-pub use incidents::{DatabaseCounts, IncidentRecord};
 pub use outbox::SessionOutboxBatch;
 pub use push::PushSubscriptionRecord;
 pub use queries::ProjectSessionCursor;

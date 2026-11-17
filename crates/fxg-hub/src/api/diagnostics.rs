@@ -1,109 +1,28 @@
-//! Diagnostics: component health, incident recording and support bundles.
+//! Diagnostics: component health for the local node and the hub.
 //!
-//! Design: `docs/proposals/2026-11-08-error-handling-and-recovery-plan.md`
-//! Phase 3. Node and server share this layer so both endpoints report the same
-//! health shape and produce the same redacted support bundle.
+//! Node and server share this layer so both endpoints report the same health
+//! shape (design: `docs/03-protocol-and-api.md` §3.1).
 
-#![allow(
-    clippy::disallowed_types,
-    reason = "recursively redact intentionally opaque RawJson incident details at the diagnostics boundary"
-)]
-
-use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
-use axum::extract::{Request, State};
-use axum::http::StatusCode;
-use axum::middleware::Next;
-use axum::response::Response;
-use fxg_db::incidents::{INCIDENT_MAX_ENTRIES, INCIDENT_RETENTION_DAYS};
-use fxg_protocol::client_api::{
-    ConnectionRole, DatabaseStats, DiagnosticsResponse, SupportBundle, SupportBundleConfig,
-};
-use fxg_protocol::common::{
-    CommandResult, ComponentHealth, ComponentName, ComponentState, ErrorCode, ErrorInfo,
-    IncidentEntry, IncidentLevel, IncidentSource, RawJson, SystemStatus, WarningInfo,
-};
+use fxg_protocol::client_api::DiagnosticsResponse;
+use fxg_protocol::common::{ComponentHealth, ComponentName, ComponentState, SystemStatus};
 use fxg_protocol::util::now_ms;
 
-use super::{ClientApiBackend, ClientApiState, DiagnosticsCounters, header_str};
+use super::{ClientApiBackend, DiagnosticsCounters};
 
-/// Window in which unresolved incidents make a component degraded.
-const HEALTH_INCIDENT_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
 /// Free disk space below this is degraded (bytes).
 const DISK_DEGRADED_BYTES: u64 = 1024 * 1024 * 1024;
 /// Free disk space below this is an error (bytes).
 const DISK_ERROR_BYTES: u64 = 100 * 1024 * 1024;
-/// Number of log lines included in a support bundle.
-const SUPPORT_BUNDLE_LOG_LINES: usize = 200;
-/// Number of sessions included in a support bundle.
-const SUPPORT_BUNDLE_SESSION_LIMIT: u32 = 50;
-
-/// Persists failures returned by the REST boundary as incidents.
-///
-/// The response carries `x-fxg-error-code` (set by `ApiError::into_response`),
-/// so the middleware never buffers or inspects the response body. Client errors
-/// that are part of normal operation (`400` / `401` / `403` / `404`) are ignored;
-/// server errors and recoverable conflicts are recorded.
-pub(crate) async fn record_api_errors<B: ClientApiBackend>(
-    State(state): State<ClientApiState<B>>,
-    request: Request,
-    next: Next,
-) -> Response {
-    let method = request.method().clone();
-    let path = request.uri().path().to_owned();
-    let request_id = super::request_context::current_request_id();
-    let response = next.run(request).await;
-
-    if matches!(
-        path.as_str(),
-        "/healthz" | "/readyz" | "/api/v1/meta" | "/api/v1/diagnostics"
-    ) || !should_record_status(response.status())
-    {
-        return response;
-    }
-    let Some(code) = error_code_from_headers(response.headers()) else {
-        return response;
-    };
-    let level = if response.status().is_server_error() {
-        IncidentLevel::Error
-    } else {
-        IncidentLevel::Warning
-    };
-    let info = ErrorInfo {
-        code,
-        message: format!("{method} {path} failed"),
-        params: std::collections::BTreeMap::new(),
-        details: Some(RawJson::new(serde_json::json!({
-            "method": method.as_str(),
-            "path": path,
-            "status": response.status().as_u16(),
-        }))),
-        retryable: code.is_retryable(),
-        recovery: Vec::new(),
-        request_id: request_id.clone(),
-        data_safety: None,
-        docs: None,
-    };
-    record_info(
-        &state.backend,
-        &info,
-        IncidentSource::Api,
-        level,
-        session_id_from_path(&path),
-        request_id.as_deref(),
-    )
-    .await;
-    response
-}
 
 /// Builds the component health snapshot for an endpoint.
 pub(crate) async fn build_system_status<B: ClientApiBackend>(backend: &B) -> SystemStatus {
     let now = now_ms();
     let mut components = Vec::new();
 
-    match backend.db().database_counts().await {
-        Ok(_) => {
+    match backend.db().health_check().await {
+        Ok(()) => {
             components.push(ComponentHealth::ok(ComponentName::Db, now));
             components.push(ComponentHealth::ok(ComponentName::Migrations, now));
         }
@@ -128,20 +47,6 @@ pub(crate) async fn build_system_status<B: ClientApiBackend>(backend: &B) -> Sys
     components.extend(backend.role_health(now).await);
     components.push(disk_health(backend.data_dir().as_deref(), now));
 
-    // Recent unresolved incidents make the matching component degraded / failing.
-    let since = now - HEALTH_INCIDENT_WINDOW_MS;
-    match backend.db().unresolved_incidents_since(since).await {
-        Ok(incidents) => apply_incidents(&mut components, &incidents, now),
-        Err(err) => {
-            components.push(ComponentHealth::failed(
-                ComponentName::Db,
-                ComponentState::Degraded,
-                format!("failed to load incidents: {err}"),
-                now,
-            ));
-        }
-    }
-
     let counters = backend
         .diagnostics_counters()
         .map(DiagnosticsCounters::snapshot)
@@ -151,54 +56,6 @@ pub(crate) async fn build_system_status<B: ClientApiBackend>(backend: &B) -> Sys
         checked_at: now,
         components,
         counters,
-    }
-}
-
-/// Adds / replaces components based on recent incidents.
-fn apply_incidents(components: &mut Vec<ComponentHealth>, incidents: &[IncidentEntry], now: i64) {
-    for incident in incidents {
-        let Some(component) = component_for_source(&incident.source) else {
-            continue;
-        };
-        let state = match incident.level {
-            IncidentLevel::Error => ComponentState::Error,
-            IncidentLevel::Warning | IncidentLevel::Info | IncidentLevel::Unknown(_) => {
-                ComponentState::Degraded
-            }
-        };
-        let health = ComponentHealth::failed(
-            component.clone(),
-            state,
-            format!(
-                "{}: {} ({} occurrence(s))",
-                incident.code, incident.summary, incident.occurrence_count
-            ),
-            now,
-        );
-        match components
-            .iter_mut()
-            .find(|existing| existing.component == component)
-        {
-            Some(existing) => *existing = health,
-            None => components.push(health),
-        }
-    }
-}
-
-/// Maps an incident source to the component it degrades.
-fn component_for_source(source: &IncidentSource) -> Option<ComponentName> {
-    match source {
-        IncidentSource::Api => Some(ComponentName::Http),
-        IncidentSource::Agent => Some(ComponentName::AgentSpawn),
-        IncidentSource::Sync => Some(ComponentName::Sync),
-        IncidentSource::Git => Some(ComponentName::Git),
-        IncidentSource::Db => Some(ComponentName::Db),
-        IncidentSource::Pty => Some(ComponentName::Pty),
-        IncidentSource::Registry => Some(ComponentName::Registry),
-        IncidentSource::Provisioner => Some(ComponentName::Provisioner),
-        IncidentSource::Push => Some(ComponentName::Push),
-        IncidentSource::Service => Some(ComponentName::Service),
-        IncidentSource::Unknown(_) => None,
     }
 }
 
@@ -236,188 +93,11 @@ fn disk_health(home: Option<&Path>, now: i64) -> ComponentHealth {
     }
 }
 
-/// Records an `ErrorInfo` at an error boundary.
-pub(crate) async fn record_info<B: ClientApiBackend>(
-    backend: &B,
-    info: &ErrorInfo,
-    source: IncidentSource,
-    level: IncidentLevel,
-    session_id: Option<&str>,
-    request_id: Option<&str>,
-) {
-    let node_id = backend.local_node_id();
-    let mut record = fxg_db::IncidentRecord::new(level, info.code, source, &info.message)
-        .with_session(session_id)
-        .with_node_id(node_id.as_ref().map(fxg_protocol::NodeId::as_str))
-        .with_request_id(request_id.or(info.request_id.as_deref()))
-        .with_details(RawJson::new(serde_json::json!({
-            "retryable": info.retryable,
-            "params": info.params,
-            "details": info.details,
-        })));
-    record.details = redact_json(&record.details, backend.data_dir().as_deref());
-    backend.db().record_incident_best_effort(&record).await;
-}
-
-/// Records a warning returned with a partially successful command.
-pub(crate) async fn record_warning<B: ClientApiBackend>(
-    backend: &B,
-    warning: &WarningInfo,
-    session_id: Option<&str>,
-) {
-    let info = ErrorInfo {
-        code: warning.code,
-        message: warning.message.clone(),
-        params: std::collections::BTreeMap::new(),
-        details: warning.details.clone(),
-        retryable: false,
-        recovery: warning.recovery.clone(),
-        request_id: None,
-        data_safety: None,
-        docs: None,
-    };
-    record_info(
-        backend,
-        &info,
-        IncidentSource::Api,
-        IncidentLevel::Warning,
-        session_id,
-        None,
-    )
-    .await;
-}
-
-/// Records the error / warnings attached to a command result.
-///
-/// Shared by the Client WS and the REST prompt / control endpoints so both
-/// transports feed the same incident log.
-pub(crate) async fn record_command_result<B: ClientApiBackend>(
-    backend: &B,
-    result: &CommandResult,
-) {
-    let session_id = result
-        .session_id
-        .as_ref()
-        .map(fxg_protocol::SessionId::as_str);
-    if let Some(error) = result.error.as_ref() {
-        record_info(
-            backend,
-            error,
-            IncidentSource::Api,
-            IncidentLevel::Error,
-            session_id,
-            None,
-        )
-        .await;
-    }
-    for warning in &result.warnings {
-        record_warning(backend, warning, session_id).await;
-    }
-}
-
-/// Extracts a session ID from an API path (`/api/v1/sessions/{id}/...`).
-pub(crate) fn session_id_from_path(path: &str) -> Option<&str> {
-    let mut segments = path.split('/');
-    while let Some(segment) = segments.next() {
-        if segment == "sessions" {
-            return segments.next().filter(|value| !value.is_empty());
-        }
-    }
-    None
-}
-
-/// Extracts the error code header attached by [`super::ApiError::into_response`].
-pub(crate) fn error_code_from_headers(headers: &axum::http::HeaderMap) -> Option<ErrorCode> {
-    let value = header_str(
-        headers,
-        axum::http::header::HeaderName::from_static("x-fxg-error-code"),
-    )?;
-    match value.parse::<ErrorCode>() {
-        Ok(code) => Some(code),
-        Err(err) => {
-            tracing::debug!("invalid x-fxg-error-code header: {err}");
-            None
-        }
-    }
-}
-
-/// Incidents whose status code is worth persisting (server errors and recoverable conflicts).
-pub(crate) fn should_record_status(status: StatusCode) -> bool {
-    status.is_server_error()
-        || matches!(
-            status,
-            StatusCode::CONFLICT | StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_MANY_REQUESTS
-        )
-}
-
-/// Builds a redacted support bundle for the endpoint.
-pub(crate) async fn build_support_bundle<B: ClientApiBackend>(
-    backend: &B,
-) -> Result<SupportBundle, super::ApiError> {
-    let diagnostics = build_diagnostics(backend).await?;
-    let counts = backend
-        .db()
-        .database_counts()
-        .await
-        .map_err(super::ApiError::from)?;
-    let sessions = backend
-        .db()
-        .support_bundle_sessions(SUPPORT_BUNDLE_SESSION_LIMIT)
-        .await
-        .map_err(super::ApiError::from)?;
-    let pending_outbox_events = match backend.connection_role() {
-        ConnectionRole::LocalNode => backend
-            .db()
-            .unsynced_event_count()
-            .await
-            .map_err(super::ApiError::from)?,
-        ConnectionRole::Hub => 0,
-    };
-    let home = dirs::home_dir();
-    let home = home.as_deref();
-    let database_file = backend.db_path();
-    let database = DatabaseStats {
-        path: database_file
-            .as_ref()
-            .map(|path| redact_text(&path.to_string_lossy(), home))
-            .unwrap_or_default(),
-        size_bytes: database_file
-            .as_ref()
-            .map(|path| fxg_db::incidents::file_size(path))
-            .unwrap_or(0),
-        sessions: counts.sessions,
-        events: counts.events,
-        incidents: counts.incidents,
-        pending_outbox_events,
-    };
-    let config = redact_config(backend.support_bundle_config(), home);
-    let logs = backend
-        .support_bundle_logs(SUPPORT_BUNDLE_LOG_LINES)
-        .into_iter()
-        .map(|line| redact_text(&line, home))
-        .collect();
-    Ok(SupportBundle {
-        generated_at: now_ms(),
-        version: backend.version().to_owned(),
-        role: backend.connection_role(),
-        config,
-        diagnostics: redact_diagnostics(diagnostics, home),
-        database,
-        sessions: redact_sessions(sessions, home),
-        logs,
-    })
-}
-
 /// Builds the shared diagnostics response (used by `GET /api/v1/diagnostics`).
 pub(crate) async fn build_diagnostics<B: ClientApiBackend>(
     backend: &B,
 ) -> Result<DiagnosticsResponse, super::ApiError> {
     let health = build_system_status(backend).await;
-    let incidents = backend
-        .db()
-        .list_incidents(50, false)
-        .await
-        .map_err(super::ApiError::from)?;
     let agents = backend.agent_diagnostics();
     let node_log = backend
         .log_path()
@@ -431,187 +111,7 @@ pub(crate) async fn build_diagnostics<B: ClientApiBackend>(
         agents,
         node_log,
         health,
-        incidents,
     })
-}
-
-fn redact_sessions(
-    mut sessions: Vec<fxg_protocol::common::SupportBundleSession>,
-    home: Option<&Path>,
-) -> Vec<fxg_protocol::common::SupportBundleSession> {
-    for entry in &mut sessions {
-        entry.session.local_path = redact_text(&entry.session.local_path, home);
-        entry.session.title = redact_text(&entry.session.title, home);
-        if let Some(branch) = entry.session.git_branch.as_mut() {
-            *branch = redact_text(branch, home);
-        }
-    }
-    sessions
-}
-
-fn redact_config(config: SupportBundleConfig, home: Option<&Path>) -> SupportBundleConfig {
-    SupportBundleConfig {
-        data_dir: redact_text(&config.data_dir, home),
-        log_level: config.log_level.map(|value| redact_text(&value, home)),
-        log_file: config.log_file.map(|value| redact_text(&value, home)),
-        log_format: config.log_format.map(|value| redact_text(&value, home)),
-        node_listen_addr: config.node_listen_addr,
-        hub_url: config.hub_url.map(|value| redact_text(&value, home)),
-        hub_listen_addr: config.hub_listen_addr,
-        allowed_hosts: config.allowed_hosts,
-        allowed_origins: config.allowed_origins,
-    }
-}
-
-fn redact_diagnostics(
-    mut diagnostics: DiagnosticsResponse,
-    home: Option<&Path>,
-) -> DiagnosticsResponse {
-    diagnostics.node_log = diagnostics.node_log.map(|path| redact_text(&path, home));
-    for agent in &mut diagnostics.agents {
-        for line in &mut agent.stderr_tail {
-            *line = redact_text(line, home);
-        }
-    }
-    for component in &mut diagnostics.health.components {
-        if let Some(message) = component.message.as_mut() {
-            *message = redact_text(message, home);
-        }
-    }
-    for incident in &mut diagnostics.incidents {
-        incident.summary = redact_text(&incident.summary, home);
-        incident.details = redact_json(&incident.details, home);
-    }
-    diagnostics
-}
-
-/// Redacts secrets and the home directory from free-form text.
-pub(crate) fn redact_text(text: &str, home: Option<&Path>) -> String {
-    let mut value = text.to_owned();
-    if let Some(home) = home {
-        let home = home.to_string_lossy().into_owned();
-        if !home.is_empty() {
-            value = value.replace(&home, "~");
-        }
-    }
-    for (marker, end_chars) in [
-        ("authorization:", "\r\n"),
-        ("bearer ", " \t\r\n"),
-        ("fxg_session=", "; \t\r\n\""),
-        ("token=", "& \t\r\n\""),
-        ("access_token=", "& \t\r\n\""),
-        ("refresh_token=", "& \t\r\n\""),
-        ("api_key=", "& \t\r\n\""),
-        ("apikey=", "& \t\r\n\""),
-        ("x-api-key:", " \t\r\n\""),
-        ("client_secret=", "& \t\r\n\""),
-        ("password=", "& \t\r\n\""),
-        ("secret=", "& \t\r\n\""),
-        ("sk-", " \t\r\n\"'"),
-        ("ghp_", " \t\r\n\"'"),
-        ("github_pat_", " \t\r\n\"'"),
-        ("akia", " \t\r\n\"'"),
-    ] {
-        value = redact_after(&value, marker, end_chars);
-    }
-    redact_url_credentials(&value)
-}
-
-/// Replaces `scheme://user:pass@host` credentials with `scheme://<redacted>@host`.
-fn redact_url_credentials(text: &str) -> String {
-    let mut result = String::with_capacity(text.len());
-    let mut cursor = 0;
-    while let Some(relative) = text[cursor..].find("://") {
-        let scheme_end = cursor + relative + 3;
-        let after = &text[scheme_end..];
-        let host_end = after
-            .find(['/', ' ', '\t', '\r', '\n', '?', '#'])
-            .unwrap_or(after.len());
-        let authority = &after[..host_end];
-        match authority.rfind('@') {
-            Some(at) => {
-                result.push_str(&text[cursor..scheme_end]);
-                result.push_str("<redacted>@");
-                cursor = scheme_end + at + 1;
-            }
-            None => {
-                let end = scheme_end + host_end;
-                result.push_str(&text[cursor..end]);
-                cursor = end;
-            }
-        }
-    }
-    result.push_str(&text[cursor..]);
-    result
-}
-
-/// Replaces the value following every `marker` with `<redacted>`.
-fn redact_after(text: &str, marker: &str, end_chars: &str) -> String {
-    let lower = text.to_ascii_lowercase();
-    let mut result = String::with_capacity(text.len());
-    let mut cursor = 0;
-    while let Some(relative) = lower[cursor..].find(marker) {
-        let marker_end = cursor + relative + marker.len();
-        result.push_str(&text[cursor..marker_end]);
-        let after = &text[marker_end..];
-        // `Header: value` / `key = value` may have whitespace after the marker.
-        let trimmed = after.trim_start_matches([' ', '\t']);
-        let whitespace = after.len() - trimmed.len();
-        result.push_str(&after[..whitespace]);
-        result.push_str("<redacted>");
-        let value_end = trimmed
-            .find(|ch| end_chars.contains(ch))
-            .unwrap_or(trimmed.len());
-        cursor = marker_end + whitespace + value_end;
-    }
-    result.push_str(&text[cursor..]);
-    result
-}
-
-/// Redacts secret-looking object keys and the home directory inside JSON values.
-pub(crate) fn redact_json(value: &RawJson, home: Option<&Path>) -> RawJson {
-    RawJson::new(redact_json_value(value.as_value(), home))
-}
-
-fn redact_json_value(value: &serde_json::Value, home: Option<&Path>) -> serde_json::Value {
-    match value {
-        serde_json::Value::String(text) => serde_json::Value::String(redact_text(text, home)),
-        serde_json::Value::Array(items) => serde_json::Value::Array(
-            items
-                .iter()
-                .map(|item| redact_json_value(item, home))
-                .collect(),
-        ),
-        serde_json::Value::Object(map) => {
-            let mut redacted = serde_json::Map::with_capacity(map.len());
-            for (key, item) in map {
-                if is_secret_key(key) {
-                    redacted.insert(
-                        key.clone(),
-                        serde_json::Value::String("<redacted>".to_owned()),
-                    );
-                } else {
-                    redacted.insert(key.clone(), redact_json_value(item, home));
-                }
-            }
-            serde_json::Value::Object(redacted)
-        }
-        other => other.clone(),
-    }
-}
-
-fn is_secret_key(key: &str) -> bool {
-    let key = key.to_ascii_lowercase();
-    key.contains("token")
-        || key.contains("password")
-        || key.contains("secret")
-        || key.contains("authorization")
-        || key.contains("cookie")
-        || key.contains("api_key")
-        || key.contains("apikey")
-        || key.contains("access_key")
-        || key.contains("private_key")
-        || key.contains("client_secret")
 }
 
 /// Resolves the newest file for a logically named log (`node.log`).
@@ -650,88 +150,9 @@ pub fn resolve_log_file(path: &Path) -> std::path::PathBuf {
         .unwrap_or_else(|| path.to_path_buf())
 }
 
-/// Reads the tail of a log file (oldest first). Missing files yield an empty tail.
-///
-/// Only the last 1 MiB is read, so a large (non-rotated) log cannot make the
-/// diagnostics endpoint allocate the whole file.
-pub fn log_tail(path: &Path, lines: usize) -> Vec<String> {
-    const MAX_TAIL_BYTES: u64 = 1024 * 1024;
-    let path = resolve_log_file(path);
-    let mut file = match std::fs::File::open(&path) {
-        Ok(file) => file,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
-        Err(err) => {
-            tracing::warn!(path = %path.display(), "failed to open the log file: {err}");
-            return Vec::new();
-        }
-    };
-    let length = file.metadata().map(|meta| meta.len()).unwrap_or(0);
-    let start = length.saturating_sub(MAX_TAIL_BYTES);
-    if start > 0
-        && let Err(err) = file.seek(SeekFrom::Start(start))
-    {
-        tracing::warn!(path = %path.display(), "failed to seek the log file: {err}");
-        return Vec::new();
-    }
-    let mut bytes = Vec::new();
-    if let Err(err) = file.read_to_end(&mut bytes) {
-        tracing::warn!(path = %path.display(), "failed to read the log file: {err}");
-        return Vec::new();
-    }
-    let text = String::from_utf8_lossy(&bytes);
-    // Drop the first (possibly partial) line when the read started mid-file.
-    let text: &str = if start > 0 {
-        text.split_once('\n').map_or("", |(_, rest)| rest)
-    } else {
-        &text
-    };
-    let mut tail: Vec<String> = text.lines().rev().take(lines).map(str::to_owned).collect();
-    tail.reverse();
-    tail
-}
-
-/// Retention metadata exposed by `GET /api/v1/diagnostics/incidents`.
-pub const fn incident_retention() -> (u32, u32) {
-    (INCIDENT_RETENTION_DAYS, INCIDENT_MAX_ENTRIES)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
-
-    #[test]
-    fn redacts_tokens_and_cookies() {
-        let text = "GET /?token=abc123 Authorization: Bearer xyz Cookie: fxg_session=secret; a=b";
-        let redacted = redact_text(text, None);
-        assert!(!redacted.contains("abc123"));
-        assert!(!redacted.contains("xyz"));
-        assert!(!redacted.contains("secret"));
-        assert!(redacted.contains("<redacted>"));
-    }
-
-    #[test]
-    fn redacts_api_keys_and_common_token_prefixes() {
-        let text = "api_key=abc123 sk-xyz ghp_123 AKIA456 x-api-key: xyz789";
-        let redacted = redact_text(text, None);
-        for secret in ["abc123", "xyz", "123", "456", "xyz789"] {
-            assert!(!redacted.contains(secret), "{secret} leaked: {redacted}");
-        }
-        assert!(redacted.contains("<redacted>"));
-    }
-
-    #[test]
-    fn secret_json_keys_include_api_key_variants() {
-        for key in [
-            "api_key",
-            "apikey",
-            "access_key",
-            "private_key",
-            "client_secret",
-        ] {
-            assert!(is_secret_key(key), "{key} must be treated as a secret key");
-        }
-    }
 
     #[test]
     fn resolve_log_file_finds_a_rotated_file() {
@@ -740,71 +161,5 @@ mod tests {
         let rotated = dir.path().join("node.log.2026-11-16");
         std::fs::write(&rotated, "rotated").expect("write rotated");
         assert_eq!(resolve_log_file(&base), rotated);
-    }
-
-    #[test]
-    fn log_tail_reads_only_the_last_megabyte() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("node.log");
-        let mut text = String::new();
-        for index in 0..200_000 {
-            text.push_str(&format!("line {index:06}\n"));
-        }
-        std::fs::write(&path, text).expect("write log");
-
-        let tail = log_tail(&path, 2);
-        assert_eq!(tail, vec!["line 199998", "line 199999"]);
-    }
-
-    #[test]
-    fn redacts_home_directory() {
-        let text = "/home/alice/.local/state/flexagent/node/node.log";
-        let redacted = redact_text(text, Some(Path::new("/home/alice")));
-        assert_eq!(redacted, "~/.local/state/flexagent/node/node.log");
-    }
-
-    #[test]
-    fn redacts_url_credentials() {
-        let text = "wss://user:pass@example.com/api/v1/node/ws";
-        assert_eq!(
-            redact_text(text, None),
-            "wss://<redacted>@example.com/api/v1/node/ws"
-        );
-        assert_eq!(
-            redact_text("https://example.com/path", None),
-            "https://example.com/path"
-        );
-    }
-
-    #[test]
-    fn redacts_secret_json_keys_recursively() {
-        let json = RawJson::new(serde_json::json!({
-            "token": "abc",
-            "nested": { "password": "pw", "path": "/home/alice/work" }
-        }));
-        let redacted = redact_json(&json, Some(Path::new("/home/alice")));
-        let value = redacted.as_value();
-        assert_eq!(value["token"], "<redacted>");
-        assert_eq!(value["nested"]["password"], "<redacted>");
-        assert_eq!(value["nested"]["path"], "~/work");
-    }
-
-    #[test]
-    fn extracts_session_id_from_path() {
-        assert_eq!(
-            session_id_from_path("/api/v1/sessions/ses_1/permissions/x/respond"),
-            Some("ses_1")
-        );
-        assert_eq!(session_id_from_path("/api/v1/projects"), None);
-    }
-
-    #[test]
-    fn records_only_server_errors_and_recoverable_conflicts() {
-        assert!(should_record_status(StatusCode::INTERNAL_SERVER_ERROR));
-        assert!(should_record_status(StatusCode::SERVICE_UNAVAILABLE));
-        assert!(should_record_status(StatusCode::CONFLICT));
-        assert!(!should_record_status(StatusCode::BAD_REQUEST));
-        assert!(!should_record_status(StatusCode::NOT_FOUND));
-        assert!(!should_record_status(StatusCode::UNAUTHORIZED));
     }
 }

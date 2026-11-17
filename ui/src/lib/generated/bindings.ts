@@ -621,22 +621,6 @@ export type DataSafety =
 /**  Unknown */
 "unknown";
 
-/**  Database statistics included in a support bundle. */
-export type DatabaseStats = {
-	/**  Database file path after home-directory redaction */
-	path: string,
-	/**  Database file size in bytes */
-	size_bytes: number,
-	/**  Number of sessions */
-	sessions: number,
-	/**  Number of persisted events */
-	events: number,
-	/**  Number of incidents */
-	incidents: number,
-	/**  Events not yet acknowledged by the hub (nodes only) */
-	pending_outbox_events: number,
-};
-
 /**  `GET /api/v1/diagnostics` response. */
 export type DiagnosticsResponse = {
 	/**  Endpoint identifier (`<node_id>` / `hub`) */
@@ -649,8 +633,6 @@ export type DiagnosticsResponse = {
 	node_log: string | null,
 	/**  Component health and delivery counters */
 	health: SystemStatus,
-	/**  Recent persisted incidents (newest first) */
-	incidents: IncidentEntry[],
 };
 
 /**  Scope of a diff. */
@@ -914,7 +896,7 @@ export type ErrorInfo = {
 	retryable?: boolean,
 	/**  Recovery actions the client can offer as buttons */
 	recovery?: RecoveryAction[],
-	/**  Correlation ID shared with logs / incidents */
+	/**  Correlation ID shared with logs */
 	request_id?: string | null,
 	/**  What happened to the user's data (unchanged / not sent / recoverable / lost) */
 	data_safety?: DataSafety | null,
@@ -1100,59 +1082,6 @@ export type HubSettingsSnapshot = {
 export type ImportRegistryAgentRequest = {
 	/**  Built-in extension ID to apply to the imported custom agent. */
 	extension?: string | null,
-};
-
-/**
- *  A persisted diagnostic incident.
- *
- *  Repeated occurrences of the same cause are grouped into one entry with an
- *  increasing `occurrence_count` instead of filling the table with duplicates.
- */
-export type IncidentEntry = {
-	/**  Row ID */
-	id: number,
-	/**  First occurrence (Unix epoch ms) */
-	created_at: number,
-	/**  Most recent occurrence (Unix epoch ms) */
-	last_seen_at: number,
-	/**  Severity */
-	level: string,
-	/**  Structured error code */
-	code: ErrorCode,
-	/**  English human-readable summary */
-	summary: string,
-	/**  Technical details (paths, request context, ...) */
-	details?: RawJson,
-	/**  Related session */
-	session_id?: SessionId | null,
-	/**  Related node */
-	node_id?: NodeId | null,
-	/**  Request correlation ID */
-	request_id?: string | null,
-	/**  Component that produced the incident */
-	source: string,
-	/**  Number of occurrences since the first one */
-	occurrence_count: number,
-	/**  Time the incident was marked resolved (Unix epoch ms) */
-	resolved_at?: number | null,
-};
-
-/**  `GET /api/v1/diagnostics/incidents` response. */
-export type IncidentListResponse = {
-	/**  Newest first */
-	incidents: IncidentEntry[],
-	/**  Retention period of the ring buffer (days) */
-	retention_days: number,
-	/**  Maximum number of retained rows */
-	max_entries: number,
-};
-
-/**  Query of `GET /api/v1/diagnostics/incidents`. */
-export type IncidentQuery = {
-	/**  Maximum number of entries to return (default 50) */
-	limit: number | null,
-	/**  Include incidents that were marked resolved */
-	include_resolved: boolean | null,
 };
 
 /**  Initial session configuration applied right after `session/new`. */
@@ -1834,9 +1763,7 @@ path: string } |
 /**  Show the logs / diagnostics for a session */
 { kind: "show_logs";
 /**  Target session ID (all logs when omitted) */
-session_id: SessionId | null } |
-/**  Export a support bundle */
-{ kind: "export_diagnostics" };
+session_id: SessionId | null };
 
 /**  One ACP Registry entry shown in the "import as custom agent" dialog. */
 export type RegistryAgentSummary = {
@@ -2406,61 +2333,6 @@ raw_output_delta: string | null } |
 terminal_id: string;
 /**  Output bytes (Base64) */
 data_b64: string };
-
-/**
- *  `GET /api/v1/diagnostics/bundle` response (`fxg support bundle`).
- *
- *  Everything text-based is redacted: tokens, cookies, environment values,
- *  prompts and the user's home directory never leave the process.
- */
-export type SupportBundle = {
-	/**  Generation time (Unix epoch ms) */
-	generated_at: number,
-	/**  fxg binary version */
-	version: string,
-	/**  Kind of endpoint */
-	role: ConnectionRole,
-	/**  Redacted bootstrap configuration */
-	config: SupportBundleConfig,
-	/**  Diagnostics (health, incidents, agent stderr tails) */
-	diagnostics: DiagnosticsResponse,
-	/**  Database statistics */
-	database: DatabaseStats,
-	/**  Recent sessions with their event counts */
-	sessions: SupportBundleSession[],
-	/**  Tail of the process log (redacted, oldest first) */
-	logs: string[],
-};
-
-/**  Redacted bootstrap configuration included in a support bundle. */
-export type SupportBundleConfig = {
-	/**  Data directory after replacing the user's home directory with `~` */
-	data_dir: string,
-	/**  Log level */
-	log_level: string | null,
-	/**  Log file destination */
-	log_file: string | null,
-	/**  Log format */
-	log_format: string | null,
-	/**  Local node bind address */
-	node_listen_addr: string | null,
-	/**  Hub URL */
-	hub_url: string | null,
-	/**  Hub bind address */
-	hub_listen_addr: string | null,
-	/**  Extra allowed hosts (the owner's `allowed_hosts`) */
-	allowed_hosts: string[],
-	/**  Extra allowed origins (the owner's `allowed_origins`) */
-	allowed_origins: string[],
-};
-
-/**  Summary of one session in a support bundle. */
-export type SupportBundleSession = {
-	/**  Session summary */
-	session: SessionSummary,
-	/**  Persisted event count */
-	event_count: number,
-};
 
 /**  `GET /api/v1/system/info` response. */
 export type SystemInfoResponse = {

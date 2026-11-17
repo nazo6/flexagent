@@ -19,7 +19,10 @@
 
 ## 3. エラー処理・診断性の残項目
 
-出典: [`docs/proposals/2026-11-08-error-handling-and-recovery-plan.md`](./proposals/2026-11-08-error-handling-and-recovery-plan.md) / [`docs/changelog/2026-11/2026-11-10-diagnostics-incidents.md`](./changelog/2026-11/2026-11-10-diagnostics-incidents.md)
+出典: [`docs/proposals/2026-11-08-error-handling-and-recovery-plan.md`](./proposals/2026-11-08-error-handling-and-recovery-plan.md)
+
+incidents とサポートバンドルは 2026-11-17 に削除済み
+（[changelog](./changelog/2026-11/2026-11-17-remove-support-bundle-and-incidents.md)）。
 
 - [ ] `fxg node status --verbose` / `stale_registry_served` の計測
 - [ ] `PreflightFailed { checks: [...] }` による起動前チェックの標準化

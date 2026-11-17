@@ -25,7 +25,7 @@ export interface AppProblem {
   code: ErrorCode | null;
   /** Technical details for the expandable section (null when absent). */
   details: string | null;
-  /** Correlation ID shared with server logs / future incidents. */
+  /** Correlation ID shared with server logs. */
   requestId: string | null;
   /** Troubleshooting documentation anchor. */
   docs: string | null;

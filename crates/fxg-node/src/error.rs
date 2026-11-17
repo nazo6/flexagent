@@ -2,8 +2,6 @@
 
 use std::path::PathBuf;
 
-use fxg_protocol::common::{IncidentLevel, IncidentSource};
-
 /// Node daemon error.
 #[derive(Debug, thiserror::Error)]
 pub enum NodeError {
@@ -136,87 +134,6 @@ pub enum NodeError {
 }
 
 impl NodeError {
-    /// Component that should own incidents caused by this error.
-    pub fn incident_source(&self) -> IncidentSource {
-        match self {
-            Self::Agent(_) | Self::AuthRequired { .. } => IncidentSource::Agent,
-            Self::GitUnavailable(_)
-            | Self::Git { .. }
-            | Self::NotARepository(_)
-            | Self::InvalidWorktree(_) => IncidentSource::Git,
-            Self::Db(_) => IncidentSource::Db,
-            Self::Pty(_) => IncidentSource::Pty,
-            Self::Io { .. } | Self::Plain(_) | Self::Json(_) | Self::Config(_) => {
-                IncidentSource::Api
-            }
-            Self::Hub(_) | Self::Timeout(_) => IncidentSource::Sync,
-            Self::Forbidden(_)
-            | Self::NotFound(_)
-            | Self::InvalidState(_)
-            | Self::InvalidSession(_)
-            | Self::ResumeRequired { .. }
-            | Self::ForkUnsupported(_)
-            | Self::ForkScopeUnsupported(_)
-            | Self::HistoryUnavailable(_)
-            | Self::Busy(_)
-            | Self::CommandDuplicate(_)
-            | Self::AlreadyResolved(_)
-            | Self::NonPersistableEvent(_)
-            | Self::PairingTokenRequired
-            | Self::SecretMissing { .. }
-            | Self::SecretInUse { .. }
-            | Self::SecretInvalid(_) => IncidentSource::Api,
-        }
-    }
-
-    /// Severity used when this error becomes an incident.
-    pub fn incident_level(&self) -> IncidentLevel {
-        match self {
-            Self::Busy(_)
-            | Self::CommandDuplicate(_)
-            | Self::AlreadyResolved(_)
-            | Self::Forbidden(_)
-            | Self::NotFound(_)
-            | Self::InvalidSession(_)
-            | Self::InvalidState(_)
-            | Self::ResumeRequired { .. }
-            | Self::ForkUnsupported(_)
-            | Self::ForkScopeUnsupported(_)
-            | Self::HistoryUnavailable(_)
-            | Self::AuthRequired { .. }
-            | Self::PairingTokenRequired
-            | Self::SecretMissing { .. }
-            | Self::SecretInUse { .. }
-            | Self::SecretInvalid(_) => IncidentLevel::Warning,
-            Self::Agent(_)
-            | Self::GitUnavailable(_)
-            | Self::Git { .. }
-            | Self::NotARepository(_)
-            | Self::InvalidWorktree(_)
-            | Self::Db(_)
-            | Self::Pty(_)
-            | Self::Io { .. }
-            | Self::Plain(_)
-            | Self::Json(_)
-            | Self::Hub(_)
-            | Self::Timeout(_)
-            | Self::Config(_)
-            | Self::NonPersistableEvent(_) => IncidentLevel::Error,
-        }
-    }
-
-    /// Whether the error is expected control flow and should not be recorded.
-    pub fn is_incident(&self) -> bool {
-        !matches!(
-            self,
-            Self::Busy(_)
-                | Self::CommandDuplicate(_)
-                | Self::AlreadyResolved(_)
-                | Self::Forbidden(_)
-                | Self::NotFound(_)
-        )
-    }
-
     /// Creates an I/O error with an associated path.
     pub fn io(path: impl Into<PathBuf>, source: std::io::Error) -> Self {
         Self::Io {

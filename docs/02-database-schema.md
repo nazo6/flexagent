@@ -48,7 +48,6 @@ E2E暗号化を行わないため、ハブ側で会話履歴の構造化クエ�
 | `permission_requests`                | 自分のセッション分の投影                             | 全会話分の投影（未解決の承認）                                     |
 | `push_subscriptions`                 | ノード直結 PWA 購読管理（VAPID。ハブとは独立）       | ハブ接続 PWA 購読管理（VAPID）                                     |
 | `audit_logs`                         | ローカル直結操作（CLI / `localhost:7860`）の記録     | ハブ経由操作の記録（同期対象外。各ストアが自分の観測事実のみ記録） |
-| `incidents`                          | ノード自身のエラー境界で観測した障害                 | ハブ自身のエラー境界で観測した障害（同期対象外）                   |
 | `sessions.synced_up_to_node_seq`     | 使用（ハブが ACK した水位）                          | 未使用（常に 0）                                                   |
 | `sessions.last_node_seq`             | 永続化済み最新の `node_seq`（次はこの値 + 1 を採番） | 投影に適用済みの最大 `node_seq`                                    |
 
@@ -131,7 +130,6 @@ DDL・カラム・インデックスの正は `crates/fxg-db/migrations/` です
 | `permission_requests` / `elicitation_requests`                                                | 未解決の承認 / 質問を引くための投影テーブル。                                                                         |
 | `push_subscriptions`                                                                          | 各ストア（ハブ / ノード）の Web Push (VAPID) 購読。                                                                   |
 | `audit_logs`                                                                                  | 各ストアが自分の観測した操作を記録する監査ログ。同期対象外。                                                          |
-| `incidents`                                                                                   | 各ストアのエラー境界が観測した障害のリングバッファ。同期対象外。                                                      |
 | `node_settings` / `agent_settings` / `agent_aliases` / `custom_agents` / `project_path_links` | ノード所有の実行時設定。                                                                                              |
 | `hub_settings` / `provisioners`                                                               | ハブ所有の実行時設定。                                                                                                |
 | `secrets`                                                                                     | 秘密のメタデータ。値は `<data>/{node,hub}/secrets/<id>` に置く。                                                      |
@@ -145,7 +143,6 @@ DDL・カラム・インデックスの正は `crates/fxg-db/migrations/` です
 - `sessions.deleted_at` は tombstone。行は残し、本文イベントと承認 / 質問をパージする。
 - `sessions.archived_at` は可逆な可視性フラグ。
 - `sessions.permission_policy` は `ask` / `auto_allow_all`。
-- `incidents` は同じ `(code, source, session_id, node_id)` の未解決障害を10分以内なら集約し、14日・最大1000行で保持する。
 
 ### 1.2 設定の所有者
 

@@ -305,7 +305,7 @@ impl DaemonState {
         }
 
         let token = auth::load_or_create(&paths.auth_token_path())?;
-        let bus = SessionEventBus::new(db.clone()).with_node_id(config.node_id.clone());
+        let bus = SessionEventBus::new(db.clone());
         // Reconcile the state of sessions lost when the previous daemon exited
         reconcile_stale_sessions(&bus).await?;
 
