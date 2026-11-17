@@ -1788,3 +1788,189 @@ async fn node_hello_protocol_mismatch_receives_hello_rejected() {
         .await
         .expect("server stop");
 }
+
+// ----------------------------------------------------------------------
+// E2E test: outbox paging with a large offline backlog
+// ----------------------------------------------------------------------
+
+/// Seeds a session with `count` events directly in `node.db` (a mock offline backlog).
+async fn seed_backlog(db: &Db, count: u64) -> String {
+    use fxg_protocol::events::SessionEventEnvelope;
+    use fxg_protocol::util::{now_ms, uuid_v7};
+
+    let session_id = uuid_v7();
+    let mut events = Vec::with_capacity(usize::try_from(count).unwrap_or(0));
+    events.push(SessionEventEnvelope {
+        event_id: uuid_v7().into(),
+        session_id: session_id.clone().into(),
+        node_seq: 1,
+        created_at: now_ms(),
+        payload: UnifiedEventPayload::SessionCreated {
+            node_id: "paging-node".into(),
+            project_id: "github.com/nazo6/flexagent".into(),
+            project_name: "flexagent".to_owned(),
+            local_path: "/tmp/flexagent".to_owned(),
+            git_branch: Some("master".to_owned()),
+            is_worktree: false,
+            agent_id: "mock".to_owned(),
+            parent_session_id: None,
+            title: "Paging backlog".to_owned(),
+        },
+    });
+    // Leave the session stopped so the daemon's restart reconciliation does not
+    // append an extra `StatusChanged` event.
+    events.push(SessionEventEnvelope {
+        event_id: uuid_v7().into(),
+        session_id: session_id.clone().into(),
+        node_seq: 2,
+        created_at: now_ms(),
+        payload: UnifiedEventPayload::StatusChanged {
+            status: SessionStatus::Stopped,
+            error_message: None,
+        },
+    });
+    for seq in 3..=count {
+        events.push(SessionEventEnvelope {
+            event_id: uuid_v7().into(),
+            session_id: session_id.clone().into(),
+            node_seq: seq,
+            created_at: now_ms(),
+            payload: UnifiedEventPayload::AgentMessage {
+                message_id: format!("m-{seq}"),
+                text: format!("mock event {seq}"),
+                is_complete: true,
+                subagent_id: None,
+            },
+        });
+    }
+    db.append_events(&events).await.expect("seed backlog");
+    session_id
+}
+
+/// Counts every persisted event of a session (follows the cursor).
+async fn count_session_events(db: &Db, session_id: &str) -> usize {
+    let mut cursor = 0u64;
+    let mut count = 0usize;
+    loop {
+        let batch = db
+            .session_events_after(session_id, cursor, 500)
+            .await
+            .expect("events");
+        if batch.events.is_empty() {
+            return count;
+        }
+        count += batch.events.len();
+        cursor = batch.cursor;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn outbox_paging_syncs_a_large_offline_backlog() {
+    // More than one outbox page (1000 events), so both the initial flush and the
+    // resync must page.
+    const BACKLOG: u64 = 2500;
+
+    let server_home = tempfile::tempdir().expect("server home");
+    let node_home = tempfile::tempdir().expect("node home");
+    let port = reserve_port();
+    let server_url = format!("ws://127.0.0.1:{port}/api/v1/node/ws");
+    let token = issue_node_token(server_home.path(), "paging-node").await;
+    let agent = MockAgent::default();
+
+    // 1. Start the node offline and seed a backlog larger than one page.
+    let node = start_node(node_home.path(), "paging-node", None, None, &agent).await;
+    let node_db = Db::open(
+        &Paths::portable(node_home.path(), Role::Node).db_path(),
+        Role::Node,
+    )
+    .await
+    .expect("node db");
+    let session_id = seed_backlog(&node_db, BACKLOG).await;
+    node.shutdown();
+    tokio::time::timeout(Duration::from_secs(10), node.wait())
+        .await
+        .expect("node stop");
+
+    // 2. Start the hub and reconnect the node with pairing.
+    let server = start_hub(server_home.path(), port).await;
+    let node = start_node(
+        node_home.path(),
+        "paging-node",
+        Some(server_url.clone()),
+        Some(token.clone()),
+        &agent,
+    )
+    .await;
+    let server_db = Db::open(
+        &Paths::portable(server_home.path(), Role::Hub).db_path(),
+        Role::Hub,
+    )
+    .await
+    .expect("server db");
+
+    // 3. Every page arrives and the node watermark advances.
+    wait_until("backlog synced", Duration::from_secs(60), || async {
+        server_db
+            .get_session(&session_id)
+            .await
+            .expect("get session")
+            .is_some_and(|session| session.last_node_seq >= BACKLOG)
+    })
+    .await;
+    assert_eq!(
+        count_session_events(&server_db, &session_id).await,
+        BACKLOG as usize,
+        "the hub must receive every event exactly once"
+    );
+    wait_until("watermark acked", Duration::from_secs(30), || async {
+        node_db.unsynced_event_count().await.unwrap_or(1) == 0
+    })
+    .await;
+
+    // 4. Resync also pages: drop the hub copy and reconnect the node.
+    node.shutdown();
+    tokio::time::timeout(Duration::from_secs(10), node.wait())
+        .await
+        .expect("node stop");
+    sqlx::query("DELETE FROM session_events WHERE session_id = ?")
+        .bind(&session_id)
+        .execute(server_db.pool())
+        .await
+        .expect("drop hub events");
+    sqlx::query("UPDATE sessions SET last_node_seq = 0 WHERE session_id = ?")
+        .bind(&session_id)
+        .execute(server_db.pool())
+        .await
+        .expect("reset hub watermark");
+
+    let node = start_node(
+        node_home.path(),
+        "paging-node",
+        Some(server_url),
+        Some(token),
+        &agent,
+    )
+    .await;
+    wait_until("backlog resynced", Duration::from_secs(60), || async {
+        server_db
+            .get_session(&session_id)
+            .await
+            .expect("get session")
+            .is_some_and(|session| session.last_node_seq >= BACKLOG)
+    })
+    .await;
+    assert_eq!(
+        count_session_events(&server_db, &session_id).await,
+        BACKLOG as usize,
+        "the resync must restore every event"
+    );
+
+    node.shutdown();
+    tokio::time::timeout(Duration::from_secs(10), node.wait())
+        .await
+        .expect("node stop");
+    server.shutdown();
+    tokio::time::timeout(Duration::from_secs(10), server.wait())
+        .await
+        .expect("server stop");
+}

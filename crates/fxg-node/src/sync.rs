@@ -444,6 +444,15 @@ async fn outbox_page(
         .db()
         .extract_outbox_page(after, OUTBOX_PAGE_EVENTS)
         .await?;
+    tracing::debug!(
+        events = page
+            .batches
+            .iter()
+            .map(|batch| batch.events.len())
+            .sum::<usize>(),
+        has_more = page.next.is_some(),
+        "loaded an outbox page"
+    );
     let mut messages = Vec::new();
     for batch in page.batches {
         for chunk in batch.events.chunks(OUTBOX_BATCH_EVENTS) {
@@ -513,6 +522,12 @@ async fn resync_session(
             .db()
             .extract_outbox_after(session_id, from, OUTBOX_PAGE_EVENTS)
             .await?;
+        tracing::debug!(
+            session_id,
+            from_node_seq = from,
+            events = events.len(),
+            "loaded a resync page"
+        );
         let Some(last) = events.last().map(|event| event.node_seq) else {
             return Ok(());
         };

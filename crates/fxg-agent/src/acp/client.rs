@@ -1054,3 +1054,92 @@ pub(super) async fn run_acp_process(
 
     run_result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn limit_bytes() -> usize {
+        usize::try_from(MAX_ACP_TEXT_FILE_BYTES).expect("limit fits in usize")
+    }
+
+    #[tokio::test]
+    async fn read_text_file_applies_the_line_window() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("notes.txt");
+        tokio::fs::write(&path, "one\ntwo\nthree\nfour\n")
+            .await
+            .expect("write");
+
+        assert_eq!(
+            read_text_file(&path, None, None).await.expect("read"),
+            "one\ntwo\nthree\nfour\n"
+        );
+        assert_eq!(
+            read_text_file(&path, Some(2), Some(2))
+                .await
+                .expect("window"),
+            "two\nthree"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_text_file_rejects_files_above_the_limit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("huge.txt");
+        tokio::fs::write(&path, vec![b'a'; limit_bytes() + 1])
+            .await
+            .expect("write");
+
+        let err = read_text_file(&path, None, None)
+            .await
+            .expect_err("must reject");
+        assert!(err.to_string().contains("byte limit"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn write_text_file_rejects_content_above_the_limit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("huge.txt");
+        let content = "a".repeat(limit_bytes() + 1);
+
+        let err = write_text_file(&path, &content)
+            .await
+            .expect_err("must reject");
+        assert!(err.to_string().contains("byte limit"), "{err}");
+        assert!(!path.exists(), "a rejected write must not create the file");
+    }
+
+    #[tokio::test]
+    async fn write_text_file_returns_the_previous_content_and_skips_large_diffs() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("notes.txt");
+
+        assert_eq!(
+            write_text_file(&path, "first").await.expect("create"),
+            Some(String::new())
+        );
+        assert_eq!(
+            write_text_file(&path, "second").await.expect("update"),
+            Some("first".to_owned())
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(&path).await.expect("read"),
+            "second"
+        );
+
+        // An existing file above the limit is overwritten without a diff.
+        let huge = dir.path().join("huge.txt");
+        tokio::fs::write(&huge, vec![b'a'; limit_bytes() + 1])
+            .await
+            .expect("write huge");
+        assert_eq!(
+            write_text_file(&huge, "small").await.expect("overwrite"),
+            None
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(&huge).await.expect("read"),
+            "small"
+        );
+    }
+}

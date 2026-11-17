@@ -45,6 +45,8 @@
 ## 検証
 
 - `cargo test --workspace --no-fail-fast`
+- `cargo test -p fxg-node --test sync_e2e outbox_paging_syncs_a_large_offline_backlog`
+  （2500 件のモックバックログを実ハブへ同期し、ハブ側を消して再同期も確認）
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `mise run lint:errors`
 - `mise run fmt:check`
