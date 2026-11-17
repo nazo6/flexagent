@@ -1470,6 +1470,28 @@ pub struct WorkspaceGitCommitResponse {
     pub files: u32,
 }
 
+/// Request body of `POST /api/v1/nodes/:id/workspace/git/pull` and `.../push`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct WorkspaceGitSyncRequest {
+    /// Directory inside a registered workspace
+    pub path: String,
+}
+
+/// `POST /api/v1/nodes/:id/workspace/git/pull` / `.../push` response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct WorkspaceGitSyncResponse {
+    /// Branch that was synced (`None` when detached)
+    pub branch: Option<String>,
+    /// HEAD after the operation
+    pub commit: String,
+    /// Upstream ref (for example `origin/main`)
+    pub upstream: Option<String>,
+    /// Whether HEAD moved (pull only; always `false` for push)
+    pub updated: bool,
+}
+
 /// Agent-native management snapshot (local node only).
 ///
 /// This is the generic seam for agent integrations that expose configuration

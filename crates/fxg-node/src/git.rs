@@ -10,6 +10,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::Duration;
 
 use fxg_protocol::common::{DiffScope, FileDiff, WorkspaceDiffResponse};
 use tokio::process::Command;
@@ -66,7 +67,8 @@ pub async fn capture(
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
     for (key, value) in env {
         command.env(key, value);
     }
@@ -76,6 +78,23 @@ pub async fn capture(
         stdout: output.stdout,
         stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
     })
+}
+
+/// Runs `git` with a timeout. The child is killed when the timeout elapses.
+pub async fn capture_with_timeout(
+    cwd: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+    timeout: Duration,
+) -> Result<GitOutput, NodeError> {
+    match tokio::time::timeout(timeout, capture(cwd, args, env)).await {
+        Ok(result) => result,
+        Err(_) => Err(NodeError::Timeout(format!(
+            "git {} timed out after {}s",
+            args.join(" "),
+            timeout.as_secs()
+        ))),
+    }
 }
 
 /// Runs `git` and returns the standard output (trimmed) on success.
@@ -175,6 +194,21 @@ pub async fn remote_origin_url(repo: &Path) -> Result<Option<String>, NodeError>
 pub async fn current_branch(repo: &Path) -> Result<Option<String>, NodeError> {
     match try_git(repo, &["rev-parse", "--abbrev-ref", "HEAD"]).await? {
         Some(branch) if !branch.is_empty() && branch != "HEAD" => Ok(Some(branch)),
+        _ => Ok(None),
+    }
+}
+
+/// Upstream ref of the current branch (for example `origin/main`).
+///
+/// `None` for a detached HEAD or a branch without an upstream.
+pub async fn upstream_ref(repo: &Path) -> Result<Option<String>, NodeError> {
+    match try_git(
+        repo,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    )
+    .await?
+    {
+        Some(value) if !value.is_empty() => Ok(Some(value)),
         _ => Ok(None),
     }
 }

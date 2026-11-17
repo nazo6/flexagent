@@ -111,6 +111,10 @@ crate::open_string_enum! {
         WorktreePrune => "worktree_prune",
         /// Workspace Git commit created
         WorkspaceGitCommit => "workspace_git_commit",
+        /// Workspace Git pull (fast-forward)
+        WorkspaceGitPull => "workspace_git_pull",
+        /// Workspace Git push
+        WorkspaceGitPush => "workspace_git_push",
         /// Project binding changed
         ProjectLink => "project_link",
         /// Agent managed

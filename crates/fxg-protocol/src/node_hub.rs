@@ -16,7 +16,7 @@ use crate::client_api::{
     AgentCapabilitiesPreview, AgentsResponse, FsBrowseResponse, ProjectLinkResponse,
     ProjectPreview, ProjectScanResponse, ProjectUnlinkResponse, TerminalsResponse,
     WorkspaceFileView, WorkspaceFsListResponse, WorkspaceGitCommitResponse,
-    WorkspaceGitStatusResponse, WorktreeInfo,
+    WorkspaceGitStatusResponse, WorkspaceGitSyncResponse, WorktreeInfo,
 };
 use crate::common::{
     AgentAction, AgentUsageLimits, ClientSource, DataSafety, DiffScope, ElicitationContent,
@@ -275,6 +275,16 @@ pub enum NodeRpcRequest {
         /// Commit message
         message: String,
     },
+    /// Fetch and fast-forward a registered workspace.
+    WorkspaceGitPull {
+        /// Directory inside the workspace
+        path: String,
+    },
+    /// Push the current branch of a registered workspace.
+    WorkspaceGitPush {
+        /// Directory inside the workspace
+        path: String,
+    },
 }
 
 impl NodeRpcRequest {
@@ -288,6 +298,8 @@ impl NodeRpcRequest {
                 | Self::WorkspaceGitStatus { .. }
                 | Self::WorkspaceGitDiff { .. }
                 | Self::WorkspaceGitCommit { .. }
+                | Self::WorkspaceGitPull { .. }
+                | Self::WorkspaceGitPush { .. }
         )
     }
 }
@@ -307,7 +319,9 @@ impl NodeRpcRequest {
             | Self::ListExternalSessions { .. }
             | Self::ResumeSession { .. }
             | Self::DeleteSession { .. }
-            | Self::WorkspaceGitCommit { .. } => Duration::from_secs(120),
+            | Self::WorkspaceGitCommit { .. }
+            | Self::WorkspaceGitPull { .. }
+            | Self::WorkspaceGitPush { .. } => Duration::from_secs(120),
             Self::ManageAgent { .. } => Duration::from_secs(600),
             // A pairing test performs a WebSocket handshake with the hub.
             Self::TestPairing { .. } => Duration::from_secs(15),
@@ -359,6 +373,16 @@ pub enum NodeRpcResponse {
     WorkspaceGitCommit {
         /// Commit result
         response: WorkspaceGitCommitResponse,
+    },
+    /// Workspace Git pull (`WorkspaceGitPull`).
+    WorkspaceGitPull {
+        /// Pull result
+        response: WorkspaceGitSyncResponse,
+    },
+    /// Workspace Git push (`WorkspaceGitPush`).
+    WorkspaceGitPush {
+        /// Push result
+        response: WorkspaceGitSyncResponse,
     },
     /// Project scan payload (`ProjectScan`).
     ProjectScan {

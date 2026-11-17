@@ -49,6 +49,8 @@
     pty_spawn: m.settings_audit_action_pty_spawn(),
     kill_switch: m.settings_audit_action_kill_switch(),
     workspace_git_commit: m.settings_audit_action_workspace_git_commit(),
+    workspace_git_pull: m.settings_audit_action_workspace_git_pull(),
+    workspace_git_push: m.settings_audit_action_workspace_git_push(),
     worktree_manage: m.settings_audit_action_worktree_manage(),
     session_resume: m.settings_audit_action_session_resume(),
   };

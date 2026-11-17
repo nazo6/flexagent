@@ -52,6 +52,10 @@ pub mod actions {
     pub const WORKTREE_PRUNE: AuditAction = AuditAction::WorktreePrune;
     /// Workspace Git commit created
     pub const WORKSPACE_GIT_COMMIT: AuditAction = AuditAction::WorkspaceGitCommit;
+    /// Workspace Git pull (fast-forward)
+    pub const WORKSPACE_GIT_PULL: AuditAction = AuditAction::WorkspaceGitPull;
+    /// Workspace Git push
+    pub const WORKSPACE_GIT_PUSH: AuditAction = AuditAction::WorkspaceGitPush;
     /// Project binding (manual Link / bulk Scan)
     pub const PROJECT_LINK: AuditAction = AuditAction::ProjectLink;
     /// Agent management (install / update / delete)

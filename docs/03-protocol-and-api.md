@@ -248,6 +248,8 @@ prune します。`sessions` は最大 1000 件で、超過時は
 | `GET /api/v1/nodes/:node_id/workspace/git/status`                  | workspace の `git status`（branch / ahead / behind / 変更一覧）。       |
 | `GET /api/v1/nodes/:node_id/workspace/git/diff`                    | workspace または 1 ファイルの diff（scope / base / file）。             |
 | `POST /api/v1/nodes/:node_id/workspace/git/commit`                 | worktree の全変更を stage して 1 コミット作成（ローカル接続のみ）。     |
+| `POST /api/v1/nodes/:node_id/workspace/git/pull`                   | upstream を fetch し fast-forward のみ（ローカル接続のみ）。            |
+| `POST /api/v1/nodes/:node_id/workspace/git/push`                   | 現在のブランチを push（force なし、初回は `origin` に upstream 設定）。 |
 | `GET /api/v1/nodes/:node_id/settings`                              | ノード設定スナップショット（トークン値は返さない）。                    |
 | `PATCH /api/v1/nodes/:node_id/settings/node` / `.../agents`        | ノード所有設定の更新。                                                  |
 | `PUT/DELETE /api/v1/nodes/:node_id/settings/pairing`               | ハブ接続先の保存 / 解除。                                               |

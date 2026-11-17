@@ -154,6 +154,41 @@ async fn execute_inner(
                 .await;
             Ok(NodeRpcResponse::WorkspaceGitCommit { response })
         }
+        NodeRpcRequest::WorkspaceGitPull { path } => {
+            let response = crate::workspace::workspace_git_pull(state, &path).await?;
+            state
+                .record_audit(
+                    fxg_db::audit::actions::WORKSPACE_GIT_PULL,
+                    source,
+                    None,
+                    serde_json::json!({
+                        "path": path,
+                        "branch": response.branch.clone(),
+                        "upstream": response.upstream.clone(),
+                        "commit": response.commit.clone(),
+                        "updated": response.updated,
+                    }),
+                )
+                .await;
+            Ok(NodeRpcResponse::WorkspaceGitPull { response })
+        }
+        NodeRpcRequest::WorkspaceGitPush { path } => {
+            let response = crate::workspace::workspace_git_push(state, &path).await?;
+            state
+                .record_audit(
+                    fxg_db::audit::actions::WORKSPACE_GIT_PUSH,
+                    source,
+                    None,
+                    serde_json::json!({
+                        "path": path,
+                        "branch": response.branch.clone(),
+                        "upstream": response.upstream.clone(),
+                        "commit": response.commit.clone(),
+                    }),
+                )
+                .await;
+            Ok(NodeRpcResponse::WorkspaceGitPush { response })
+        }
         NodeRpcRequest::ProjectScan { dir } => {
             let scanned_dirs = state.project_scan(dir.as_deref().map(Path::new)).await?;
             let projects = state.list_projects_with_path_state().await?;

@@ -80,6 +80,7 @@ import type {
   WorkspaceFsListResponse,
   WorkspaceGitCommitResponse,
   WorkspaceGitStatusResponse,
+  WorkspaceGitSyncResponse,
 } from "#lib/generated/bindings.ts";
 import { errorCodeMessage } from "./error-messages";
 import { ApiError } from "./errors";
@@ -385,6 +386,24 @@ export class ApiClient {
       "POST",
       `/api/v1/nodes/${encodeURIComponent(nodeId)}/workspace/git/commit`,
       { body: { path, message } },
+    );
+  }
+
+  /** `POST /api/v1/nodes/:id/workspace/git/pull` (fetch and fast-forward only). */
+  workspaceGitPull(nodeId: string, path: string): Promise<WorkspaceGitSyncResponse> {
+    return this.#request<WorkspaceGitSyncResponse>(
+      "POST",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/workspace/git/pull`,
+      { body: { path } },
+    );
+  }
+
+  /** `POST /api/v1/nodes/:id/workspace/git/push` (never force). */
+  workspaceGitPush(nodeId: string, path: string): Promise<WorkspaceGitSyncResponse> {
+    return this.#request<WorkspaceGitSyncResponse>(
+      "POST",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/workspace/git/push`,
+      { body: { path } },
     );
   }
 

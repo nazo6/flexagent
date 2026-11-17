@@ -6,14 +6,14 @@
 //! worktree can never reach the main repository and vice versa.
 
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use fxg_protocol::client_api::{
     WorkspaceEntryKind, WorkspaceFileContent, WorkspaceFileView, WorkspaceFsEntry,
     WorkspaceFsListResponse, WorkspaceGitCommitResponse, WorkspaceGitEntry, WorkspaceGitFileStatus,
-    WorkspaceGitStatusResponse,
+    WorkspaceGitStatusResponse, WorkspaceGitSyncResponse,
 };
 use fxg_protocol::common::{DiffScope, WorkspaceDiffResponse};
 use sha2::{Digest, Sha256};
@@ -254,21 +254,7 @@ pub async fn workspace_git_commit(
         ));
     }
 
-    let resolved = resolve_existing(state, requested).await?;
-    let metadata =
-        std::fs::metadata(&resolved.path).map_err(|err| NodeError::io(&resolved.path, err))?;
-    if !metadata.is_dir() {
-        return Err(NodeError::InvalidState(format!(
-            "not a directory: {}",
-            resolved.path.display()
-        )));
-    }
-    let root = resolved.root;
-    if !git::is_inside_work_tree(&root).await? {
-        return Err(NodeError::InvalidState(
-            "the workspace is not inside a Git work tree".to_owned(),
-        ));
-    }
+    let root = resolve_git_root(state, requested).await?;
 
     let bytes = git::run_git_bytes(&root, &["status", "--porcelain=v2", "-z"]).await?;
     let parsed = parse_status_z(&bytes, &root);
@@ -294,6 +280,135 @@ pub async fn workspace_git_commit(
         branch,
         files,
     })
+}
+
+/// Timeout for Git operations that talk to a remote (fetch / push).
+const GIT_NETWORK_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// `POST /api/v1/nodes/:id/workspace/git/pull`
+///
+/// Fetches the upstream and fast-forwards the current branch. The operation
+/// never creates a merge commit or conflict markers; a diverged branch is an
+/// error that the user resolves in a terminal.
+pub async fn workspace_git_pull(
+    state: &DaemonState,
+    requested: &str,
+) -> Result<WorkspaceGitSyncResponse, NodeError> {
+    let root = resolve_git_root(state, requested).await?;
+    let upstream = git::upstream_ref(&root).await?.ok_or_else(|| {
+        NodeError::InvalidState(
+            "the current branch has no upstream; set one in a terminal before pulling".to_owned(),
+        )
+    })?;
+    let before = git::head_commit(&root).await?.unwrap_or_default();
+
+    let fetch = git::capture_with_timeout(
+        &root,
+        &["fetch"],
+        &[("GIT_TERMINAL_PROMPT", "0")],
+        GIT_NETWORK_TIMEOUT,
+    )
+    .await?;
+    if !fetch.success {
+        return Err(NodeError::Git {
+            cwd: root.clone(),
+            args: "fetch".to_owned(),
+            message: fetch.stderr,
+        });
+    }
+
+    let merge = git::capture(&root, &["merge", "--ff-only", &upstream], &[]).await?;
+    if !merge.success {
+        return Err(NodeError::Git {
+            cwd: root.clone(),
+            args: "merge --ff-only <upstream>".to_owned(),
+            message: merge.stderr,
+        });
+    }
+
+    let commit = git::head_commit(&root).await?.unwrap_or_default();
+    Ok(WorkspaceGitSyncResponse {
+        branch: git::current_branch(&root).await?,
+        updated: before != commit,
+        commit,
+        upstream: Some(upstream),
+    })
+}
+
+/// `POST /api/v1/nodes/:id/workspace/git/push`
+///
+/// Pushes the current branch without force. When the branch has no upstream,
+/// `origin` is used and the upstream is set on the first push.
+pub async fn workspace_git_push(
+    state: &DaemonState,
+    requested: &str,
+) -> Result<WorkspaceGitSyncResponse, NodeError> {
+    let root = resolve_git_root(state, requested).await?;
+    let (args, upstream) = match git::upstream_ref(&root).await? {
+        Some(upstream) => (vec!["push".to_owned()], upstream),
+        None => {
+            let branch = git::current_branch(&root)
+                .await?
+                .ok_or_else(|| NodeError::InvalidState("cannot push a detached HEAD".to_owned()))?;
+            if git::remote_origin_url(&root).await?.is_none() {
+                return Err(NodeError::InvalidState(
+                    "the current branch has no upstream and no 'origin' remote".to_owned(),
+                ));
+            }
+            let upstream = format!("origin/{branch}");
+            (
+                vec![
+                    "push".to_owned(),
+                    "--set-upstream".to_owned(),
+                    "origin".to_owned(),
+                    branch,
+                ],
+                upstream,
+            )
+        }
+    };
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let output = git::capture_with_timeout(
+        &root,
+        &arg_refs,
+        &[("GIT_TERMINAL_PROMPT", "0")],
+        GIT_NETWORK_TIMEOUT,
+    )
+    .await?;
+    if !output.success {
+        return Err(NodeError::Git {
+            cwd: root.clone(),
+            args: "push".to_owned(),
+            message: output.stderr,
+        });
+    }
+
+    let commit = git::head_commit(&root).await?.unwrap_or_default();
+    Ok(WorkspaceGitSyncResponse {
+        branch: git::current_branch(&root).await?,
+        commit,
+        upstream: Some(upstream),
+        updated: false,
+    })
+}
+
+/// Resolves a registered workspace directory to its Git worktree root.
+async fn resolve_git_root(state: &DaemonState, requested: &str) -> Result<PathBuf, NodeError> {
+    let resolved = resolve_existing(state, requested).await?;
+    let metadata =
+        std::fs::metadata(&resolved.path).map_err(|err| NodeError::io(&resolved.path, err))?;
+    if !metadata.is_dir() {
+        return Err(NodeError::InvalidState(format!(
+            "not a directory: {}",
+            resolved.path.display()
+        )));
+    }
+    if !git::is_inside_work_tree(&resolved.root).await? {
+        return Err(NodeError::InvalidState(
+            "the workspace is not inside a Git work tree".to_owned(),
+        ));
+    }
+    Ok(resolved.root)
 }
 
 /// Resolves an existing path and its workspace access root.

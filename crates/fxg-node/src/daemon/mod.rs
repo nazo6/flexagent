@@ -1863,6 +1863,15 @@ mod tests {
             .expect_err("nothing to commit");
         assert!(matches!(nothing, NodeError::InvalidState(_)));
 
+        let no_upstream = workspace::workspace_git_pull(daemon.state(), &path_str)
+            .await
+            .expect_err("pull without an upstream");
+        assert!(matches!(no_upstream, NodeError::InvalidState(_)));
+        let no_remote = workspace::workspace_git_push(daemon.state(), &path_str)
+            .await
+            .expect_err("push without an origin remote");
+        assert!(matches!(no_remote, NodeError::InvalidState(_)));
+
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
@@ -1874,6 +1883,133 @@ mod tests {
                 .expect_err("symlink escape must be rejected");
             assert!(matches!(error, NodeError::Forbidden(_)));
         }
+
+        daemon.shutdown();
+        daemon.wait().await;
+    }
+
+    #[tokio::test]
+    async fn workspace_git_push_and_pull_are_fast_forward_only() {
+        use crate::NodeError;
+        use crate::workspace;
+
+        let (daemon, dir) = start_test_daemon().await;
+        let remote = dir.path().join("remote.git");
+        crate::git::run_git(dir.path(), &["init", "--bare", "remote.git"])
+            .await
+            .expect("init bare remote");
+
+        let work = dir.path().join("work");
+        std::fs::create_dir_all(&work).expect("mkdir work");
+        let path = fxg_pty::canonicalize(&work).expect("canonical work");
+        let path_str = path.to_string_lossy().into_owned();
+        daemon
+            .state()
+            .resolve_and_register_project(&work)
+            .await
+            .expect("register project");
+
+        crate::git::run_git(&path, &["init"])
+            .await
+            .expect("git init");
+        crate::git::run_git(&path, &["config", "user.email", "test@example.com"])
+            .await
+            .expect("git email");
+        crate::git::run_git(&path, &["config", "user.name", "Test"])
+            .await
+            .expect("git name");
+        std::fs::write(path.join("hello.txt"), "hello\n").expect("write hello");
+        crate::git::run_git(&path, &["add", "hello.txt"])
+            .await
+            .expect("git add");
+        crate::git::run_git(&path, &["commit", "-m", "initial"])
+            .await
+            .expect("git commit");
+        crate::git::run_git(
+            &path,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        )
+        .await
+        .expect("git remote");
+
+        // The first push has no upstream, so it publishes to origin and sets it.
+        let pushed = workspace::workspace_git_push(daemon.state(), &path_str)
+            .await
+            .expect("first push");
+        let branch = pushed.branch.clone().expect("branch");
+        assert_eq!(pushed.upstream, Some(format!("origin/{branch}")));
+
+        // A second clone creates a remote change.
+        let other = dir.path().join("other");
+        crate::git::run_git(
+            dir.path(),
+            &[
+                "clone",
+                "--branch",
+                branch.as_str(),
+                remote.to_str().unwrap(),
+                other.to_str().unwrap(),
+            ],
+        )
+        .await
+        .expect("clone");
+        crate::git::run_git(&other, &["config", "user.email", "test@example.com"])
+            .await
+            .expect("other email");
+        crate::git::run_git(&other, &["config", "user.name", "Test"])
+            .await
+            .expect("other name");
+        std::fs::write(other.join("hello.txt"), "hello\nfrom other\n").expect("write other");
+        crate::git::run_git(&other, &["commit", "-am", "remote change"])
+            .await
+            .expect("other commit");
+        crate::git::run_git(&other, &["push"])
+            .await
+            .expect("other push");
+
+        let pulled = workspace::workspace_git_pull(daemon.state(), &path_str)
+            .await
+            .expect("pull");
+        assert!(pulled.updated);
+        assert_eq!(
+            std::fs::read_to_string(path.join("hello.txt")).expect("read hello"),
+            "hello\nfrom other\n"
+        );
+
+        let again = workspace::workspace_git_pull(daemon.state(), &path_str)
+            .await
+            .expect("second pull");
+        assert!(!again.updated);
+
+        // Diverged branches fail without creating a merge commit or conflict markers.
+        std::fs::write(path.join("hello.txt"), "hello\nlocal\n").expect("write local");
+        crate::git::run_git(&path, &["commit", "-am", "local change"])
+            .await
+            .expect("local commit");
+        std::fs::write(other.join("hello.txt"), "hello\nremote 2\n").expect("write other 2");
+        crate::git::run_git(&other, &["commit", "-am", "remote change 2"])
+            .await
+            .expect("other commit 2");
+        crate::git::run_git(&other, &["push"])
+            .await
+            .expect("other push 2");
+
+        let pull_error = workspace::workspace_git_pull(daemon.state(), &path_str)
+            .await
+            .expect_err("diverged pull must fail");
+        assert!(matches!(pull_error, NodeError::Git { .. }));
+        let push_error = workspace::workspace_git_push(daemon.state(), &path_str)
+            .await
+            .expect_err("diverged push must fail");
+        assert!(matches!(push_error, NodeError::Git { .. }));
+        assert_eq!(
+            std::fs::read_to_string(path.join("hello.txt")).expect("read local"),
+            "hello\nlocal\n"
+        );
+        let subject = crate::git::run_git(&path, &["log", "-1", "--pretty=%s"])
+            .await
+            .expect("log");
+        assert_eq!(subject, "local change");
 
         daemon.shutdown();
         daemon.wait().await;

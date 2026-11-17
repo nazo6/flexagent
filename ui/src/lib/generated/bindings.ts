@@ -3112,6 +3112,24 @@ export type WorkspaceGitStatusResponse = {
 	truncated: boolean,
 };
 
+/**  Request body of `POST /api/v1/nodes/:id/workspace/git/pull` and `.../push`. */
+export type WorkspaceGitSyncRequest = {
+	/**  Directory inside a registered workspace */
+	path: string,
+};
+
+/**  `POST /api/v1/nodes/:id/workspace/git/pull` / `.../push` response. */
+export type WorkspaceGitSyncResponse = {
+	/**  Branch that was synced (`None` when detached) */
+	branch: string | null,
+	/**  HEAD after the operation */
+	commit: string,
+	/**  Upstream ref (for example `origin/main`) */
+	upstream: string | null,
+	/**  Whether HEAD moved (pull only; always `false` for push) */
+	updated: boolean,
+};
+
 /**  Worktree operation action (`ManageWorktree` command). */
 export type WorktreeAction =
 /**  Create a new worktree (`git worktree add -b <branch> <path> <base>`) */

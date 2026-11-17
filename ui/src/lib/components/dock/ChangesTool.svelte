@@ -2,6 +2,7 @@
   import DiffPane from "#lib/components/diff/DiffPane.svelte";
   import GitStatusBadge from "#lib/components/dock/GitStatusBadge.svelte";
   import { errorMessage } from "#lib/api/error-messages.ts";
+  import { ApiError } from "#lib/api/errors.ts";
   import { joinPath } from "#lib/dock/paths.ts";
   import type { DockContext, DockDiffScope } from "#lib/stores/dock.svelte.ts";
   import { dock } from "#lib/stores/dock.svelte.ts";
@@ -15,6 +16,8 @@
   import { m } from "#lib/paraglide/messages.js";
   import { cn } from "#lib/utils.ts";
   import type { TimelineItem } from "#lib/sync/reducer.ts";
+  import ArrowDownToLineIcon from "@lucide/svelte/icons/arrow-down-to-line";
+  import ArrowUpFromLineIcon from "@lucide/svelte/icons/arrow-up-from-line";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
   import { toast } from "svelte-sonner";
@@ -37,6 +40,7 @@
   let branchGeneration = 0;
   let commitMessage = $state("");
   let committing = $state(false);
+  let syncAction = $state<"pull" | "push" | null>(null);
 
   const canCommit = $derived(
     !remote &&
@@ -46,6 +50,15 @@
       status.entries.length > 0 &&
       commitMessage.trim() !== "" &&
       !committing,
+  );
+
+  const canSync = $derived(
+    !remote &&
+      scope === "uncommitted" &&
+      status !== null &&
+      status.is_repository &&
+      status.branch !== null &&
+      syncAction === null,
   );
 
   const scopes: { value: Scope; label: string }[] = [
@@ -128,6 +141,19 @@
     refreshToken += 1;
   }
 
+  /**
+   * Git failures carry the useful reason in `message` (rejected push, diverged
+   * branch, missing upstream). Prefer it over the generic code label.
+   */
+  function workspaceError(cause: unknown): string {
+    if (cause instanceof ApiError && cause.info !== null) {
+      if (cause.info.code === "GIT_FAILED" || cause.info.code === "INVALID_STATE") {
+        return cause.info.message;
+      }
+    }
+    return errorMessage(cause);
+  }
+
   async function commit(): Promise<void> {
     if (!canCommit) return;
     committing = true;
@@ -141,9 +167,45 @@
       toast.success(m.dock_changes_commit_success({ commit: result.commit.slice(0, 8) }));
       refresh();
     } catch (cause) {
-      toast.error(errorMessage(cause));
+      toast.error(workspaceError(cause));
     } finally {
       committing = false;
+    }
+  }
+
+  async function pull(): Promise<void> {
+    if (!canSync) return;
+    syncAction = "pull";
+    try {
+      const result = await sync.connection.client.workspaceGitPull(ctx.nodeId, ctx.localPath);
+      toast.success(
+        result.updated
+          ? m.dock_changes_pull_updated({ commit: result.commit.slice(0, 8) })
+          : m.dock_changes_pull_up_to_date(),
+      );
+    } catch (cause) {
+      toast.error(workspaceError(cause));
+    } finally {
+      syncAction = null;
+      refresh();
+    }
+  }
+
+  async function push(): Promise<void> {
+    if (!canSync) return;
+    syncAction = "push";
+    try {
+      const result = await sync.connection.client.workspaceGitPush(ctx.nodeId, ctx.localPath);
+      toast.success(
+        result.upstream === null
+          ? m.dock_changes_push_success_generic()
+          : m.dock_changes_push_success({ upstream: result.upstream }),
+      );
+    } catch (cause) {
+      toast.error(workspaceError(cause));
+    } finally {
+      syncAction = null;
+      refresh();
     }
   }
 
@@ -196,6 +258,46 @@
     >
       <RefreshCwIcon class="size-3.5" />
     </button>
+    {#if scope === "uncommitted" && status?.is_repository}
+      <span
+        class="text-muted-foreground ml-1 flex shrink-0 items-center gap-1 font-mono text-[11px]"
+      >
+        {#if status.ahead > 0}
+          <span title={m.dock_changes_ahead()}>↑{status.ahead}</span>
+        {/if}
+        {#if status.behind > 0}
+          <span title={m.dock_changes_behind()}>↓{status.behind}</span>
+        {/if}
+      </span>
+      <button
+        type="button"
+        class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-50"
+        title={m.dock_changes_pull_hint()}
+        aria-label={m.dock_changes_pull()}
+        disabled={!canSync}
+        onclick={() => void pull()}
+      >
+        {#if syncAction === "pull"}
+          <LoaderCircleIcon class="size-3.5 animate-spin" />
+        {:else}
+          <ArrowDownToLineIcon class="size-3.5" />
+        {/if}
+      </button>
+      <button
+        type="button"
+        class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-50"
+        title={m.dock_changes_push_hint()}
+        aria-label={m.dock_changes_push()}
+        disabled={!canSync}
+        onclick={() => void push()}
+      >
+        {#if syncAction === "push"}
+          <LoaderCircleIcon class="size-3.5 animate-spin" />
+        {:else}
+          <ArrowUpFromLineIcon class="size-3.5" />
+        {/if}
+      </button>
+    {/if}
     {#if scope === "branch_base" && branchDiff !== null}
       <span class="text-muted-foreground ml-auto truncate font-mono text-[11px]">
         {branchDiff.base_branch ?? branchDiff.scope}
