@@ -1,16 +1,16 @@
 //! Server settings, secrets and project profiles.
 
-use fxg_protocol::common::ErrorCode;
-
-use crate::api::{ApiError, ClientInfo};
-use crate::error::HubError;
+use fxg_api::{ApiError, ClientInfo};
 use fxg_protocol::SecretId;
 use fxg_protocol::client_api::{ProvisionerSummary, ProvisionersResponse};
+use fxg_protocol::common::ErrorCode;
 use fxg_protocol::settings::{
     ConfigSource, HubBootstrapView, HubSettingsSnapshot, ProvisionerDefinition, SecretsResponse,
     SourcedValue, UpdateHubSettingsRequest, UpsertSecretRequest, sourced_bool, sourced_list,
     sourced_option, sourced_string,
 };
+
+use crate::error::HubError;
 
 use super::HubState;
 

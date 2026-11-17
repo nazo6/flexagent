@@ -1,13 +1,13 @@
 //! Client API backend implementation for the local node (`fxg node start`).
 //!
 //! Supplies the daemon's `SessionManager` / `PtySessionManager` / Git operations
-//! to the shared router of `fxg-hub` ([`fxg_hub::api::client_router`])
+//! to the shared router of `fxg-api` ([`fxg_api::client_router`])
 //! (design: `docs/03-protocol-and-api.md` §3).
 
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use fxg_hub::api::{
+use fxg_api::{
     ApiError, ClientApiBackend, ClientCommand, ClientEvent, ClientInfo, PtyChannelError,
     PtyChannelEvent, SystemExtras,
 };
@@ -152,7 +152,7 @@ impl ClientApiBackend for DaemonState {
             .map_err(api_error)
     }
 
-    fn diagnostics_counters(&self) -> Option<&fxg_hub::api::DiagnosticsCounters> {
+    fn diagnostics_counters(&self) -> Option<&fxg_api::DiagnosticsCounters> {
         Some(DaemonState::diagnostics_counters(self))
     }
 
@@ -1056,7 +1056,7 @@ impl ClientApiBackend for DaemonState {
         request: PushSubscribeRequest,
         client: ClientInfo,
     ) -> Result<PushSubscribeResponse, ApiError> {
-        fxg_hub::push::register_subscription(self.db(), &request, &client).await
+        fxg_api::push::register_subscription(self.db(), &request, &client).await
     }
 
     async fn kill_switch(
@@ -1082,8 +1082,8 @@ impl ClientApiBackend for DaemonState {
 
     async fn pty_open(
         &self,
-        params: fxg_hub::api::PtyOpenParams,
-    ) -> Result<fxg_hub::api::PtyOpenOutcome, PtyChannelError> {
+        params: fxg_api::PtyOpenParams,
+    ) -> Result<fxg_api::PtyOpenOutcome, PtyChannelError> {
         if params.node_id.as_str() != self.node_id() {
             return Err(PtyChannelError::not_found(format!(
                 "requested node {} but this node is {}",
@@ -1127,7 +1127,7 @@ impl ClientApiBackend for DaemonState {
             }),
         )
         .await;
-        Ok(fxg_hub::api::PtyOpenOutcome {
+        Ok(fxg_api::PtyOpenOutcome {
             pty_id: opened.info.pty_id,
             path: opened.info.path.to_string_lossy().into_owned(),
             attached: opened.attached,
@@ -1136,12 +1136,9 @@ impl ClientApiBackend for DaemonState {
         })
     }
 
-    async fn pty_attach(
-        &self,
-        pty_id: &str,
-    ) -> Result<fxg_hub::api::PtyOpenOutcome, PtyChannelError> {
+    async fn pty_attach(&self, pty_id: &str) -> Result<fxg_api::PtyOpenOutcome, PtyChannelError> {
         let info = self.pty().attach(pty_id).map_err(map_pty_error)?;
-        Ok(fxg_hub::api::PtyOpenOutcome {
+        Ok(fxg_api::PtyOpenOutcome {
             pty_id: info.pty_id,
             path: info.path.to_string_lossy().into_owned(),
             attached: true,

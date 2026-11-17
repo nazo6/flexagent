@@ -5,7 +5,7 @@ use axum::extract::{Path as UrlPath, Query, State};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 
-use crate::api::{ClientApiBackend, ClientApiState};
+use crate::{ClientApiBackend, ClientApiState};
 
 /// Query of `GET /api/v1/nodes/:node_id/agents/:agent_id/usage`.
 #[derive(Debug, Deserialize)]

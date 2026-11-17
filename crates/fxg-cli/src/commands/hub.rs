@@ -437,8 +437,8 @@ impl usage::RunAsync for HubPairingTokenIssueArgs {
             db.upsert_node(&fxg_db::NodeRecord::pending(self.node_id.clone()))
                 .await?;
         }
-        let token = fxg_hub::api::auth::generate_token();
-        db.set_node_token_hash(&self.node_id, Some(&fxg_hub::api::auth::hash_token(&token)))
+        let token = fxg_api::auth::generate_token();
+        db.set_node_token_hash(&self.node_id, Some(&fxg_api::auth::hash_token(&token)))
             .await?;
         // The plaintext token is shown only once at issuance (the hub stores
         // only the hash)

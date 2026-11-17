@@ -13,6 +13,7 @@
 //! - On idle timeout / when all sessions end, sends `DrainAndShutdown` and discards the child
 //!   process (VM/container) after `DrainComplete`
 
+use fxg_api::{ApiError, ClientEvent};
 use fxg_protocol::paths::Paths;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex as StdMutex, RwLock};
@@ -28,7 +29,6 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::process::Command;
 use tokio::sync::{oneshot, watch};
 
-use crate::api::{ApiError, ClientEvent};
 use crate::hub;
 use crate::state::HubState;
 

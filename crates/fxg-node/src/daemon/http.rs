@@ -4,7 +4,7 @@
 //! `docs/01-architecture-and-sync.md` §7.1-§7.3.
 //!
 //! The router, handlers and validation logic are shared with the hub
-//! (`fxg hub start`) in [`fxg_hub::api`]; this module only supplies the
+//! (`fxg hub start`) in [`fxg_api`]; this module only supplies the
 //! [`DaemonState`] (the Client API backend implementation) and serves it locally
 //! (loopback `127.0.0.1` only).
 
@@ -16,7 +16,7 @@
 use std::net::SocketAddr;
 
 use axum::Router;
-use fxg_hub::api::{ClientApiOptions, client_router};
+use fxg_api::{ClientApiOptions, client_router};
 use tokio::sync::watch;
 
 use super::DaemonState;
@@ -1219,7 +1219,7 @@ mod tests {
         assert!(state.db().unsynced_event_count().await.expect("count") > 1000);
 
         let health =
-            <super::DaemonState as fxg_hub::api::ClientApiBackend>::role_health(state, 2000).await;
+            <super::DaemonState as fxg_api::ClientApiBackend>::role_health(state, 2000).await;
         assert_eq!(health.len(), 1);
         assert_eq!(
             health[0].state,

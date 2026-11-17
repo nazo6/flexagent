@@ -213,7 +213,7 @@ prune します。`sessions` は最大 1000 件で、超過時は
 ### 3.1 REST API
 
 以下はリソースごとの概要です。パス・リクエスト / レスポンス型の正は
-`crates/fxg-hub/src/api/mod.rs` と `crates/fxg-protocol/src/client_api.rs` です。
+`crates/fxg-api/src/` と `crates/fxg-protocol/src/client_api.rs` です。
 
 #### システム / 認証
 

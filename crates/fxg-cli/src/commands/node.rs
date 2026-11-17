@@ -596,7 +596,7 @@ pub(crate) fn local_web_url(listen_addr: &str, token: &str) -> String {
 /// Build the tokenized Web UI URL for a specific session.
 pub(crate) fn local_session_web_url(session_id: &str) -> Result<String> {
     let env = fxg_protocol::config::process_env;
-    let token = fxg_hub::api::auth::load_or_create_token(
+    let token = fxg_api::auth::load_or_create_token(
         &fxg_protocol::paths::Paths::resolve(&env, fxg_protocol::paths::Role::Node)
             .auth_token_path(),
     )

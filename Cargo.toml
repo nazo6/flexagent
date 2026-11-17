@@ -10,6 +10,7 @@ repository = "https://github.com/nazo6/flexagent"
 
 [workspace.dependencies]
 fxg-agent = { path = "crates/fxg-agent" }
+fxg-api = { path = "crates/fxg-api" }
 fxg-db = { path = "crates/fxg-db" }
 fxg-hub = { path = "crates/fxg-hub" }
 fxg-node = { path = "crates/fxg-node" }

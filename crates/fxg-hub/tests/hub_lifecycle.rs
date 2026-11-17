@@ -27,7 +27,7 @@ async fn hub_keeps_running_until_shutdown_is_requested() {
     .await
     .expect("start hub");
     let addr = hub.listen_addr();
-    let token = fxg_hub::api::auth::load_or_create_token(
+    let token = fxg_api::auth::load_or_create_token(
         &Paths::portable(home.path(), Role::Hub).auth_token_path(),
     )
     .expect("token");

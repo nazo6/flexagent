@@ -27,9 +27,9 @@ use fxg_agent::{
     ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind,
     StartSessionRequest, StartedSession,
 };
+use fxg_api::auth::{generate_token, hash_token};
 use fxg_db::Db;
 use fxg_hub::Hub;
-use fxg_hub::api::auth::{generate_token, hash_token};
 use fxg_hub::state::HubOptions;
 use fxg_node::daemon::{DaemonConfig, NodeDaemon};
 use fxg_node::session_manager::{DriverFactory, StartSessionParams};
@@ -561,7 +561,7 @@ async fn hub_commands_permissions_and_kill_switch() {
     )
     .await
     .expect("node db");
-    let client_token = fxg_hub::api::auth::load_or_create_token(
+    let client_token = fxg_api::auth::load_or_create_token(
         &Paths::portable(server_home.path(), Role::Hub).auth_token_path(),
     )
     .expect("Web access token");
@@ -976,7 +976,7 @@ async fn hub_resumes_stopped_session() {
     )
     .await
     .expect("node db");
-    let client_token = fxg_hub::api::auth::load_or_create_token(
+    let client_token = fxg_api::auth::load_or_create_token(
         &Paths::portable(server_home.path(), Role::Hub).auth_token_path(),
     )
     .expect("Web access token");
@@ -1160,7 +1160,7 @@ async fn hub_archives_and_deletes_session() {
     )
     .await
     .expect("node db");
-    let client_token = fxg_hub::api::auth::load_or_create_token(
+    let client_token = fxg_api::auth::load_or_create_token(
         &Paths::portable(server_home.path(), Role::Hub).auth_token_path(),
     )
     .expect("Web access token");
@@ -1535,7 +1535,7 @@ async fn hub_relays_workspace_terminal_and_replays_output() {
         .await
         .expect("resolve project");
 
-    let client_token = fxg_hub::api::auth::load_or_create_token(
+    let client_token = fxg_api::auth::load_or_create_token(
         &Paths::portable(server_home.path(), Role::Hub).auth_token_path(),
     )
     .expect("Web access token");

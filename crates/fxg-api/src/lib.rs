@@ -1,4 +1,4 @@
-//! Shared HTTP/WS API layer for clients.
+//! FlexAgent shared client API layer (`fxg-api`).
 //!
 //! The hub (`fxg hub start`, `:8080`) and the node's local web server
 //! (`fxg node start`, `127.0.0.1:7860`) expose **exactly the same API paths and WebSocket format**
@@ -7,13 +7,22 @@
 //! The differences between the two (who owns the DB, how commands execute, whether node relay
 //! is involved) are confined to implementations of the [`ClientApiBackend`] trait.
 //!
-//! - REST handlers: [`handlers`]
-//! - Backend trait and shared types: [`backend`]
-//! - REST / WS error type: [`error`]
-//! - Client WS (`/api/v1/client/ws`): [`ws`]
-//! - PTY WS (`/api/v1/pty/ws`): [`pty`]
-//! - Security (Host / Origin / Token validation): [`security`]
+//! - REST handlers: `handlers`
+//! - Backend trait and shared types: `backend`
+//! - REST / WS error type: `error`
+//! - Client WS (`/api/v1/client/ws`): `ws`
+//! - PTY WS (`/api/v1/pty/ws`): `pty`
+//! - Security (Host / Origin / Token validation): `security`
 //! - Token generation and comparison: [`auth`]
+//! - Web Push delivery: [`push`]
+//! - Graceful shutdown helpers: [`shutdown`]
+
+// Migration baseline: remove this crate-level allow as Phase 1 of
+// `docs/proposals/2026-11-08-type-safety-plan.md` lands.
+#![allow(
+    clippy::wildcard_enum_match_arm,
+    reason = "type-safety migration baseline; see docs/06-type-safety.md"
+)]
 
 pub mod auth;
 mod backend;
@@ -22,8 +31,10 @@ pub(crate) mod diagnostics;
 mod error;
 mod handlers;
 mod pty;
+pub mod push;
 mod request_context;
 mod security;
+pub mod shutdown;
 mod static_ui;
 mod ws;
 
@@ -88,7 +99,7 @@ use handlers::workspace::{
 // `Result::ok` is disallowed by the error-handling policy, so the explicit
 // match below is intentional.
 #[allow(clippy::manual_ok_err)]
-pub(crate) fn header_str(headers: &HeaderMap, name: header::HeaderName) -> Option<&str> {
+pub fn header_str(headers: &HeaderMap, name: header::HeaderName) -> Option<&str> {
     match headers.get(name) {
         Some(value) => match value.to_str() {
             Ok(value) => Some(value),
@@ -346,7 +357,11 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
 // ----------------------------------------------------------------------
 
 /// Shared helper for sending over WS (`send_json`).
-pub(crate) async fn send_ws_json<T: serde::Serialize>(
+#[allow(
+    clippy::result_unit_err,
+    reason = "the caller treats any failure as a disconnected socket"
+)]
+pub async fn send_ws_json<T: serde::Serialize>(
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     message: &T,
 ) -> Result<(), ()> {

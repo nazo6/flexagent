@@ -16,7 +16,7 @@ use fxg_protocol::client_api::{
 };
 use fxg_protocol::common::{DiffScope, SessionCursor, SessionStatus};
 
-use crate::api::{
+use crate::{
     ApiError, ClientApiBackend, ClientApiState, ClientCommand, ClientInfo, REPLAY_BATCH_SIZE,
 };
 

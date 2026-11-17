@@ -1,0 +1,37 @@
+[package]
+name = "fxg-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "FlexAgent shared client API layer (REST / Client WS / PTY WS router, ClientApiBackend, Web Push)"
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = { workspace = true }
+axum = { workspace = true }
+base64 = { workspace = true }
+fs4 = { workspace = true }
+futures-util = { workspace = true }
+fxg-db = { workspace = true }
+fxg-protocol = { workspace = true }
+fxg-ui-assets = { workspace = true }
+http = "1.5.0"
+rand = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+web-push-native = "0.5.0"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tower = { workspace = true }
+
+[lints]
+workspace = true

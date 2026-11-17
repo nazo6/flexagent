@@ -83,7 +83,7 @@ mod tests {
     use axum::routing::get;
     use tower::ServiceExt;
 
-    use crate::api::ApiError;
+    use crate::ApiError;
     use fxg_protocol::client_api::ApiErrorResponse;
 
     async fn fail() -> ApiError {

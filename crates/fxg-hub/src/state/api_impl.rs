@@ -4,6 +4,10 @@
 //! `settings.rs`.
 
 use async_trait::async_trait;
+use fxg_api::{
+    ApiError, ClientApiBackend, ClientCommand, ClientEvent, ClientInfo, PtyChannelError,
+    PtyChannelEvent, PtyOpenOutcome, PtyOpenParams, SystemExtras, auth,
+};
 use fxg_db::Db;
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
@@ -24,17 +28,12 @@ use fxg_protocol::common::{
     WorkspaceDiffResponse, WorktreeAction,
 };
 use fxg_protocol::node_hub::{HubToNodeMsg, NodeRpcRequest, NodeRpcResponse};
-use fxg_protocol::util::uuid_v7;
-use tokio::sync::broadcast;
-
-use crate::api::{
-    ApiError, ClientApiBackend, ClientCommand, ClientEvent, ClientInfo, PtyChannelError,
-    PtyChannelEvent, PtyOpenOutcome, PtyOpenParams, SystemExtras, auth,
-};
 use fxg_protocol::settings::{
     HubSettingsSnapshot, SecretsResponse, UpdateHubSettingsRequest, UpsertSecretRequest,
 };
+use fxg_protocol::util::uuid_v7;
 use fxg_protocol::{NodeId, SecretId};
+use tokio::sync::broadcast;
 
 use super::HubState;
 use super::settings::secret_error;
@@ -58,7 +57,7 @@ impl ClientApiBackend for HubState {
         ConnectionRole::Hub
     }
 
-    fn diagnostics_counters(&self) -> Option<&crate::api::DiagnosticsCounters> {
+    fn diagnostics_counters(&self) -> Option<&fxg_api::DiagnosticsCounters> {
         Some(HubState::diagnostics_counters(self))
     }
 
@@ -839,7 +838,7 @@ impl ClientApiBackend for HubState {
         request: PushSubscribeRequest,
         client: ClientInfo,
     ) -> Result<PushSubscribeResponse, ApiError> {
-        crate::push::register_subscription(&self.inner.db, &request, &client).await
+        fxg_api::push::register_subscription(&self.inner.db, &request, &client).await
     }
 
     async fn pty_open(&self, params: PtyOpenParams) -> Result<PtyOpenOutcome, PtyChannelError> {

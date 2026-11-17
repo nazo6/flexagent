@@ -9,9 +9,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
+use fxg_api::{ClientApiBackend, ClientEvent};
 use fxg_db::Db;
 use fxg_hub::Hub;
-use fxg_hub::api::{ClientApiBackend, ClientEvent};
 use fxg_hub::state::HubOptions;
 use fxg_protocol::client_api::{CreateSessionRequest, CreateSessionResponse, NodesResponse};
 use fxg_protocol::paths::{Paths, Role};
@@ -142,7 +142,7 @@ async fn provisioner_runs_stdio_node_and_drains() {
     .await
     .expect("start server");
     let addr = server.listen_addr();
-    let token = fxg_hub::api::auth::load_or_create_token(
+    let token = fxg_api::auth::load_or_create_token(
         &Paths::portable(&server_home, Role::Hub).auth_token_path(),
     )
     .expect("token");

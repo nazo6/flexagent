@@ -1,5 +1,6 @@
 //! Session lifecycle operations and their node / project resolution helpers.
 
+use fxg_api::{ApiError, ClientInfo};
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
     CreateSessionRequest, CreateSessionResponse, RespondElicitationRequest,
@@ -11,7 +12,6 @@ use fxg_protocol::common::{ErrorCode, WorktreeAction};
 use fxg_protocol::node_hub::{HubToNodeMsg, NodeRpcRequest, NodeRpcResponse};
 use fxg_protocol::util::uuid_v7;
 
-use crate::api::{ApiError, ClientInfo};
 use crate::provisioner::{self, SpawnSessionRequest};
 
 use super::HubState;

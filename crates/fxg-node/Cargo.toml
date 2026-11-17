@@ -15,8 +15,8 @@ dirs = { workspace = true }
 dunce = { workspace = true }
 futures-util = { workspace = true }
 fxg-agent = { workspace = true }
+fxg-api = { workspace = true }
 fxg-db = { workspace = true }
-fxg-hub = { workspace = true }
 fxg-protocol = { workspace = true }
 fxg-pty = { workspace = true }
 rand = { workspace = true }
@@ -30,6 +30,7 @@ toml = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+fxg-hub = { workspace = true }
 http-body-util = { workspace = true }
 reqwest = { workspace = true }
 sqlx = { workspace = true }
