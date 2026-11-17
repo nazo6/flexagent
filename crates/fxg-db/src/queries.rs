@@ -431,6 +431,18 @@ pub async fn session_owner(pool: &SqlitePool, session_id: &str) -> Result<Option
     Ok(owner)
 }
 
+/// Number of persisted events of one session.
+pub async fn session_event_count(pool: &SqlitePool, session_id: &str) -> Result<u64, DbError> {
+    let count = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) AS "count!" FROM session_events WHERE session_id = ?"#,
+        session_id,
+    )
+    .fetch_one(pool)
+    .await?;
+    u64::try_from(count)
+        .map_err(|err| DbError::InvalidPayload(format!("negative event count: {err}")))
+}
+
 /// Retrieves the event history after `after_cursor` in batches (for resuming incremental sync).
 ///
 /// The returned batch's `cursor` is the cursor of the last event that could be retrieved; if

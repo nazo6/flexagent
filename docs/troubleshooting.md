@@ -20,9 +20,8 @@ UI のエラーバナー「Details」からは、このページの対応する�
 
 ## 診断・障害復旧の仕組み
 
-- **インシデント永続化 (`incidents` テーブル)**: REST (5xx/409/408/429)・Client WS・ノード RPC・エージェントの `StatusChanged(Error)` を観測した時点で `node.db` / `hub.db` へ記録する（同期対象外）。同一 `(code, source, session_id, node_id)` が未解決のまま 10 分以内に再発した場合は集約して `occurrence_count` を増やし、14 日・最大 1,000 行で保持する。
 - **ヘルス & カウンタ**: `/api/v1/diagnostics` がコンポーネントヘルス（`db` / `migrations` / `http` / `sync` / `hub` / `disk` 等）と `DropCounters`（`dropped_events` / `lagged_broadcasts` / `replay_failures` / `outbox_retries` / `push_failures`）を返す。UI では **Problem center**（サイドバー下部バッジ）または設定の Process タブから確認できる。
-- **サポートバンドル & Redaction**: `GET /api/v1/diagnostics/bundle` および `fxg support bundle` で設定・DB 統計・インシデント・ログ末尾を取得できる。出力時は Bearer トークン・`fxg_session`・`token=`/`password=`/`secret=`・ホームディレクトリ（`~` 置換）等を自動 redaction する。
+- **エラー履歴**: エラーは tracing ログに記録される。`request_id` で該当行を検索する。過去のエラーを DB に残す専用の履歴は持たない。
 - **CLI 切り分け**: `fxg doctor` でデータディレクトリ・DB・設定パスを検査し、`fxg logs [hub]` でログを確認する。
 
 ## エラー処理の規約（開発者向け）
@@ -138,7 +137,7 @@ UI のエラーバナー「Details」からは、このページの対応する�
 
 - **原因**: 想定外のハブ / ノード内部エラー。
 - **確認**: `request_id` でログを検索し、`details` を確認する。
-- **復旧**: 再試行する。繰り返す場合は `fxg support bundle` を添えて報告する。
+- **復旧**: 再試行する。繰り返す場合は `request_id` と `fxg logs` の該当行を添えて報告する。
 
 ## CONFIG_INVALID
 
@@ -253,7 +252,7 @@ UI のエラーバナー「Details」からは、このページの対応する�
 
 - **原因**: ハブ内部の処理失敗（DB / 集約 / 配信など）。
 - **確認**: `request_id` でハブログを検索する。
-- **復旧**: 再試行する。繰り返す場合は `fxg support bundle` を添えて報告する。
+- **復旧**: 再試行する。繰り返す場合は `request_id` と `fxg logs hub` の該当行を添えて報告する。
 
 ## CANCELLED
 

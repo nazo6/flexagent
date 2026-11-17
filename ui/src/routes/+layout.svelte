@@ -26,7 +26,6 @@
   import { page } from "$app/state";
   import { sessionNeedsAttention } from "#lib/session-status.ts";
   import {
-    hubSettingsPath,
     nodeSettingsPath,
     resolveDefaultNodeId,
     settingsHomePath,
@@ -87,9 +86,6 @@
         break;
       case "login_agent":
         void goto(nodeSettingsPath("agents", defaultNodeId));
-        break;
-      case "export_diagnostics":
-        void goto(isHub ? hubSettingsPath("process") : nodeSettingsPath("process", defaultNodeId));
         break;
       case "select_online_node":
         void goto(nodeSettingsPath("general", defaultNodeId));

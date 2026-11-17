@@ -198,32 +198,7 @@ CREATE TABLE audit_logs (
 CREATE INDEX idx_audit_logs_action ON audit_logs(action, created_at DESC);
 CREATE INDEX idx_audit_logs_session ON audit_logs(session_id, created_at DESC);
 
--- 11. Diagnostic incidents: a bounded, grouped history of failures and
---     degradations. Rows are grouped by (code, source, session_id, node_id)
---     while unresolved and inside the grouping window, so a reconnect loop does
---     not flood the table. Retention is enforced by fxg_db::incidents::prune.
-CREATE TABLE incidents (
-    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-    created_at              INTEGER NOT NULL,
-    last_seen_at            INTEGER NOT NULL,
-    level                   TEXT NOT NULL,
-    code                    TEXT NOT NULL,
-    summary                 TEXT NOT NULL,
-    details_json            TEXT NOT NULL DEFAULT '{}',
-    session_id              TEXT,
-    node_id                 TEXT,
-    request_id              TEXT,
-    source                  TEXT NOT NULL,
-    occurrence_count        INTEGER NOT NULL DEFAULT 1,
-    resolved_at             INTEGER
-);
-
-CREATE INDEX idx_incidents_created ON incidents(created_at DESC);
-CREATE INDEX idx_incidents_group
-    ON incidents(code, source, session_id, node_id, resolved_at);
-CREATE INDEX idx_incidents_last_seen ON incidents(last_seen_at DESC);
-
--- 12. Node-owned runtime settings (node.db; single-row table).
+-- 11. Node-owned runtime settings (node.db; single-row table).
 CREATE TABLE node_settings (
     id                      INTEGER PRIMARY KEY CHECK (id = 1),
     name                    TEXT NOT NULL,
@@ -235,7 +210,7 @@ CREATE TABLE node_settings (
     updated_at              INTEGER NOT NULL
 );
 
--- 13. Agent settings, aliases and custom definitions (node.db).
+-- 12. Agent settings, aliases and custom definitions (node.db).
 CREATE TABLE agent_settings (
     id                      INTEGER PRIMARY KEY CHECK (id = 1),
     registry_url            TEXT,
@@ -265,7 +240,7 @@ CREATE TABLE custom_agents (
     updated_at              INTEGER NOT NULL
 );
 
--- 14. Explicit local path -> logical project link (node.db).
+-- 13. Explicit local path -> logical project link (node.db).
 CREATE TABLE project_path_links (
     local_path              TEXT PRIMARY KEY,
     project_key             TEXT NOT NULL,
@@ -276,7 +251,7 @@ CREATE TABLE project_path_links (
 CREATE INDEX idx_project_path_links_key
     ON project_path_links(project_key);
 
--- 15. Hub-owned runtime settings and provisioners (hub.db).
+-- 14. Hub-owned runtime settings and provisioners (hub.db).
 CREATE TABLE hub_settings (
     id                      INTEGER PRIMARY KEY CHECK (id = 1),
     vapid_subject           TEXT,
@@ -295,7 +270,7 @@ CREATE TABLE provisioners (
     updated_at              INTEGER NOT NULL
 );
 
--- 16. Secret metadata (node.db / hub.db; values live in secrets/{node,hub}/).
+-- 15. Secret metadata (node.db / hub.db; values live in secrets/{node,hub}/).
 CREATE TABLE secrets (
     id                      TEXT PRIMARY KEY,
     description             TEXT,
@@ -303,7 +278,7 @@ CREATE TABLE secrets (
     updated_at              INTEGER NOT NULL
 );
 
--- 17. Node-owned pairing state (node.db).
+-- 16. Node-owned pairing state (node.db).
 --     Only the hub address lives here. The pairing token is a secret and stays
 --     in <data>/node/node_token (0600).
 CREATE TABLE node_pairing (

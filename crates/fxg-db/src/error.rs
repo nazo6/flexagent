@@ -48,9 +48,6 @@ pub enum DbError {
     /// Permission request not found
     #[error("permission request not found: {0}")]
     PermissionRequestNotFound(String),
-    /// Incident not found
-    #[error("incident not found: {0}")]
-    IncidentNotFound(i64),
     /// Search query is empty
     #[error("search query must not be empty")]
     EmptySearchQuery,

@@ -11,7 +11,7 @@ use specta::Type;
 
 use crate::common::{
     AuditLogEntry, ClientSource, CommandResult, ConfigOptionInfo, DiffScope, ElicitationAction,
-    ElicitationContent, ElicitationRequestEntry, ErrorInfo, IncidentEntry, ModeInfo, NodeSummary,
+    ElicitationContent, ElicitationRequestEntry, ErrorInfo, ModeInfo, NodeSummary,
     PermissionRequestEntry, ProjectSummary, PromptInput, ResolvedBy, SearchHit,
     SessionControlAction, SessionSummary, StreamDeltaPayload, SystemStatus,
 };
@@ -133,85 +133,6 @@ pub struct DiagnosticsResponse {
     pub node_log: Option<String>,
     /// Component health and delivery counters
     pub health: SystemStatus,
-    /// Recent persisted incidents (newest first)
-    pub incidents: Vec<IncidentEntry>,
-}
-
-/// Query of `GET /api/v1/diagnostics/incidents`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[specta(collect)]
-pub struct IncidentQuery {
-    /// Maximum number of entries to return (default 50)
-    pub limit: Option<u32>,
-    /// Include incidents that were marked resolved
-    pub include_resolved: Option<bool>,
-}
-
-/// Redacted bootstrap configuration included in a support bundle.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[specta(collect)]
-pub struct SupportBundleConfig {
-    /// Data directory after replacing the user's home directory with `~`
-    pub data_dir: String,
-    /// Log level
-    pub log_level: Option<String>,
-    /// Log file destination
-    pub log_file: Option<String>,
-    /// Log format
-    pub log_format: Option<String>,
-    /// Local node bind address
-    pub node_listen_addr: Option<String>,
-    /// Hub URL
-    pub hub_url: Option<String>,
-    /// Hub bind address
-    pub hub_listen_addr: Option<String>,
-    /// Extra allowed hosts (the owner's `allowed_hosts`)
-    pub allowed_hosts: Vec<String>,
-    /// Extra allowed origins (the owner's `allowed_origins`)
-    pub allowed_origins: Vec<String>,
-}
-
-/// Database statistics included in a support bundle.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[specta(collect)]
-pub struct DatabaseStats {
-    /// Database file path after home-directory redaction
-    pub path: String,
-    /// Database file size in bytes
-    pub size_bytes: u64,
-    /// Number of sessions
-    pub sessions: u64,
-    /// Number of persisted events
-    pub events: u64,
-    /// Number of incidents
-    pub incidents: u64,
-    /// Events not yet acknowledged by the hub (nodes only)
-    pub pending_outbox_events: u64,
-}
-
-/// `GET /api/v1/diagnostics/bundle` response (`fxg support bundle`).
-///
-/// Everything text-based is redacted: tokens, cookies, environment values,
-/// prompts and the user's home directory never leave the process.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-#[specta(collect)]
-pub struct SupportBundle {
-    /// Generation time (Unix epoch ms)
-    pub generated_at: i64,
-    /// fxg binary version
-    pub version: String,
-    /// Kind of endpoint
-    pub role: ConnectionRole,
-    /// Redacted bootstrap configuration
-    pub config: SupportBundleConfig,
-    /// Diagnostics (health, incidents, agent stderr tails)
-    pub diagnostics: DiagnosticsResponse,
-    /// Database statistics
-    pub database: DatabaseStats,
-    /// Recent sessions with their event counts
-    pub sessions: Vec<crate::common::SupportBundleSession>,
-    /// Tail of the process log (redacted, oldest first)
-    pub logs: Vec<String>,
 }
 
 /// `GET /api/v1/meta` response (endpoint metadata that needs no authentication).

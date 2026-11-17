@@ -22,8 +22,8 @@ use fxg_protocol::client_api::{
     RespondElicitationRequest, RespondElicitationResponse, RespondPermissionRequest,
     RespondPermissionResponse, ResumeSessionRequest, ResumeSessionResponse,
     RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse, SessionImportRequest,
-    SessionImportResponse, SessionRenameRequest, SessionRenameResponse, SupportBundle,
-    SupportBundleConfig, WorktreeInfo, WorktreesResponse,
+    SessionImportResponse, SessionRenameRequest, SessionRenameResponse, WorktreeInfo,
+    WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, ComponentHealth, ComponentName, ComponentState, DiffScope,
@@ -93,11 +93,6 @@ impl DaemonState {
     /// Shared diagnostics payload (REST).
     pub async fn diagnostics_response(&self) -> Result<DiagnosticsResponse, ApiError> {
         <Self as ClientApiBackend>::diagnostics(self).await
-    }
-
-    /// Redacted support bundle (REST).
-    pub async fn support_bundle_response(&self) -> Result<SupportBundle, ApiError> {
-        <Self as ClientApiBackend>::support_bundle(self).await
     }
 }
 
@@ -172,10 +167,6 @@ impl ClientApiBackend for DaemonState {
         Some(DaemonState::paths(self).data_dir())
     }
 
-    fn db_path(&self) -> Option<std::path::PathBuf> {
-        Some(DaemonState::paths(self).db_path())
-    }
-
     fn log_path(&self) -> Option<std::path::PathBuf> {
         Some(DaemonState::paths(self).log_path())
     }
@@ -247,29 +238,6 @@ impl ClientApiBackend for DaemonState {
                 stderr_tail,
             })
             .collect()
-    }
-
-    fn support_bundle_config(&self) -> SupportBundleConfig {
-        let config = self.config();
-        SupportBundleConfig {
-            data_dir: DaemonState::paths(self)
-                .data_dir()
-                .to_string_lossy()
-                .into_owned(),
-            log_level: config.log.level.clone(),
-            log_file: config.log.file.clone(),
-            log_format: config.log.format.clone(),
-            node_listen_addr: Some(config.listen_addr.clone()),
-            hub_url: self.hub_link().hub_url,
-            hub_listen_addr: None,
-            allowed_hosts: config.allowed_hosts.clone(),
-            allowed_origins: config.allowed_origins.clone(),
-        }
-    }
-
-    fn support_bundle_logs(&self, lines: usize) -> Vec<String> {
-        let path = DaemonState::paths(self).log_path();
-        fxg_hub::api::log_tail(&path, lines)
     }
 
     async fn system_extras(&self) -> Result<SystemExtras, ApiError> {

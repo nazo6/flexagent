@@ -12,7 +12,6 @@ mod node;
 mod service;
 mod session;
 mod session_new;
-mod support;
 mod web;
 
 pub use agents::*;
@@ -24,7 +23,6 @@ pub use node::*;
 pub use service::*;
 pub use session::*;
 pub use session_new::*;
-pub use support::*;
 pub use web::*;
 
 pub(crate) use node::{local_web_url, open_session_url};
