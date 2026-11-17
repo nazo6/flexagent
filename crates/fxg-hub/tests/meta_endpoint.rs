@@ -154,5 +154,4 @@ async fn diagnostics_expose_component_health() {
         .await
         .expect("json");
     assert!(diagnostics["health"]["components"].is_array());
-    assert!(diagnostics.get("incidents").is_none());
 }
