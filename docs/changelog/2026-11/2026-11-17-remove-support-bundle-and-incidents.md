@@ -30,6 +30,7 @@ UI のエラー通知はレスポンス / WebSocket から直接届くため、�
   `SupportBundleSession` / `IncidentEntry` / `IncidentListResponse` /
   `IncidentLevel` / `IncidentSource` / `IncidentQuery`
 - `RecoveryAction::ExportDiagnostics`
+- `x-fxg-error-code` レスポンスヘッダ（クライアントは本文の `error.code` を読む）
 - `incidents` テーブルと `fxg-db::incidents` モジュール
 - REST / Client WS / ノード RPC / エージェントのエラー境界でのインシデント記録
 - redaction 処理（トークン・Cookie・URL 資格情報・ホームディレクトリ・
