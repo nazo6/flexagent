@@ -1864,6 +1864,30 @@ async fn count_session_events(db: &Db, session_id: &str) -> usize {
     }
 }
 
+/// Waits until the hub has applied every event of the session.
+///
+/// The watermark alone is not enough: a later page can commit before an earlier
+/// one, so compare the full event count too. Reports both values on timeout.
+async fn wait_for_backlog(db: &Db, session_id: &str, expected: usize) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let watermark = db
+            .get_session(session_id)
+            .await
+            .expect("get session")
+            .map(|session| session.last_node_seq)
+            .unwrap_or(0);
+        let count = count_session_events(db, session_id).await;
+        if watermark >= expected as u64 && count == expected {
+            return;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("backlog did not sync: watermark={watermark} count={count} expected={expected}");
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn outbox_paging_syncs_a_large_offline_backlog() {
     // More than one outbox page (1000 events), so both the initial flush and the
@@ -1909,14 +1933,7 @@ async fn outbox_paging_syncs_a_large_offline_backlog() {
     .expect("server db");
 
     // 3. Every page arrives and the node watermark advances.
-    wait_until("backlog synced", Duration::from_secs(60), || async {
-        server_db
-            .get_session(&session_id)
-            .await
-            .expect("get session")
-            .is_some_and(|session| session.last_node_seq >= BACKLOG)
-    })
-    .await;
+    wait_for_backlog(&server_db, &session_id, BACKLOG as usize).await;
     assert_eq!(
         count_session_events(&server_db, &session_id).await,
         BACKLOG as usize,
@@ -1932,6 +1949,17 @@ async fn outbox_paging_syncs_a_large_offline_backlog() {
     tokio::time::timeout(Duration::from_secs(10), node.wait())
         .await
         .expect("node stop");
+    // The hub may still be draining the old connection; wait until it observes the
+    // disconnect so no stale batch can land after the hub copy is dropped.
+    wait_until("node offline on hub", Duration::from_secs(10), || async {
+        server_db
+            .list_nodes()
+            .await
+            .expect("list nodes")
+            .into_iter()
+            .any(|node| node.node_id.as_str() == "paging-node" && !node.is_online)
+    })
+    .await;
     sqlx::query("DELETE FROM session_events WHERE session_id = ?")
         .bind(&session_id)
         .execute(server_db.pool())
@@ -1951,14 +1979,7 @@ async fn outbox_paging_syncs_a_large_offline_backlog() {
         &agent,
     )
     .await;
-    wait_until("backlog resynced", Duration::from_secs(60), || async {
-        server_db
-            .get_session(&session_id)
-            .await
-            .expect("get session")
-            .is_some_and(|session| session.last_node_seq >= BACKLOG)
-    })
-    .await;
+    wait_for_backlog(&server_db, &session_id, BACKLOG as usize).await;
     assert_eq!(
         count_session_events(&server_db, &session_id).await,
         BACKLOG as usize,
