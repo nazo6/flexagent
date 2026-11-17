@@ -264,7 +264,6 @@ pub(crate) async fn send_prompt<B: ClientApiBackend>(
         client_source: request.client_source,
     };
     let result = state.backend.dispatch_command(command).await;
-    crate::api::diagnostics::record_command_result(&state.backend, &result).await;
     Json(result).into_response()
 }
 
@@ -280,7 +279,6 @@ pub(crate) async fn control_session<B: ClientApiBackend>(
         action: request.action,
     };
     let result = state.backend.dispatch_command(command).await;
-    crate::api::diagnostics::record_command_result(&state.backend, &result).await;
     Json(result).into_response()
 }
 

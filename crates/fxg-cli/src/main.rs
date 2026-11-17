@@ -8,8 +8,8 @@
 //!
 //! The CLI is organized around sessions (`fxg session ...`), the local node
 //! (`fxg node ...`), the hub (`fxg hub ...`), and the OS autostart service
-//! (`fxg service ...`), plus the support utilities (`logs` / `doctor` /
-//! `support`) and the hidden `internal` namespace.
+//! (`fxg service ...`), plus the support utilities (`logs` / `doctor`) and the
+//! hidden `internal` namespace.
 
 // Migration baseline: remove this crate-level allow as Phase 1 of
 // `docs/proposals/2026-11-08-type-safety-plan.md` lands.
@@ -67,8 +67,6 @@ enum Commands {
     Logs(commands::LogsArgs),
     /// Check the local configuration, database, logs and toolchain
     Doctor(commands::DoctorArgs),
-    /// Export a redacted support bundle / list persisted incidents
-    Support(commands::SupportArgs),
     /// Local node process and Web access tokens
     Node(commands::NodeArgs),
     /// Hub process and node pairing tokens

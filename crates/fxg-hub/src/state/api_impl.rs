@@ -16,8 +16,8 @@ use fxg_protocol::client_api::{
     RespondElicitationRequest, RespondElicitationResponse, RespondPermissionRequest,
     RespondPermissionResponse, ResumeSessionRequest, ResumeSessionResponse,
     RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse, SessionImportRequest,
-    SessionImportResponse, SessionRenameRequest, SessionRenameResponse, SupportBundleConfig,
-    WorktreeInfo, WorktreesResponse,
+    SessionImportResponse, SessionRenameRequest, SessionRenameResponse, WorktreeInfo,
+    WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, ComponentHealth, ComponentName, DiffScope, ErrorCode,
@@ -66,42 +66,12 @@ impl ClientApiBackend for HubState {
         Some(self.inner.options.paths.data_dir())
     }
 
-    fn db_path(&self) -> Option<std::path::PathBuf> {
-        Some(self.inner.options.paths.db_path())
-    }
-
     fn log_path(&self) -> Option<std::path::PathBuf> {
         Some(self.inner.options.paths.log_path())
     }
 
     async fn role_health(&self, now: i64) -> Vec<ComponentHealth> {
         vec![ComponentHealth::ok(ComponentName::Hub, now)]
-    }
-
-    fn support_bundle_config(&self) -> SupportBundleConfig {
-        let allowed_hosts = self.inner.options.allowed_hosts.clone();
-        let allowed_origins = self.inner.options.allowed_origins.clone();
-        SupportBundleConfig {
-            data_dir: self
-                .inner
-                .options
-                .paths
-                .data_dir()
-                .to_string_lossy()
-                .into_owned(),
-            log_level: self.inner.options.log.level.clone(),
-            log_file: self.inner.options.log.file.clone(),
-            log_format: self.inner.options.log.format.clone(),
-            hub_listen_addr: Some(self.inner.options.listen_addr.clone()),
-            allowed_hosts,
-            allowed_origins,
-            ..SupportBundleConfig::default()
-        }
-    }
-
-    fn support_bundle_logs(&self, lines: usize) -> Vec<String> {
-        let path = self.inner.options.paths.log_path();
-        crate::api::diagnostics::log_tail(&path, lines)
     }
 
     async fn system_extras(&self) -> Result<SystemExtras, ApiError> {

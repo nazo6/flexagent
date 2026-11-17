@@ -34,7 +34,7 @@ CLI のコマンド・引数の正は `fxg --help` / `fxg <noun> --help` と
   アクセストークン。
 - `fxg hub ...`: ハブの起動・停止・状態・ノードペアリングトークン。
 - `fxg service ...`: OS ログイン時の自動起動登録。
-- `fxg logs` / `fxg doctor` / `fxg support`: ログ・診断・サポートバンドル。
+- `fxg logs` / `fxg doctor`: ログ・自己診断。
 - `fxg agents login|logout`: ACP エージェントの認証。
 - `fxg internal ...`: システム連携用の隠しコマンド。
 

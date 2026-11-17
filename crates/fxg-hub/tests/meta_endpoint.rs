@@ -137,26 +137,8 @@ async fn rotate_token_sets_the_new_session_cookie() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn diagnostics_expose_health_and_persisted_incidents() {
+async fn diagnostics_expose_component_health() {
     let (home, server) = start_hub().await;
-    let db = fxg_db::Db::open(
-        &Paths::portable(home.path(), Role::Hub).db_path(),
-        Role::Hub,
-    )
-    .await
-    .expect("db");
-    db.record_incident(
-        &fxg_db::IncidentRecord::new(
-            fxg_protocol::common::IncidentLevel::Error,
-            fxg_protocol::common::ErrorCode::GitFailed,
-            fxg_protocol::common::IncidentSource::Git,
-            "git diff failed",
-        )
-        .with_node_id(Some("node-1")),
-    )
-    .await
-    .expect("incident");
-
     let http = reqwest::Client::new();
     let token = auth_token(&home);
     let diagnostics: serde_json::Value = http
@@ -172,79 +154,5 @@ async fn diagnostics_expose_health_and_persisted_incidents() {
         .await
         .expect("json");
     assert!(diagnostics["health"]["components"].is_array());
-    assert_eq!(diagnostics["incidents"][0]["code"], "GIT_FAILED");
-
-    let incidents: serde_json::Value = http
-        .get(format!(
-            "http://{}/api/v1/diagnostics/incidents",
-            server.listen_addr()
-        ))
-        .bearer_auth(&token)
-        .send()
-        .await
-        .expect("incidents")
-        .json()
-        .await
-        .expect("json");
-    assert_eq!(incidents["retention_days"], 14);
-    assert_eq!(incidents["incidents"][0]["summary"], "git diff failed");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn support_bundle_is_redacted() {
-    let (home, server) = start_hub().await;
-    let paths = Paths::portable(home.path(), Role::Hub);
-    let user_home = dirs::home_dir().expect("user home");
-    let secret_path = user_home.join("secret.txt");
-    let log_path = paths.log_path();
-    std::fs::create_dir_all(log_path.parent().expect("log parent")).expect("log dir");
-    std::fs::write(&log_path, format!("path={}\n", secret_path.display())).expect("write log");
-
-    let http = reqwest::Client::new();
-    let token = auth_token(&home);
-    let response = http
-        .get(format!(
-            "http://{}/api/v1/diagnostics/bundle",
-            server.listen_addr()
-        ))
-        .bearer_auth(&token)
-        .send()
-        .await
-        .expect("bundle");
-    assert_eq!(response.status(), reqwest::StatusCode::OK);
-    let text = response.text().await.expect("body");
-    assert!(!text.contains(&token), "the auth token must not leak");
-    let secret_text = secret_path.to_string_lossy();
-    assert!(
-        !text.contains(secret_text.as_ref()),
-        "the user home must be redacted"
-    );
-    let bundle: serde_json::Value = serde_json::from_str(&text).expect("json");
-    let data_dir = paths.data_dir().to_string_lossy().to_string();
-    assert_eq!(
-        bundle["config"]["data_dir"].as_str(),
-        Some(data_dir.as_str())
-    );
-    assert!(
-        bundle["database"]["path"]
-            .as_str()
-            .expect("path")
-            .contains(&data_dir)
-    );
-    let redacted_path = secret_path
-        .strip_prefix(&user_home)
-        .map(|rest| std::path::Path::new("~").join(rest))
-        .unwrap_or_else(|_| secret_path.clone());
-    let redacted_text = redacted_path.to_string_lossy();
-    assert!(
-        bundle["logs"]
-            .as_array()
-            .expect("logs")
-            .iter()
-            .any(|line| line
-                .as_str()
-                .is_some_and(|line| line.contains(redacted_text.as_ref()))),
-        "the user home in logs must be redacted: {}",
-        bundle["logs"]
-    );
+    assert!(diagnostics.get("incidents").is_none());
 }

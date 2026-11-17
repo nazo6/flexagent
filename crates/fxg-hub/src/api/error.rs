@@ -26,7 +26,7 @@ pub struct ApiError {
     pub retryable: bool,
     /// Recovery actions the client can offer
     pub recovery: Vec<RecoveryAction>,
-    /// Correlation ID shared with logs / incidents
+    /// Correlation ID shared with logs
     pub request_id: Option<Box<str>>,
     /// What happened to the user's data
     pub data_safety: Option<DataSafety>,
@@ -216,8 +216,7 @@ impl IntoResponse for ApiError {
             }),
         )
             .into_response();
-        // The incident-recording middleware reads the code without buffering the
-        // response body (`x-fxg-error-code`).
+        // Expose the structured code to clients without parsing the body.
         if let Ok(value) = HeaderValue::from_str(info.code.as_str()) {
             response
                 .headers_mut()

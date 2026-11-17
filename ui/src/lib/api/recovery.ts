@@ -22,8 +22,6 @@ export function recoveryActionLabel(action: RecoveryAction): string {
       return m.recovery_open_config();
     case "show_logs":
       return m.recovery_show_logs();
-    case "export_diagnostics":
-      return m.recovery_export_diagnostics();
   }
 }
 

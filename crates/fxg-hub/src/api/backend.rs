@@ -17,11 +17,11 @@ use fxg_protocol::client_api::{
     RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
     ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
     SessionArchiveResponse, SessionImportRequest, SessionImportResponse, SessionRenameRequest,
-    SessionRenameResponse, SupportBundle, SupportBundleConfig, WorktreeInfo, WorktreesResponse,
+    SessionRenameResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, ClientSource, CommandResult, ComponentHealth, DiffScope, ErrorCode,
-    ProjectSummary, PromptInput, SessionControlAction, SystemStatus, WorkspaceDiffResponse,
+    ProjectSummary, PromptInput, SessionControlAction, WorkspaceDiffResponse,
 };
 use fxg_protocol::events::SessionEventEnvelope;
 use fxg_protocol::node_hub::{NodeRpcRequest, NodeRpcResponse};
@@ -200,9 +200,9 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
 
     /// Diagnostics (`GET /api/v1/diagnostics`).
     ///
-    /// The default implementation combines component health, recent incidents and
-    /// the role-specific hooks below. Endpoints only override
-    /// [`Self::agent_diagnostics`] / [`Self::role_health`].
+    /// The default implementation combines component health and the role-specific
+    /// hooks below. Endpoints only override [`Self::agent_diagnostics`] /
+    /// [`Self::role_health`].
     async fn diagnostics(&self) -> Result<DiagnosticsResponse, ApiError> {
         super::diagnostics::build_diagnostics(self).await
     }
@@ -214,11 +214,6 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
 
     /// Role data directory when the endpoint owns one.
     fn data_dir(&self) -> Option<std::path::PathBuf> {
-        None
-    }
-
-    /// Database file path of the endpoint.
-    fn db_path(&self) -> Option<std::path::PathBuf> {
         None
     }
 
@@ -240,28 +235,6 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     /// Agent stderr tails for diagnostics.
     fn agent_diagnostics(&self) -> Vec<AgentDiagnostics> {
         Vec::new()
-    }
-
-    /// Redacted bootstrap configuration included in a support bundle.
-    fn support_bundle_config(&self) -> SupportBundleConfig {
-        SupportBundleConfig::default()
-    }
-
-    /// Tail of the process log included in a support bundle (unredacted; the
-    /// diagnostics layer applies redaction).
-    fn support_bundle_logs(&self, _lines: usize) -> Vec<String> {
-        Vec::new()
-    }
-
-    /// Component health snapshot (`GET /api/v1/diagnostics` / bundle).
-    async fn system_status(&self) -> Result<SystemStatus, ApiError> {
-        Ok(super::diagnostics::build_system_status(self).await)
-    }
-
-    /// Redacted support bundle (`GET /api/v1/diagnostics/bundle` /
-    /// `fxg support bundle`).
-    async fn support_bundle(&self) -> Result<SupportBundle, ApiError> {
-        super::diagnostics::build_support_bundle(self).await
     }
 
     /// Requests a graceful process shutdown (`POST /api/v1/system/shutdown`).

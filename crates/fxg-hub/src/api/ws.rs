@@ -7,7 +7,7 @@
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use fxg_protocol::client_api::{ClientWsMessage, HubLinkStatus, ServerWsMessage};
-use fxg_protocol::common::{ErrorCode, ErrorInfo, IncidentLevel, IncidentSource};
+use fxg_protocol::common::{ErrorCode, ErrorInfo};
 use tokio::sync::{broadcast, watch};
 
 use super::{ClientApiBackend, ClientCommand, ClientEvent, replay_events, send_ws_json};
@@ -77,15 +77,6 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                                 counters.incr(super::CounterKind::ReplayFailures);
                             }
                             let error = ErrorInfo::new(ErrorCode::SyncBacklog, message);
-                            super::diagnostics::record_info(
-                                &backend,
-                                &error,
-                                IncidentSource::Sync,
-                                IncidentLevel::Error,
-                                None,
-                                None,
-                            )
-                            .await;
                             let error = ServerWsMessage::Error { error };
                             fxg_protocol::discard_with!(
                                 send_ws_json(&mut sender, &error).await,
@@ -117,7 +108,6 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                             continue;
                         };
                         let result = backend.dispatch_command(command).await;
-                        super::diagnostics::record_command_result(&backend, &result).await;
                         let response = ServerWsMessage::CommandResult {
                             command_id: result.command_id,
                             success: result.success,
@@ -214,15 +204,6 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                             counters.incr(super::CounterKind::ReplayFailures);
                         }
                         let error = ErrorInfo::new(ErrorCode::SyncBacklog, message);
-                        super::diagnostics::record_info(
-                            &backend,
-                            &error,
-                            IncidentSource::Sync,
-                            IncidentLevel::Error,
-                            None,
-                            None,
-                        )
-                        .await;
                         let error = ServerWsMessage::Error { error };
                         fxg_protocol::discard_with!(
                             send_ws_json(&mut sender, &error).await,

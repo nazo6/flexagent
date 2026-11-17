@@ -75,12 +75,6 @@ export const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   {
     scope: "current",
     tab: "process",
-    label: "Support bundle",
-    keywords: "diagnostics export bundle support",
-  },
-  {
-    scope: "current",
-    tab: "process",
     label: "Component health",
     keywords: "health status db http sync disk",
   },

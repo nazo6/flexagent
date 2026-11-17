@@ -1,8 +1,8 @@
 //! In-memory delivery counters exposed by diagnostics.
 //!
 //! Counters are process-local and reset on restart. They make packet / event
-//! drops visible in `/api/v1/diagnostics` and the support bundle instead of
-//! leaving them in log lines only.
+//! drops visible in `/api/v1/diagnostics` instead of leaving them in log lines
+//! only.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
