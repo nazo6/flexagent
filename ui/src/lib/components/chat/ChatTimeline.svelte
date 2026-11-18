@@ -10,6 +10,7 @@
   import ThoughtBlock from "./ThoughtBlock.svelte";
   import ToolCallGroup from "./ToolCallGroup.svelte";
   import { Badge } from "#lib/components/ui/badge/index.ts";
+  import { SvelteSet } from "svelte/reactivity";
   import {
     groupActivitySections,
     groupTimelineItems,
@@ -22,6 +23,7 @@
   import type { TimelineItem } from "#lib/sync/reducer.ts";
   import AlertTriangleIcon from "@lucide/svelte/icons/alert-triangle";
   import BotIcon from "@lucide/svelte/icons/bot";
+  import CircleStopIcon from "@lucide/svelte/icons/circle-stop";
   import ClockIcon from "@lucide/svelte/icons/clock";
   import ListChecksIcon from "@lucide/svelte/icons/list-checks";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
@@ -42,6 +44,7 @@
     onfork,
     canRevert = false,
     onrevert,
+    onstopterminal,
   }: {
     sessionId: string;
     items: TimelineItem[];
@@ -66,7 +69,25 @@
     canRevert?: boolean;
     /** Called when the user chooses "Revert to here" on a message. */
     onrevert?: (item: TimelineItem) => void;
+    /**
+     * Called when the user stops a command that is still running. Must resolve
+     * when the request finished so the card re-enables the button on failure.
+     */
+    onstopterminal?: (terminalId: string) => Promise<void>;
   } = $props();
+
+  /** Terminals whose stop request is in flight (per card). */
+  let stoppingTerminals = $state(new SvelteSet<string>());
+
+  async function stopTerminal(terminalId: string): Promise<void> {
+    if (stoppingTerminals.has(terminalId)) return;
+    stoppingTerminals.add(terminalId);
+    try {
+      await onstopterminal?.(terminalId);
+    } finally {
+      stoppingTerminals.delete(terminalId);
+    }
+  }
 
   /**
    * The agent is running a turn (generating a response or executing tools).
@@ -157,6 +178,12 @@
   );
 
   /**
+   * A stopped session's agent process (and its terminals) is gone, even when the
+   * last recorded terminal event was a turn-end snapshot.
+   */
+  const sessionStopped = $derived(status === "stopped" || status === "error");
+
+  /**
    * Latest message that can represent the current end of the conversation.
    * `last` scope only enables Fork there; `message` scope (future) enables all.
    */
@@ -206,6 +233,7 @@
         {status}
         nested
         {onsubagent}
+        {onstopterminal}
         subagentTitle={group.subagent.title ?? group.subagent.description ?? null}
       />
     </SubagentGroup>
@@ -286,11 +314,27 @@
     {:else if item.kind === "thought"}
       <ThoughtBlock {item} />
     {:else if item.kind === "terminal"}
+      {@const stopping = stoppingTerminals.has(item.terminalId)}
       <div class="bg-card flex flex-col gap-1.5 rounded-lg border border-border p-3">
         <div class="flex items-center gap-2 text-[13px]">
           <SquareTerminalIcon class="text-muted-foreground size-4" />
           <span class="desk-mono">{item.command === "" ? item.terminalId : item.command}</span>
-          {#if item.exitCode !== null}
+          {#if item.running && !sessionStopped && onstopterminal}
+            <button
+              type="button"
+              class="text-muted-foreground hover:bg-destructive/10 hover:text-destructive ml-auto flex size-5 shrink-0 items-center justify-center rounded transition-colors disabled:opacity-50"
+              title={stopping ? m.chat_terminal_stopping() : m.chat_terminal_stop()}
+              aria-label={stopping ? m.chat_terminal_stopping() : m.chat_terminal_stop()}
+              disabled={stopping}
+              onclick={() => void stopTerminal(item.terminalId)}
+            >
+              {#if stopping}
+                <LoaderCircleIcon class="size-3.5 animate-spin" />
+              {:else}
+                <CircleStopIcon class="size-3.5" />
+              {/if}
+            </button>
+          {:else if item.exitCode !== null}
             <Badge variant={item.exitCode === 0 ? "secondary" : "destructive"}>
               exit {item.exitCode}
             </Badge>

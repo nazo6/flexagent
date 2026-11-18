@@ -62,6 +62,21 @@ function subagent(childSessionId: string): TimelineItem {
   };
 }
 
+function terminal(terminalId: string, running: boolean): TimelineItem {
+  return {
+    kind: "terminal",
+    key: `terminal:${terminalId}`,
+    seq: 2,
+    createdAt: 0,
+    terminalId,
+    command: "npm run dev",
+    output: "",
+    exitCode: null,
+    running,
+    subagentId: null,
+  };
+}
+
 function thought(text: string): TimelineItem {
   return {
     kind: "thought",
@@ -177,6 +192,24 @@ describe("groupActivitySections", () => {
   it("leaves a single collapsible block on its own row", () => {
     const entries = groupActivitySections(groupTimelineItems([tool("t1"), tool("t2")]));
     expect(entries.map((entry) => entry.kind)).toEqual(["tools"]);
+  });
+
+  it("keeps a running command outside the fold", () => {
+    const entries = groupActivitySections(
+      groupTimelineItems([tool("t1"), terminal("term-1", true), message("done")]),
+    );
+    expect(entries.map((entry) => entry.kind)).toEqual(["tools", "single", "single"]);
+    expect(entries[1]).toMatchObject({ kind: "single", item: { terminalId: "term-1" } });
+  });
+
+  it("folds a finished command into the activity run", () => {
+    const entries = groupActivitySections(
+      groupTimelineItems([tool("t1"), terminal("term-1", false), message("done")]),
+    );
+    expect(entries.map((entry) => entry.kind)).toEqual(["activity", "single"]);
+    const section = entries[0];
+    if (section.kind !== "activity") throw new Error("expected activity section");
+    expect(section.counts.steps).toBe(1);
   });
 
   it("keeps approvals outside the fold", () => {

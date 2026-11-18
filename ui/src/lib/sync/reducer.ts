@@ -152,6 +152,8 @@ export type TimelineItem =
       command: string;
       output: string;
       exitCode: number | null;
+      /** Whether the command is still running (its card offers a stop action). */
+      running: boolean;
       subagentId: string | null;
     }
   | {
@@ -354,12 +356,11 @@ export function clearStreamBuffers(
       }
       break;
     case "terminal_output":
-      // When the finalized event for command completion (with `exit_code`)
-      // arrives, discard the matching streaming buffer to avoid duplicates
-      if (payload.data.exit_code !== null) {
-        sources.terminalDeltas.delete(payload.data.terminal_id);
-        untrackStream(sources, streamKey("terminal", payload.data.terminal_id));
-      }
+      // Every persisted terminal event carries only the bytes produced since the
+      // previous one (start / turn-end snapshot / final), so whatever was streamed
+      // until now is already in the event. Discard the buffer to avoid duplicates.
+      sources.terminalDeltas.delete(payload.data.terminal_id);
+      untrackStream(sources, streamKey("terminal", payload.data.terminal_id));
       break;
     default:
       break;
@@ -518,6 +519,8 @@ function upsertTerminalOutput(
       command: payload.data.command,
       output,
       exitCode: payload.data.exit_code,
+      // Events recorded before `running` existed are final.
+      running: payload.data.running ?? false,
       subagentId: payload.data.subagent_id ?? null,
     });
     return;
@@ -526,8 +529,11 @@ function upsertTerminalOutput(
   if (existing.kind === "terminal") {
     builder.items[previous] = {
       ...existing,
+      // The command is known from the start event on; later events repeat it.
+      command: payload.data.command,
       output: appendTerminalText(existing.output, output),
       exitCode: payload.data.exit_code ?? existing.exitCode,
+      running: payload.data.running ?? false,
       subagentId: payload.data.subagent_id ?? existing.subagentId,
     };
   }
@@ -848,9 +854,11 @@ function appendEphemeralItems(builder: TimelineBuilder, sources: TimelineSources
             seq: nextStreamSeq(),
             createdAt: items.at(-1)?.createdAt ?? 0,
             terminalId: id,
+            // The start event (recorded before any output) carries the command.
             command: "",
             output,
             exitCode: null,
+            running: true,
             subagentId: null,
           });
         }
