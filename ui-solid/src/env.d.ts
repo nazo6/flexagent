@@ -11,3 +11,9 @@ declare module "~icons/*" {
   const component: (props: ComponentProps<"svg">) => JSX.Element;
   export default component;
 }
+
+/**
+ * `monaco-editor` ships no declaration for the basic-languages contribution
+ * (only the implementation), so declare the side-effect-only module here.
+ */
+declare module "monaco-editor/basic-languages/monaco.contribution";

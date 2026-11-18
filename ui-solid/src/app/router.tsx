@@ -31,16 +31,16 @@ const routes = defineRoutes([
         path: "/settings",
         component: SettingsShell,
         children: [
-          { path: "/settings", component: SettingsIndex },
-          { path: "/settings/nodes", component: NodeSettings },
-          { path: "/settings/hub/:tab?", component: HubSettings, matchFilters: { tab: isHubTab } },
+          { path: "/", component: SettingsIndex },
+          { path: "/nodes", component: NodeSettings },
+          { path: "/hub/:tab?", component: HubSettings, matchFilters: { tab: isHubTab } },
           {
-            path: "/settings/browser/:tab?",
+            path: "/browser/:tab?",
             component: BrowserSettings,
             matchFilters: { tab: isBrowserTab },
           },
           {
-            path: "/settings/nodes/:node_id/:tab?",
+            path: "/nodes/:node_id/:tab?",
             component: NodeSettings,
             matchFilters: { tab: isNodeTab },
           },

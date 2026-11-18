@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onSettled, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, onSettled, Show, untrack } from "solid-js";
 import { useNavigate, useParams } from "@solidjs/router";
 import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
 import ProvisioningLogCard from "#lib/components/ProvisioningLogCard.tsx";
@@ -213,7 +213,8 @@ export default function SessionPage() {
   createEffect(
     () => dockContext(),
     (context) => {
-      dock.setContext(context);
+      // Store mutation: the reads inside it are deliberately untracked.
+      untrack(() => dock.setContext(context));
     },
   );
 
@@ -223,14 +224,16 @@ export default function SessionPage() {
     () => sessionId(),
     (id) => {
       if (!id) return;
-      sync.setActiveSession(id);
-      if (loadedFor !== id) {
-        loadedFor = id;
-        setSelectedSubagentId(null);
-        sync.loadSessionEvents(id).catch(() => {
-          /* Ignore: the WS replay will make it visible once it arrives. */
-        });
-      }
+      untrack(() => {
+        sync.setActiveSession(id);
+        if (loadedFor !== id) {
+          loadedFor = id;
+          setSelectedSubagentId(null);
+          sync.loadSessionEvents(id).catch(() => {
+            /* Ignore: the WS replay will make it visible once it arrives. */
+          });
+        }
+      });
       return () => sync.setActiveSession(null);
     },
   );
@@ -240,11 +243,12 @@ export default function SessionPage() {
     () => ({
       id: sessionId(),
       listed: sync.sessions.some((entry) => entry.session_id === sessionId()),
+      fallbackId: fallbackSession()?.id ?? null,
     }),
-    ({ id, listed }) => {
+    ({ id, listed, fallbackId }) => {
       if (!id) return;
       if (listed) return;
-      if (fallbackSession()?.id === id) return;
+      if (fallbackId === id) return;
       let cancelled = false;
       void sync.connection.client
         .sessionDetail(id)

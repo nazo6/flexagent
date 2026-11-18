@@ -1,0 +1,148 @@
+.fxg-md {
+  /* Markdown typography (theme variables and em units so it follows the parent font size) */
+  overflow-wrap: anywhere;
+}
+
+.fxg-md > :first-child {
+  margin-block-start: 0;
+}
+
+.fxg-md > :last-child {
+  margin-block-end: 0;
+}
+
+.fxg-md p {
+  margin-block: 0.5em;
+}
+
+.fxg-md h1,
+.fxg-md h2,
+.fxg-md h3,
+.fxg-md h4,
+.fxg-md h5,
+.fxg-md h6 {
+  margin-block: 1em 0.5em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.fxg-md h1 {
+  font-size: 1.35em;
+}
+
+.fxg-md h2 {
+  font-size: 1.2em;
+}
+
+.fxg-md h3 {
+  font-size: 1.1em;
+}
+
+.fxg-md h4,
+.fxg-md h5,
+.fxg-md h6 {
+  font-size: 1em;
+}
+
+.fxg-md ul {
+  margin-block: 0.5em;
+  padding-inline-start: 1.4em;
+  list-style: disc;
+}
+
+.fxg-md ol {
+  margin-block: 0.5em;
+  padding-inline-start: 1.4em;
+  list-style: decimal;
+}
+
+.fxg-md li {
+  margin-block: 0.2em;
+}
+
+.fxg-md li > p {
+  margin-block: 0.2em;
+}
+
+.fxg-md li:has(> input[type="checkbox"]) {
+  list-style: none;
+}
+
+.fxg-md input[type="checkbox"] {
+  margin-inline-end: 0.4em;
+  vertical-align: middle;
+}
+
+.fxg-md :not(pre) > code {
+  border-radius: 0.3em;
+  background: color-mix(in oklab, currentColor 8%, transparent);
+  padding: 0.1em 0.35em;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 0.875em;
+}
+
+.fxg-md pre {
+  margin-block: 0.6em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--muted);
+  padding: 0.65em 0.8em;
+  overflow-x: auto;
+  font-size: 0.85em;
+  line-height: 1.6;
+}
+
+.fxg-md pre code {
+  background: none;
+  padding: 0;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: inherit;
+}
+
+.fxg-md blockquote {
+  margin-block: 0.6em;
+  border-inline-start: 3px solid var(--border);
+  padding-inline-start: 0.8em;
+  color: var(--muted-foreground);
+}
+
+.fxg-md hr {
+  margin-block: 1em;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.fxg-md a {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.fxg-md a:hover {
+  opacity: 0.8;
+}
+
+.fxg-md table {
+  display: block;
+  margin-block: 0.6em;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.fxg-md th,
+.fxg-md td {
+  border: 1px solid var(--border);
+  padding: 0.3em 0.6em;
+  text-align: start;
+}
+
+.fxg-md th {
+  background: var(--muted);
+  font-weight: 600;
+}
+
+.fxg-md img {
+  max-width: 100%;
+  border-radius: var(--radius-md);
+}
