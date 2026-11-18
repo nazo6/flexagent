@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# Stage 1: Web UI (SvelteKit SPA → ui/build)
+# Stage 1: Web UI (Solid SPA → ui/build)
 # ---------------------------------------------------------------------------
 FROM node:24-bookworm-slim AS ui
 # pnpm は mise.toml と同じバージョンへ固定する
@@ -25,7 +25,7 @@ COPY .sqlx/ ./.sqlx/
 COPY crates/ ./crates/
 
 COPY --from=ui /app/ui/build ./ui/build
-COPY --from=ui /app/ui/static ./ui/static
+COPY --from=ui /app/ui/public ./ui/public
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
