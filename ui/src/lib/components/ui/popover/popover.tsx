@@ -5,7 +5,13 @@ import { Popover as PopoverPrimitive, PopoverButton, PopoverPanel } from "terrac
 import { cn } from "#lib/utils.ts";
 import { createControllable, toBoolean, type MouseHandler } from "../controllable.ts";
 import { ANCHORED_PANEL_ATTRIBUTE, dismissOnOutsidePointer } from "../position.ts";
-import { composeRef, useAnchoredPanel, type ElementRef, type PanelAlign } from "../position.ts";
+import {
+  composeRef,
+  restoreFocusOnClose,
+  useAnchoredPanel,
+  type ElementRef,
+  type PanelAlign,
+} from "../position.ts";
 import { PopoverContext, usePopoverState } from "./popover-context.ts";
 
 /**
@@ -110,6 +116,8 @@ export function Content(props: ContentProps) {
     sideOffset: () => props.sideOffset ?? 6,
     alignOffset: () => props.alignOffset ?? 0,
   });
+
+  restoreFocusOnClose({ open: state.open, anchor: state.anchor, panel: panel.element });
 
   return (
     <Portal>

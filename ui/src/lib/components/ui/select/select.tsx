@@ -7,7 +7,7 @@ import IconCheck from "~icons/lucide/check";
 import IconChevronDown from "~icons/lucide/chevron-down";
 import IconChevronUp from "~icons/lucide/chevron-up";
 import { createControllable, toBoolean, type MouseHandler } from "../controllable.ts";
-import { composeRef, useAnchoredPanel, type ElementRef } from "../position.ts";
+import { composeRef, restoreFocusOnClose, useAnchoredPanel, type ElementRef } from "../position.ts";
 import { ANCHORED_PANEL_ATTRIBUTE, dismissOnOutsidePointer } from "../position.ts";
 import { Separator as SeparatorRoot } from "../separator/index.ts";
 
@@ -205,6 +205,8 @@ export function Content(props: ContentProps) {
     sideOffset: () => props.sideOffset ?? 4,
     matchWidth: true,
   });
+
+  restoreFocusOnClose({ open: state.open, anchor: state.anchor, panel: panel.element });
 
   const [element, setElement] = createSignal<HTMLElement>();
   const [scrollTop, setScrollTop] = createSignal(0);

@@ -92,6 +92,8 @@ export interface AnchoredPanelOptions {
 export interface AnchoredPanel {
   /** Ref for the panel element. */
   ref: ElementRef;
+  /** The panel element, once the ref has run. */
+  element: Accessor<HTMLElement | undefined>;
   /** The side the panel actually landed on (after `flip`). */
   side: Accessor<Side>;
   /** The alignment the panel actually landed on. */
@@ -162,7 +164,7 @@ export function useAnchoredPanel(options: AnchoredPanelOptions): AnchoredPanel {
     },
   );
 
-  return { ref: setPanel, side, align };
+  return { ref: setPanel, element: panel, side, align };
 }
 
 interface PanelState {
@@ -254,4 +256,43 @@ export function dismissOnOutsidePointer(options: DismissOptions): void {
     document.addEventListener("pointerdown", handle, true);
     return () => document.removeEventListener("pointerdown", handle, true);
   });
+}
+
+/**
+ * Returns focus to the trigger when a non-modal panel closes.
+ *
+ * Non-modal panels have no focus trap, so closing one with Escape or by
+ * choosing an item leaves focus on the unmounted panel (or on `<body>`).
+ * Focus is left alone when the user moved it somewhere outside the panel
+ * first, so an outside click keeps its own target.
+ */
+export function restoreFocusOnClose(options: {
+  open: Accessor<boolean>;
+  anchor: Accessor<HTMLElement | null | undefined>;
+  panel: Accessor<HTMLElement | undefined>;
+}): void {
+  let wasOpen = false;
+  createEffect(
+    () => options.open(),
+    (open) => {
+      if (open) {
+        wasOpen = true;
+        return;
+      }
+      if (!wasOpen) return;
+      wasOpen = false;
+      queueMicrotask(() => {
+        const active = document.activeElement;
+        const panel = options.panel();
+        const focusIsOutsidePanel =
+          active instanceof HTMLElement &&
+          active !== document.body &&
+          active !== document.documentElement &&
+          !panel?.contains(active);
+        if (focusIsOutsidePanel) return;
+        const anchor = options.anchor();
+        if (anchor?.isConnected) anchor.focus();
+      });
+    },
+  );
 }

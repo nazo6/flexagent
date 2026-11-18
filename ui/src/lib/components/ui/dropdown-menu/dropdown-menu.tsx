@@ -5,7 +5,13 @@ import { Popover, PopoverButton, PopoverPanel } from "terracotta/popover";
 import { Menu, MenuItem } from "terracotta/menu";
 import { cn } from "#lib/utils.ts";
 import { createControllable, toBoolean, type MouseHandler } from "../controllable.ts";
-import { composeRef, useAnchoredPanel, type ElementRef, type PanelAlign } from "../position.ts";
+import {
+  composeRef,
+  restoreFocusOnClose,
+  useAnchoredPanel,
+  type ElementRef,
+  type PanelAlign,
+} from "../position.ts";
 import { ANCHORED_PANEL_ATTRIBUTE, dismissOnOutsidePointer } from "../position.ts";
 import IconCheck from "~icons/lucide/check";
 import IconMinus from "~icons/lucide/minus";
@@ -166,6 +172,8 @@ export function Content(props: ContentProps) {
     sideOffset: () => props.sideOffset ?? 4,
     alignOffset: () => props.alignOffset ?? 0,
   });
+
+  restoreFocusOnClose({ open: state.open, anchor: state.anchor, panel: panel.element });
 
   return (
     <Portal>
@@ -613,6 +621,8 @@ export function SubContent(props: SubContentProps) {
     sideOffset: () => props.sideOffset ?? 0,
     alignOffset: () => props.alignOffset ?? -4,
   });
+
+  restoreFocusOnClose({ open: sub.open, anchor: sub.anchor, panel: panel.element });
 
   return (
     <Portal>
