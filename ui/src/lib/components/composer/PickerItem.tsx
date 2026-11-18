@@ -20,19 +20,22 @@ export interface PickerItemProps {
 /** One row of a picker popover (project / directory / agent / model). */
 export default function PickerItem(props: PickerItemProps) {
   return (
-    <div class="flex w-full items-center gap-1">
+    <div role="presentation" class="flex w-full items-center gap-1">
       <button
         type="button"
+        data-picker-item
+        role="option"
+        aria-selected={props.selected === true ? "true" : "false"}
         disabled={props.disabled ?? false}
         class={cn(
-          "hover:bg-accent focus-visible:bg-accent flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors outline-none disabled:pointer-events-none disabled:opacity-50",
+          "hover:bg-accent focus:bg-accent focus-visible:bg-accent flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors outline-none disabled:pointer-events-none disabled:opacity-50",
           props.class,
         )}
         onClick={() => props.onselect?.()}
       >
         <span class="min-w-0 flex-1">{props.children}</span>
         <Show when={props.selected ?? false}>
-          <IconCheck class="text-signal size-3.5 shrink-0" />
+          <IconCheck class="text-signal size-3.5 shrink-0" aria-hidden="true" />
         </Show>
       </button>
       <Show when={props.favorite}>
