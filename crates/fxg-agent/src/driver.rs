@@ -436,7 +436,29 @@ pub trait ActiveSessionHandle: Send + Sync {
         anyhow::bail!("compaction is not supported by this driver")
     }
     /// Cancel the current turn.
+    ///
+    /// Cancellation is cooperative: drivers forward it to the agent, and the
+    /// agent decides whether the tools it is running stop. Commands that keep
+    /// running are terminated with [`Self::kill_terminal`] or [`Self::dispose`].
     async fn cancel_turn(&self) -> anyhow::Result<()>;
+    /// Terminates one terminal the agent started (ACP `terminal/*`).
+    ///
+    /// A background command outlives the turn that started it, so this is the
+    /// only way to stop it without ending the session. The terminal reports its
+    /// final `TerminalOutput` (with the exit code) through the event stream,
+    /// exactly as if the command had exited on its own. The default
+    /// implementation is for drivers that do not own the terminals.
+    async fn kill_terminal(&self, _terminal_id: &str) -> anyhow::Result<()> {
+        anyhow::bail!("this driver does not own agent terminals")
+    }
+    /// Publishes the output of terminals that are still running as
+    /// `TerminalOutput` snapshots.
+    ///
+    /// The node calls this when a turn ends. Without it, a command that keeps
+    /// running (a dev server, a watcher) would only be persisted when it exits,
+    /// so its card and output would disappear from the timeline on reload.
+    /// Drivers without terminals keep the no-op default.
+    async fn snapshot_terminals(&self) {}
     /// Fully terminates the session process (including the process tree).
     ///
     /// Drivers that keep processes alive after session end (`AcpDriver`) **discard

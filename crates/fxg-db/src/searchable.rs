@@ -199,6 +199,7 @@ mod tests {
             command: "ls".to_owned(),
             data_b64: "GVsbG8=".to_owned(),
             exit_code: None,
+            running: false,
             subagent_id: None,
         };
         assert_eq!(classify_payload(&output).1, None);

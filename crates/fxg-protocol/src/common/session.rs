@@ -32,6 +32,15 @@ pub enum SessionStatus {
 }
 
 impl SessionStatus {
+    /// Whether the agent is working on a turn (including waiting on the user
+    /// mid-turn). A non-busy status means the turn ended.
+    pub const fn is_busy(self) -> bool {
+        matches!(
+            self,
+            Self::Running | Self::WaitingPermission | Self::WaitingInput
+        )
+    }
+
     /// String representation used in the DB / JSON.
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -511,6 +520,14 @@ pub enum SessionControlAction {
     Compact,
     /// Interrupt the current turn
     Cancel,
+    /// Terminate one terminal the agent started (ACP `terminal/*`).
+    ///
+    /// Commands outlive the turn that started them, so this is the only way to
+    /// stop a background command without ending the session.
+    KillTerminal {
+        /// Terminal ID reported in the `TerminalOutput` events
+        terminal_id: String,
+    },
     /// End the session and return the agent process to the reuse pool
     Kill,
     /// Force-terminate the session and its process tree

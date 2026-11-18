@@ -38,7 +38,9 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use fxg_protocol::util::{PtyOutputLog, now_ms};
-use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
+#[cfg(not(windows))]
+use portable_pty::ChildKiller;
+use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use tokio::sync::{broadcast, mpsc};
 
 use crate::error::PtyError;
@@ -166,6 +168,9 @@ struct PtySession {
     info: PtySessionInfo,
     master: Box<dyn MasterPty + Send>,
     input_tx: mpsc::UnboundedSender<Vec<u8>>,
+    /// Unix child killer. Windows terminates through the Job Object instead
+    /// (see [`terminate_session`]).
+    #[cfg(not(windows))]
     killer: Box<dyn ChildKiller + Send + Sync>,
     /// Drop reliably terminates the process tree (Windows Job Object)
     _guard: ProcessTreeGuard,
@@ -173,6 +178,23 @@ struct PtySession {
     log: Arc<Mutex<PtyOutputLog>>,
     /// When the last client detached (base of the idle timeout)
     detached_at: Option<Instant>,
+}
+
+/// Terminates a PTY's child process (and its whole tree on Windows).
+///
+/// Windows goes through the Job Object: `portable-pty` 0.9 reports a successful
+/// `TerminateProcess` as an error in `ChildKiller::kill`, so a successful kill
+/// would otherwise surface as a failure to the caller (`kill_terminal`, the
+/// workspace terminal's tab close, the emergency kill switch).
+fn terminate_session(session: &mut PtySession) -> Result<(), PtyError> {
+    #[cfg(windows)]
+    {
+        session._guard.terminate_tree().map(|_| ())
+    }
+    #[cfg(not(windows))]
+    {
+        session.killer.kill().map_err(PtyError::from_display)
+    }
 }
 
 #[derive(Default)]
@@ -434,7 +456,7 @@ impl PtySessionManager {
                         continue;
                     }
                     tracing::info!(pty_id = %pty_id, "killing idle workspace terminal");
-                    if let Err(err) = session.killer.kill() {
+                    if let Err(err) = terminate_session(session) {
                         tracing::warn!(pty_id = %pty_id, "failed to kill idle terminal: {err}");
                     }
                 }
@@ -481,7 +503,7 @@ impl PtySessionManager {
                 }
                 // Replace the shell: the workspace mapping is released now,
                 // the old session is removed by its exit thread.
-                if let Err(err) = session.killer.kill() {
+                if let Err(err) = terminate_session(session) {
                     tracing::warn!(pty_id = %existing_id, "failed to replace terminal: {err}");
                 }
             }
@@ -593,7 +615,7 @@ impl PtySessionManager {
             .sessions
             .get_mut(pty_id)
             .ok_or_else(|| PtyError::NotFound(pty_id.to_owned()))?;
-        session.killer.kill().map_err(PtyError::from_display)?;
+        terminate_session(session)?;
         remove_workspace_mapping(&mut state, pty_id);
         Ok(())
     }
@@ -606,7 +628,7 @@ impl PtySessionManager {
         let mut state = self.lock_state();
         let mut killed = Vec::with_capacity(state.sessions.len());
         for (pty_id, session) in state.sessions.iter_mut() {
-            if session.killer.kill().is_ok() {
+            if terminate_session(session).is_ok() {
                 killed.push(pty_id.clone());
             }
         }
@@ -683,6 +705,7 @@ impl PtySessionManager {
         guard.attach(child.as_ref())?;
 
         let pid = child.process_id();
+        #[cfg(not(windows))]
         let killer = child.clone_killer();
         let reader = pair
             .master
@@ -777,6 +800,7 @@ impl PtySessionManager {
                 info: info.clone(),
                 master: pair.master,
                 input_tx,
+                #[cfg(not(windows))]
                 killer,
                 _guard: guard,
                 log,
@@ -1214,6 +1238,25 @@ mod tests {
         assert!(
             !manager.contains("pty-win"),
             "session must be removed on exit"
+        );
+    }
+
+    /// `portable-pty` 0.9 reports a successful `TerminateProcess` as an error, so
+    /// `kill` must terminate through the Job Object and report success.
+    #[cfg(windows)]
+    #[test]
+    fn kill_reports_success_and_terminates_the_tree_on_windows() {
+        let manager = PtySessionManager::new();
+        let mut request = PtySpawnRequest::new("pty-win-kill");
+        request.shell_cmd = Some("cmd".to_owned());
+        request.args = vec!["/C".to_owned(), "ping -n 60 127.0.0.1 > nul".to_owned()];
+        manager.spawn(request).expect("spawn");
+        wait_until(|| manager.contains("pty-win-kill"), "session registration");
+
+        manager.kill("pty-win-kill").expect("kill must succeed");
+        wait_until(
+            || !manager.contains("pty-win-kill"),
+            "session removal after kill",
         );
     }
 }

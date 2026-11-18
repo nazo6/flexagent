@@ -112,12 +112,69 @@ pub(super) fn elicitation_content_value(
 // terminal/* (fxg-pty)
 // ----------------------------------------------------------------------
 
+/// Retained output of an ACP terminal and the cursor of already published bytes.
+///
+/// The output collector is the only writer. Live streaming deltas are
+/// independent of this cursor: it tracks the bytes that `TerminalOutput` events
+/// (the start event, turn-end snapshots and the final event) already carried, so
+/// the UI appends every byte exactly once even when a command survives a turn.
+pub(super) struct TerminalOutputBuffer {
+    data: Vec<u8>,
+    /// Bytes dropped from the front because `limit` was exceeded.
+    dropped: u64,
+    /// Absolute end offset of the last published event.
+    published: u64,
+    limit: Option<usize>,
+}
+
+impl TerminalOutputBuffer {
+    /// Creates a buffer keeping at most `limit` bytes (`None` = unbounded).
+    pub(super) fn new(limit: Option<usize>) -> Self {
+        Self {
+            data: Vec::new(),
+            dropped: 0,
+            published: 0,
+            limit,
+        }
+    }
+
+    /// Appends a chunk, trimming the oldest bytes beyond the limit.
+    pub(super) fn push(&mut self, chunk: &[u8]) {
+        self.data.extend_from_slice(chunk);
+        if let Some(limit) = self.limit
+            && self.data.len() > limit
+        {
+            let excess = self.data.len() - limit;
+            self.data.drain(..excess);
+            self.dropped += excess as u64;
+        }
+    }
+
+    /// Everything still retained (the `terminal/output` response).
+    pub(super) fn retained(&self) -> Vec<u8> {
+        self.data.clone()
+    }
+
+    /// Bytes produced since the last published event; advances the cursor.
+    pub(super) fn take_unpublished(&mut self) -> Vec<u8> {
+        let start = self
+            .published
+            .saturating_sub(self.dropped)
+            .min(self.data.len() as u64) as usize;
+        let data = self.data[start..].to_vec();
+        self.published = self.dropped + self.data.len() as u64;
+        data
+    }
+}
+
 /// Execution state of an ACP terminal.
 pub(super) struct TerminalState {
     pub(super) pty_id: String,
     command: String,
-    output: Arc<Mutex<Vec<u8>>>,
+    buffer: Arc<Mutex<TerminalOutputBuffer>>,
     exit_rx: watch::Receiver<Option<i32>>,
+    /// Asks the collector to publish the output produced since the last event.
+    snapshot: mpsc::UnboundedSender<()>,
 }
 
 /// ACP terminal registry.
@@ -126,11 +183,11 @@ pub(super) struct TerminalRegistry {
     terminals: Mutex<HashMap<String, TerminalState>>,
 }
 
-/// Return value of `TerminalRegistry::get` (pty_id, command, output, exit_rx).
+/// Return value of `TerminalRegistry::get` (pty_id, command, buffer, exit_rx).
 pub(super) type TerminalSnapshot = (
     String,
     String,
-    Arc<Mutex<Vec<u8>>>,
+    Arc<Mutex<TerminalOutputBuffer>>,
     watch::Receiver<Option<i32>>,
 );
 
@@ -143,9 +200,49 @@ impl TerminalRegistry {
         Ok((
             state.pty_id.clone(),
             state.command.clone(),
-            Arc::clone(&state.output),
+            Arc::clone(&state.buffer),
             state.exit_rx.clone(),
         ))
+    }
+
+    /// PTY ID behind a terminal ID (used to terminate one command).
+    pub(super) fn pty_id(&self, terminal_id: &str) -> Result<String, String> {
+        let terminals = self.terminals.lock().expect("terminal registry poisoned");
+        terminals
+            .get(terminal_id)
+            .map(|state| state.pty_id.clone())
+            .ok_or_else(|| format!("unknown terminal: {terminal_id}"))
+    }
+
+    /// Asks every terminal to publish the output produced since its last event.
+    pub(super) fn request_snapshots(&self) {
+        let terminals = self.terminals.lock().expect("terminal registry poisoned");
+        for state in terminals.values() {
+            // A closed collector already published its final event.
+            fxg_protocol::discard_with!(
+                state.snapshot.send(()),
+                "request a snapshot from a closed terminal collector"
+            );
+        }
+    }
+
+    /// Exit receivers of all terminals (used to wait for their final events).
+    pub(super) fn exit_receivers(&self) -> Vec<watch::Receiver<Option<i32>>> {
+        self.terminals
+            .lock()
+            .expect("terminal registry poisoned")
+            .values()
+            .map(|state| state.exit_rx.clone())
+            .collect()
+    }
+
+    /// Drops every terminal (session end). The output buffers must not survive
+    /// into the next session of the same warm-pooled process.
+    pub(super) fn clear(&self) {
+        self.terminals
+            .lock()
+            .expect("terminal registry poisoned")
+            .clear();
     }
 
     pub(super) fn remove(&self, terminal_id: &str) -> Option<TerminalState> {
@@ -182,64 +279,102 @@ pub(super) async fn create_terminal(
             let Ok(mut receiver) = pty.subscribe(&terminal_id) else {
                 return responder.respond_with_internal_error("failed to subscribe terminal");
             };
-            let output: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+            let buffer = Arc::new(Mutex::new(TerminalOutputBuffer::new(
+                request.output_byte_limit.map(|limit| limit as usize),
+            )));
             let (exit_tx, exit_rx) = watch::channel(None);
-            let limit = request.output_byte_limit.map(|limit| limit as usize);
+            let (snapshot_tx, mut snapshot_rx) = mpsc::unbounded_channel::<()>();
+            // The start event makes the command visible while it runs: the final
+            // event (with the exit code) may be minutes away for a background
+            // command, and it is the only persisted trace of the command itself.
+            fxg_protocol::discard_with!(
+                events.send(DriverEvent::Event(UnifiedEventPayload::TerminalOutput {
+                    terminal_id: terminal_id.clone(),
+                    command: command_line.clone(),
+                    data_b64: String::new(),
+                    exit_code: None,
+                    running: true,
+                    subagent_id: subagent_id.clone(),
+                })),
+                "notify event subscribers"
+            );
             // PTY output collection task (delta delivery + completion event on exit)
-            let output_for_task = Arc::clone(&output);
+            let buffer_for_task = Arc::clone(&buffer);
             let events_for_task = events.clone();
             let command_for_task = command_line.clone();
             let terminal_id_for_task = terminal_id.clone();
             let subagent_id_for_task = subagent_id.clone();
             fxg_protocol::spawn_guarded!("terminal output collector", async move {
                 loop {
-                    match receiver.recv().await {
-                        Ok(fxg_pty::PtyEvent::Output { data, .. }) => {
-                            {
-                                let mut buffer =
-                                    output_for_task.lock().expect("terminal output poisoned");
-                                buffer.extend_from_slice(&data);
-                                if let Some(limit) = limit
-                                    && buffer.len() > limit
-                                {
-                                    let excess = buffer.len() - limit;
-                                    buffer.drain(..excess);
-                                }
+                    tokio::select! {
+                        // Deltas first: a chunk published before a snapshot request
+                        // must reach the client before the snapshot takes the cursor.
+                        biased;
+                        event = receiver.recv() => match event {
+                            Ok(fxg_pty::PtyEvent::Output { data, .. }) => {
+                                buffer_for_task
+                                    .lock()
+                                    .expect("terminal output poisoned")
+                                    .push(&data);
+                                fxg_protocol::discard_with!(
+                                    events_for_task.send(DriverEvent::Delta(
+                                        StreamDeltaPayload::TerminalOutputDelta {
+                                            terminal_id: terminal_id_for_task.clone(),
+                                            data_b64: base64_encode(&data),
+                                        },
+                                    )),
+                                    "notify event subscribers"
+                                );
                             }
-                            fxg_protocol::discard_with!(
-                                events_for_task.send(DriverEvent::Delta(
-                                    StreamDeltaPayload::TerminalOutputDelta {
-                                        terminal_id: terminal_id_for_task.clone(),
-                                        data_b64: base64_encode(&data),
-                                    },
-                                )),
-                                "notify event subscribers"
-                            );
-                        }
-                        Ok(fxg_pty::PtyEvent::Exit { exit_code, .. }) => {
-                            let data = std::mem::take(
-                                &mut *output_for_task.lock().expect("terminal output poisoned"),
-                            );
+                            Ok(fxg_pty::PtyEvent::Exit { exit_code, .. }) => {
+                                let data = buffer_for_task
+                                    .lock()
+                                    .expect("terminal output poisoned")
+                                    .take_unpublished();
+                                fxg_protocol::discard_with!(
+                                    events_for_task.send(DriverEvent::Event(
+                                        UnifiedEventPayload::TerminalOutput {
+                                            terminal_id: terminal_id_for_task.clone(),
+                                            command: command_for_task.clone(),
+                                            data_b64: base64_encode(&data),
+                                            exit_code,
+                                            running: false,
+                                            subagent_id: subagent_id_for_task.clone(),
+                                        },
+                                    )),
+                                    "notify event subscribers"
+                                );
+                                fxg_protocol::discard_with!(
+                                    exit_tx.send(exit_code),
+                                    "discard a non-critical result"
+                                );
+                                break;
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        },
+                        Some(()) = snapshot_rx.recv() => {
+                            let data = buffer_for_task
+                                .lock()
+                                .expect("terminal output poisoned")
+                                .take_unpublished();
+                            if data.is_empty() {
+                                continue;
+                            }
                             fxg_protocol::discard_with!(
                                 events_for_task.send(DriverEvent::Event(
                                     UnifiedEventPayload::TerminalOutput {
                                         terminal_id: terminal_id_for_task.clone(),
                                         command: command_for_task.clone(),
                                         data_b64: base64_encode(&data),
-                                        exit_code,
+                                        exit_code: None,
+                                        running: true,
                                         subagent_id: subagent_id_for_task.clone(),
                                     },
                                 )),
                                 "notify event subscribers"
                             );
-                            fxg_protocol::discard_with!(
-                                exit_tx.send(exit_code),
-                                "discard a non-critical result"
-                            );
-                            break;
                         }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     }
                 }
             });
@@ -252,8 +387,9 @@ pub(super) async fn create_terminal(
                     TerminalState {
                         pty_id: terminal_id.clone(),
                         command: command_line,
-                        output,
+                        buffer,
                         exit_rx,
+                        snapshot: snapshot_tx,
                     },
                 );
             responder.respond(CreateTerminalResponse::new(TerminalId::new(terminal_id)))

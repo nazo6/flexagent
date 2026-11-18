@@ -10,6 +10,8 @@
 //!   and flushes a queued report before the next turn's user-message echo
 //! - `--mode thought-before-requests`: emits `agent_thought_chunk` right before
 //!   `elicitation/create` and `session/request_permission` without ending the turn
+//! - `--mode terminal`: starts a long-running command through `terminal/create`
+//!   and ends the turn while the command keeps running
 
 #![allow(
     clippy::disallowed_types,
@@ -46,6 +48,11 @@ fn main() {
 
         if method == "session/prompt" && mode == "thought-before-requests" {
             handle_thought_before_requests(&mut lines, &mut stdout, id);
+            continue;
+        }
+
+        if method == "session/prompt" && mode == "terminal" {
+            handle_terminal(&mut lines, &mut stdout, id);
             continue;
         }
 
@@ -263,7 +270,11 @@ fn main() {
                 }
             }),
             (
-                "subagents" | "opencode-subagents" | "late-updates" | "thought-before-requests",
+                "subagents"
+                | "opencode-subagents"
+                | "late-updates"
+                | "thought-before-requests"
+                | "terminal",
                 "session/new",
             ) => json!({
                 "jsonrpc": "2.0",
@@ -272,7 +283,7 @@ fn main() {
                     "sessionId": "root-session"
                 }
             }),
-            ("late-updates" | "thought-before-requests", "initialize") => json!({
+            ("late-updates" | "thought-before-requests" | "terminal", "initialize") => json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {
@@ -629,6 +640,46 @@ fn handle_thought_before_requests<R: BufRead>(
             }
         }),
     );
+    write_line(
+        stdout,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": prompt_id,
+            "result": { "stopReason": "end_turn" }
+        }),
+    );
+}
+
+/// Starts a command through `terminal/create` and ends the turn while it runs.
+///
+/// The command keeps producing output after the turn (like a dev server), so the
+/// client has to persist a snapshot at the turn end and be able to kill it.
+fn handle_terminal<R: BufRead>(
+    lines: &mut io::Lines<R>,
+    stdout: &mut io::Stdout,
+    prompt_id: &Value,
+) {
+    // The same command on Windows, where `sh` is not available.
+    let (command, args) = if cfg!(windows) {
+        ("cmd", vec!["/C", "echo ready & ping -n 60 127.0.0.1 > nul"])
+    } else {
+        ("sh", vec!["-c", "printf 'ready\\n'; sleep 60"])
+    };
+    write_line(
+        stdout,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "req-terminal-1",
+            "method": "terminal/create",
+            "params": {
+                "sessionId": "root-session",
+                "command": command,
+                "args": args,
+            }
+        }),
+    );
+    wait_for_response(lines, "req-terminal-1");
+
     write_line(
         stdout,
         &json!({

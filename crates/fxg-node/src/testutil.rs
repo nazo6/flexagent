@@ -139,6 +139,12 @@ struct MockAgentInner {
     compactions: AtomicUsize,
     /// Fork scope emitted in the start capabilities
     fork_scope: Mutex<Option<fxg_protocol::common::ForkScope>>,
+    /// Terminal IDs terminated by `kill_terminal`
+    killed_terminals: Mutex<Vec<String>>,
+    /// Number of `snapshot_terminals` requests
+    terminal_snapshots: AtomicUsize,
+    /// Event emitted by `snapshot_terminals` (turn-end terminal snapshot tests)
+    snapshot_event: Mutex<Option<UnifiedEventPayload>>,
 }
 
 impl MockAgent {
@@ -223,6 +229,25 @@ impl MockAgent {
     /// Sets the fork scope advertised by the start capabilities.
     pub(crate) fn set_fork_scope(&self, scope: fxg_protocol::common::ForkScope) {
         *self.inner.fork_scope.lock().expect("fork scope") = Some(scope);
+    }
+
+    /// Terminal IDs recorded by `kill_terminal`.
+    pub(crate) fn killed_terminals(&self) -> Vec<String> {
+        self.inner
+            .killed_terminals
+            .lock()
+            .expect("killed terminals")
+            .clone()
+    }
+
+    /// Number of `snapshot_terminals` requests (one per finished turn).
+    pub(crate) fn terminal_snapshots(&self) -> usize {
+        self.inner.terminal_snapshots.load(Ordering::SeqCst)
+    }
+
+    /// Event the mock emits when the node snapshots running terminals.
+    pub(crate) fn set_snapshot_event(&self, payload: Option<UnifiedEventPayload>) {
+        *self.inner.snapshot_event.lock().expect("snapshot event") = payload;
     }
 
     /// Makes `capture_history` fail as if `session/load` replayed no history.
@@ -501,6 +526,37 @@ impl ActiveSessionHandle for MockAgent {
 
     async fn cancel_turn(&self) -> anyhow::Result<()> {
         Ok(())
+    }
+
+    async fn kill_terminal(&self, terminal_id: &str) -> anyhow::Result<()> {
+        self.inner
+            .killed_terminals
+            .lock()
+            .expect("killed terminals")
+            .push(terminal_id.to_owned());
+        // The real driver emits the final output of the terminated terminal.
+        self.emit(DriverEvent::Event(UnifiedEventPayload::TerminalOutput {
+            terminal_id: terminal_id.to_owned(),
+            command: "mock command".to_owned(),
+            data_b64: String::new(),
+            exit_code: Some(0),
+            running: false,
+            subagent_id: None,
+        }));
+        Ok(())
+    }
+
+    async fn snapshot_terminals(&self) {
+        self.inner.terminal_snapshots.fetch_add(1, Ordering::SeqCst);
+        let payload = self
+            .inner
+            .snapshot_event
+            .lock()
+            .expect("snapshot event")
+            .clone();
+        if let Some(payload) = payload {
+            self.emit(DriverEvent::Event(payload));
+        }
     }
 
     async fn shutdown(&self) -> anyhow::Result<()> {
