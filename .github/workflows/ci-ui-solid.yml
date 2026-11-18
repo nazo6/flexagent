@@ -44,4 +44,5 @@ jobs:
       - run: mise run ui-solid:install
       - run: mise run lint:ui-solid
       - run: mise run check:ui-solid
+      - run: mise run test:ui-solid
       - run: mise run build:ui-solid

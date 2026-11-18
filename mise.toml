@@ -116,6 +116,10 @@ run = "pnpm --dir ui-solid run check"
 description = "Lint the Solid UI with oxlint"
 run = "pnpm --dir ui-solid run lint"
 
+[tasks."test:ui-solid"]
+description = "Run the Solid UI unit tests with Vitest"
+run = "pnpm --dir ui-solid run test"
+
 [tasks."build:ui-solid"]
 description = "Build the Solid UI (ui-solid/dist)"
 run = "pnpm --dir ui-solid run build"
