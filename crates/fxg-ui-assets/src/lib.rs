@@ -63,7 +63,7 @@ pub fn content_type(path: &str) -> &'static str {
 
 /// Cacheability: `index.html` and the Service Worker must reflect updates immediately.
 pub fn cache_control(path: &str) -> &'static str {
-    if path == "index.html" || path == "service-worker.js" {
+    if path == "index.html" || path == "sw.js" {
         "no-cache"
     } else {
         "public, max-age=31536000, immutable"
