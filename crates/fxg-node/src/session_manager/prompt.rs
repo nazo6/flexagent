@@ -343,6 +343,10 @@ impl SessionManager {
                     .await
                     .map_err(|err| NodeError::Hub(format!("failed to cancel: {err:#}")))
             }
+            SessionControlAction::KillTerminal { terminal_id } => handle
+                .kill_terminal(terminal_id)
+                .await
+                .map_err(|err| NodeError::Hub(format!("failed to kill terminal: {err:#}"))),
             SessionControlAction::Kill => handle
                 .shutdown()
                 .await

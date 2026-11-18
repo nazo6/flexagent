@@ -34,6 +34,8 @@ pub(super) struct AcpSessionHandle {
     capabilities: Arc<Mutex<SessionCapabilitiesState>>,
     /// PTY manager (for ACP terminal/*; shared per process)
     pty: Arc<fxg_pty::PtySessionManager>,
+    /// Terminals started by the agent (shared per process, one session at a time)
+    terminals: Arc<TerminalRegistry>,
     /// Process lease (returned to the pool or disposed on end)
     lease: Arc<ProcessLease>,
 }
@@ -195,6 +197,21 @@ impl ActiveSessionHandle for AcpSessionHandle {
         Ok(())
     }
 
+    async fn kill_terminal(&self, terminal_id: &str) -> anyhow::Result<()> {
+        let pty_id = self
+            .terminals
+            .pty_id(terminal_id)
+            .map_err(|err| anyhow!("{err}"))?;
+        self.pty
+            .kill(&pty_id)
+            .with_context(|| format!("failed to terminate terminal {terminal_id}"))?;
+        Ok(())
+    }
+
+    async fn snapshot_terminals(&self) {
+        self.terminals.request_snapshots();
+    }
+
     async fn cancel_turn(&self) -> anyhow::Result<()> {
         self.conn
             .send_notification(CancelNotification::new(self.acp_session_id.clone()))
@@ -265,12 +282,33 @@ impl ActiveSessionHandle for AcpSessionHandle {
                 }
             }
         }
+        let mut exits = self.terminals.exit_receivers();
         for terminal_id in self.pty.list() {
             fxg_protocol::discard_with!(
                 self.pty.kill(&terminal_id.pty_id),
                 "kill the pty terminal on session shutdown"
             );
         }
+        // A terminated command still reports its final output. Wait for it (bounded)
+        // so the card does not stay "running" without an exit code once the event
+        // sink below is released.
+        fxg_protocol::discard_with!(
+            tokio::time::timeout(Duration::from_secs(1), async {
+                for exit_rx in &mut exits {
+                    if exit_rx.borrow().is_none() {
+                        fxg_protocol::discard_with!(
+                            exit_rx.changed().await,
+                            "wait for a terminal to report its exit on shutdown"
+                        );
+                    }
+                }
+            })
+            .await,
+            "discard a terminal that did not report its exit in time"
+        );
+        // The process may be returned to the warm pool: do not keep the previous
+        // session's terminal buffers (or let them answer a later session).
+        self.terminals.clear();
         // Release the event sender (so the session manager's pump detects that the
         // driver ended and removes the session from the active list)
         self.events.lock().expect("session events poisoned").take();
@@ -671,8 +709,8 @@ pub(super) async fn run_acp_process(
                 async move |request: TerminalOutputRequest, responder, _cx| match terminals
                     .get(&request.terminal_id.to_string())
                 {
-                    Ok((_, _, output, exit_rx)) => {
-                        let data = output.lock().expect("terminal output poisoned").clone();
+                    Ok((_, _, buffer, exit_rx)) => {
+                        let data = buffer.lock().expect("terminal output poisoned").retained();
                         let text = String::from_utf8_lossy(&data).into_owned();
                         let exit_status = exit_rx
                             .borrow()
@@ -979,6 +1017,7 @@ pub(super) async fn run_acp_process(
                     events: Mutex::new(Some(events.clone())),
                     capabilities: Arc::clone(&capabilities_state),
                     pty: Arc::clone(&pty),
+                    terminals: Arc::clone(&terminals),
                     lease: Arc::clone(&lease),
                 };
                 if ready.send(Ok((handle, context_restored))).is_err() {

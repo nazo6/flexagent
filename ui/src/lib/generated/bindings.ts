@@ -2037,6 +2037,15 @@ files: boolean } |
 { action: "compact" } |
 /**  Interrupt the current turn */
 { action: "cancel" } |
+/**
+ *  Terminate one terminal the agent started (ACP `terminal/*`).
+ *
+ *  Commands outlive the turn that started them, so this is the only way to
+ *  stop a background command without ending the session.
+ */
+{ action: "kill_terminal";
+/**  Terminal ID reported in the `TerminalOutput` events */
+terminal_id: string } |
 /**  End the session and return the agent process to the reuse pool */
 { action: "kill" } |
 /**  Force-terminate the session and its process tree */
@@ -2645,6 +2654,14 @@ export type UnifiedEventPayload =
 /**
  *  An output chunk of ACP `terminal/*` or a PTY (persisted).
  *
+ *  A terminal is recorded by several events, and each one carries only the
+ *  bytes produced since the previous event (the UI appends them):
+ *
+ *  - the start event (empty `data_b64`, `running = true`) so the command is
+ *    visible while it runs,
+ *  - turn-end snapshots of terminals that are still running (`running = true`),
+ *  - the final event (`running = false`) with the last bytes and the exit code.
+ *
  *  It is, however, excluded from the FTS5 `searchable_text` (binary data).
  */
 { type: "terminal_output"; data: {
@@ -2656,6 +2673,13 @@ export type UnifiedEventPayload =
 	data_b64: string,
 	/**  Exit code (once execution finished) */
 	exit_code: number | null,
+	/**
+	 *  Whether the process was still running when this event was recorded.
+	 *
+	 *  `false` is the final event of the terminal. Events recorded before
+	 *  this field existed are final, so the default keeps their meaning.
+	 */
+	running?: boolean,
 	/**  Subagent that produced this output (`None` = the parent session) */
 	subagent_id?: string | null,
 } } |

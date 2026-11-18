@@ -1195,3 +1195,32 @@ fn next_status_after_request_keeps_waiting_when_other_requests_remain() {
         fxg_protocol::common::SessionStatus::WaitingInput
     );
 }
+
+#[test]
+fn terminal_output_buffer_publishes_each_byte_once() {
+    let mut buffer = TerminalOutputBuffer::new(None);
+    buffer.push(b"line 1\n");
+
+    // A turn-end snapshot publishes what arrived so far.
+    assert_eq!(buffer.take_unpublished(), b"line 1\n");
+    // Nothing new: the node must not record an empty snapshot.
+    assert!(buffer.take_unpublished().is_empty());
+
+    buffer.push(b"line 2\n");
+    assert_eq!(buffer.take_unpublished(), b"line 2\n");
+    // The agent can still read the whole output through `terminal/output`.
+    assert_eq!(buffer.retained(), b"line 1\nline 2\n");
+}
+
+#[test]
+fn terminal_output_buffer_keeps_the_tail_when_the_limit_is_hit() {
+    let mut buffer = TerminalOutputBuffer::new(Some(5));
+    buffer.push(b"abcdefgh");
+    assert_eq!(buffer.retained(), b"defgh");
+    assert_eq!(buffer.take_unpublished(), b"defgh");
+
+    // Bytes trimmed before they were ever published are lost, not replayed.
+    buffer.push(b"ijkl");
+    assert_eq!(buffer.retained(), b"hijkl");
+    assert_eq!(buffer.take_unpublished(), b"ijkl");
+}

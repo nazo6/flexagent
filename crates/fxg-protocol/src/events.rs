@@ -294,6 +294,14 @@ pub enum UnifiedEventPayload {
     SessionDeleted {},
     /// An output chunk of ACP `terminal/*` or a PTY (persisted).
     ///
+    /// A terminal is recorded by several events, and each one carries only the
+    /// bytes produced since the previous event (the UI appends them):
+    ///
+    /// - the start event (empty `data_b64`, `running = true`) so the command is
+    ///   visible while it runs,
+    /// - turn-end snapshots of terminals that are still running (`running = true`),
+    /// - the final event (`running = false`) with the last bytes and the exit code.
+    ///
     /// It is, however, excluded from the FTS5 `searchable_text` (binary data).
     TerminalOutput {
         /// Terminal ID
@@ -304,6 +312,12 @@ pub enum UnifiedEventPayload {
         data_b64: String,
         /// Exit code (once execution finished)
         exit_code: Option<i32>,
+        /// Whether the process was still running when this event was recorded.
+        ///
+        /// `false` is the final event of the terminal. Events recorded before
+        /// this field existed are final, so the default keeps their meaning.
+        #[serde(default)]
+        running: bool,
         /// Subagent that produced this output (`None` = the parent session)
         #[serde(default, skip_serializing_if = "Option::is_none")]
         subagent_id: Option<String>,
@@ -651,6 +665,7 @@ mod tests {
                 command: "cargo test".into(),
                 data_b64: "".into(),
                 exit_code: Some(0),
+                running: false,
                 subagent_id: None,
             }
             .is_persistable()
@@ -697,6 +712,7 @@ mod tests {
                 command: "cargo test".to_owned(),
                 data_b64: String::new(),
                 exit_code: Some(0),
+                running: false,
                 subagent_id: None,
             },
             UnifiedEventPayload::SubagentMessage {

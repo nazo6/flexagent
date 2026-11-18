@@ -967,6 +967,7 @@ async fn fts_search_matches_text_and_excludes_binary_events() {
         command: "cargo test".to_owned(),
         data_b64: "c2VjcmV0LXRva2VuLXZhbHVl".to_owned(), // "secret-token-value"
         exit_code: Some(0),
+        running: false,
         subagent_id: None,
     });
     let message = fixture.event(UnifiedEventPayload::AgentMessage {
