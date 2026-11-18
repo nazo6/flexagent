@@ -29,7 +29,7 @@ here disagrees with this file, fix one of them in the same change.
 | :------------------------- | :--------------------------------------------------------------- |
 | `$state(x)`                | `createSignal(x)`; deep objects → `createStore`                  |
 | `$derived(expr)`           | `createMemo(() => expr)`                                         |
-| `$effect(fn)`              | `createEffect(on(...))`; never compute derived values here       |
+| `$effect(fn)`              | `createEffect(compute, apply)`（Solid 2 は分割 API）              |
 | `$props()`                 | function argument; `merge` / `omit` for splitting                |
 | `$bindable()`              | getter + setter props                                            |
 | `{#each list as x (key)}`  | `<For each={list}>` (reference keyed) / `<Index>`                |
