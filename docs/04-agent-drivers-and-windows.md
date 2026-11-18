@@ -240,6 +240,13 @@ ACPでは、エディタやオーケストレータ側が **`acp::Client` トレ
   `terminal_kill`**:
   - `fxg-pty` クレートを呼び出し、ConPTY (Windows) または Unix PTY
     でコマンドを実行し、出力をリアルタイムにストリーム配信。
+  - `terminal/create` の直後に開始イベント（空の出力・`running = true`）を記録し、
+    ターン終了時に実行中のターミナルの出力をスナップショットする。終了イベント
+    だけが exit code を持ち、各イベントは前回以降の差分だけを運ぶ（詳細は
+    [`docs/03-protocol-and-api.md`](03-protocol-and-api.md) §1.2）。
+  - `SessionControlAction::KillTerminal` はこの PTY を終了し、通常終了と同じ
+    終了イベントを流す。`cancel` はターンだけを止め、動き続けるターミナルは
+    残るため、バックグラウンドコマンドの停止はこの操作で行う。
 
 ### 2.3 サブエージェントのルーティング
 
