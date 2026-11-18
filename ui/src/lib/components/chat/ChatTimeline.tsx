@@ -63,27 +63,29 @@ export interface ChatTimelineProps {
 }
 
 /**
- * Values the rows need.
+ * Values the rows need, resolved once per change.
  *
- * The rows are components with getter props, so a streamed delta updates the
- * text / status bindings in place instead of remounting the row (which would
- * throw away the reader's expanded tools and folded blocks).
+ * A memo hands the rows a plain value object: the `For` bodies are keyed by the
+ * reducer's stable item key, so a streamed delta updates the row that owns it
+ * instead of remounting the list, and the rows read `props.ctx.*` like any
+ * other prop. The memo only recomputes when a value below actually changes, so
+ * a delta does not rebuild it.
  */
 interface TimelineContext {
-  sessionId: () => string;
-  status: () => SessionStatus | null;
-  subagentTitle: () => string | null;
-  onsubagent: () => ((childSessionId: string) => void) | undefined;
-  onfork: () => ((item: TimelineItem) => void) | undefined;
-  onrevert: () => ((item: TimelineItem) => void) | undefined;
-  onstopterminal: () => ((terminalId: string) => Promise<void>) | undefined;
+  sessionId: string;
+  status: SessionStatus | null;
+  subagentTitle: string | null;
+  onsubagent: ((childSessionId: string) => void) | undefined;
+  onfork: ((item: TimelineItem) => void) | undefined;
+  onrevert: ((item: TimelineItem) => void) | undefined;
+  onstopterminal: ((terminalId: string) => Promise<void>) | undefined;
   stopTerminal: (terminalId: string) => void;
   isStoppingTerminal: (terminalId: string) => boolean;
-  sessionStopped: () => boolean;
-  lastForkableSeq: () => number | null;
-  revert: () => { canRevert: boolean | null; reason: string | null };
+  sessionStopped: boolean;
+  lastForkableSeq: number | null;
+  revert: { canRevert: boolean | null; reason: string | null };
   forkState: (item: TimelineItem) => { canFork: boolean | null; reason: string | null };
-  liveEntryKey: () => string | null;
+  liveEntryKey: string | null;
 }
 
 function planStatusClass(planStatus: string): string {
@@ -111,7 +113,7 @@ function groupMaxSeq(group: TimelineGroup): number {
 /** One row of an activity run. */
 function ActivityRow(props: { section: ActivitySection; ctx: TimelineContext }) {
   return (
-    <ActivityBlock section={props.section} live={props.ctx.liveEntryKey() === props.section.key}>
+    <ActivityBlock section={props.section} live={props.ctx.liveEntryKey === props.section.key}>
       <ul class="timeline-list list-none p-0">
         <For each={props.section.groups} keyed={(group) => group.key}>
           {(group) => (
@@ -131,14 +133,14 @@ function GroupView(props: { group: TimelineGroup; ctx: TimelineContext }) {
     <Switch>
       <Match when={props.group.kind === "subagent" ? props.group : null}>
         {(group) => (
-          <SubagentGroup subagent={group().subagent} onopen={props.ctx.onsubagent()}>
+          <SubagentGroup subagent={group().subagent} onopen={props.ctx.onsubagent}>
             <ChatTimeline
-              sessionId={props.ctx.sessionId()}
+              sessionId={props.ctx.sessionId}
               items={group().items}
-              status={props.ctx.status()}
+              status={props.ctx.status}
               nested
-              onsubagent={props.ctx.onsubagent()}
-              onstopterminal={props.ctx.onstopterminal()}
+              onsubagent={props.ctx.onsubagent}
+              onstopterminal={props.ctx.onstopterminal}
               subagentTitle={group().subagent.title ?? group().subagent.description ?? null}
             />
           </SubagentGroup>
@@ -197,13 +199,13 @@ function SingleRow(props: { item: TimelineItem; ctx: TimelineContext }): JSX.Ele
               text={item().text}
               canFork={ctx.forkState(item()).canFork}
               forkReason={ctx.forkState(item()).reason}
-              canRevert={ctx.revert().canRevert}
-              revertReason={ctx.revert().reason}
-              prominent={item().seq === ctx.lastForkableSeq()}
+              canRevert={ctx.revert.canRevert}
+              revertReason={ctx.revert.reason}
+              prominent={item().seq === ctx.lastForkableSeq}
               meta={`${item().clientSource} · ${formatClockTime(item().createdAt)}`}
               metaTitle={formatEpochMs(item().createdAt)}
-              onfork={() => ctx.onfork()?.(item())}
-              onrevert={() => ctx.onrevert()?.(item())}
+              onfork={() => ctx.onfork?.(item())}
+              onrevert={() => ctx.onrevert?.(item())}
             />
           </div>
         )}
@@ -230,8 +232,8 @@ function SingleRow(props: { item: TimelineItem; ctx: TimelineContext }): JSX.Ele
               forkReason={ctx.forkState(item()).reason}
               canRevert={null}
               revertReason={null}
-              prominent={item().seq === ctx.lastForkableSeq()}
-              onfork={() => ctx.onfork()?.(item())}
+              prominent={item().seq === ctx.lastForkableSeq}
+              onfork={() => ctx.onfork?.(item())}
             />
           </div>
         )}
@@ -250,7 +252,7 @@ function SingleRow(props: { item: TimelineItem; ctx: TimelineContext }): JSX.Ele
                 {item().command === "" ? item().terminalId : item().command}
               </span>
               <Show
-                when={item().running && !ctx.sessionStopped() && ctx.onstopterminal() !== undefined}
+                when={item().running && !ctx.sessionStopped && ctx.onstopterminal !== undefined}
                 fallback={
                   <Show when={item().exitCode !== null}>
                     <Badge variant={item().exitCode === 0 ? "secondary" : "destructive"}>
@@ -294,7 +296,7 @@ function SingleRow(props: { item: TimelineItem; ctx: TimelineContext }): JSX.Ele
       <Match when={props.item.kind === "permission" ? props.item : null}>
         {(item) => (
           <PermissionCard
-            sessionId={ctx.sessionId()}
+            sessionId={ctx.sessionId}
             requestId={item().requestId}
             toolName={item().toolName}
             summary={item().summary}
@@ -302,7 +304,7 @@ function SingleRow(props: { item: TimelineItem; ctx: TimelineContext }): JSX.Ele
             details={item().details}
             resolved={item().resolved}
             createdAt={item().createdAt}
-            subagentTitle={ctx.subagentTitle()}
+            subagentTitle={ctx.subagentTitle}
           />
         )}
       </Match>
@@ -310,7 +312,7 @@ function SingleRow(props: { item: TimelineItem; ctx: TimelineContext }): JSX.Ele
       <Match when={props.item.kind === "elicitation" ? props.item : null}>
         {(item) => (
           <ElicitationCard
-            sessionId={ctx.sessionId()}
+            sessionId={ctx.sessionId}
             elicitationId={item().elicitationId}
             message={item().message}
             requestedSchema={item().requestedSchema}
@@ -547,22 +549,25 @@ export default function ChatTimeline(props: ChatTimelineProps) {
       : { canFork: false, reason: m.chat_action_fork_latest() };
   }
 
-  const context: TimelineContext = {
-    sessionId: () => props.sessionId,
-    status,
-    subagentTitle: () => props.subagentTitle ?? null,
-    onsubagent: () => props.onsubagent,
-    onfork: () => props.onfork,
-    onrevert: () => props.onrevert,
-    onstopterminal: () => props.onstopterminal,
+  // Rows receive values, not accessors (CONVENTIONS: props are values). The
+  // memo keeps the object stable during streaming: every field below only
+  // changes when the value it carries changes.
+  const context = createMemo<TimelineContext>(() => ({
+    sessionId: props.sessionId,
+    status: status(),
+    subagentTitle: props.subagentTitle ?? null,
+    onsubagent: props.onsubagent,
+    onfork: props.onfork,
+    onrevert: props.onrevert,
+    onstopterminal: props.onstopterminal,
     stopTerminal,
     isStoppingTerminal,
-    sessionStopped,
-    lastForkableSeq,
-    revert: revertState,
+    sessionStopped: sessionStopped(),
+    lastForkableSeq: lastForkableSeq(),
+    revert: revertState(),
     forkState,
-    liveEntryKey,
-  };
+    liveEntryKey: liveEntryKey(),
+  }));
 
   return (
     <>
@@ -574,7 +579,7 @@ export default function ChatTimeline(props: ChatTimelineProps) {
           {(entry) => (
             <>
               <li>
-                <TimelineRow entry={entry()} ctx={context} />
+                <TimelineRow entry={entry()} ctx={context()} />
               </li>
               <Show when={forkFrom() !== null && endsWithFork(entry())}>
                 <li>
