@@ -312,7 +312,7 @@ ui/
 - `ui/` は Solid 2 + `@solidjs/router` 2.0 + Terracotta 2.0 の SPA になり、`ui/build` を `rust-embed` が同梱する契約は不変。
 - `tsc --noEmit`、`oxlint`、`vite build`、Vitest（20 ファイル / 169 テスト）が通る。CI は `ci-ui.yml`（tsc / oxlint / Vitest / build）に一本化。
 - 実ノードに対して、セッション一覧・セッション画面（履歴・ツールコール・コンポーザ）・設定（ノード / ブラウザ）・プロジェクト・検索・ドック（Files / Changes / Terminal）の描画と遷移を確認。
-- 本番ビルドは service worker を生成し、`build/sw.js` にビルド資産のプリキャッシュ一覧を注入する。
+- 本番ビルドは `ui/build`（約 16 MB。Monaco / Shiki は遅延チャンク）で、service worker を生成し `build/sw.js` にビルド資産のプリキャッシュ一覧を注入する。
 
 ### 12.2 Svelte 版からの差分（意図的）
 
