@@ -54,7 +54,7 @@ description = "Lint TOML with tombi (including JSON Schema validation)"
 run = "tombi lint"
 
 [tasks."lint:ui"]
-description = "Lint TypeScript / Svelte with oxlint"
+description = "Lint TypeScript / TSX with oxlint"
 run = "pnpm --dir ui run lint"
 
 [tasks.lint]
@@ -83,7 +83,7 @@ description = "Run Rust lint and tests together"
 run = [{ task = "lint:rust" }, { task = "test:rust" }]
 
 [tasks."check:ui"]
-description = "Type-check UI TypeScript / Svelte (svelte-check)"
+description = "Generate Paraglide messages, then type-check the UI with tsc"
 run = "pnpm --dir ui run check"
 
 [tasks.check]

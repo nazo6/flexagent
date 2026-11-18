@@ -7,10 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "tsc --noEmit",
+    "check": "pnpm run i18n:compile && tsc --noEmit",
     "lint": "oxlint",
     "i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --emit-ts-declarations --output-structure locale-modules",
-    "test": "vitest run"
+    "test": "pnpm run i18n:compile && vitest run"
   },
   "dependencies": {
     "@floating-ui/dom": "^1.8.0",
