@@ -52,9 +52,20 @@ function guessMime(fileName: string): string {
  *
  * Images are transported inline (`data_b64`); local files are referenced by
  * their absolute path on the node. `initial` restores a previously kept draft.
+ * `onChange` observes every mutation, so the owner can persist the draft
+ * without watching the list in an effect.
  */
-export function createComposerAttachments(initial: AttachmentMeta[] = []) {
+export function createComposerAttachments(
+  initial: AttachmentMeta[] = [],
+  options: { onChange?: (attachments: AttachmentMeta[]) => void } = {},
+) {
   const attachments = new ReactiveCell<AttachmentMeta[]>([...initial]);
+
+  /** Apply one mutation and hand the result to the owner. */
+  function mutate(change: (current: AttachmentMeta[]) => AttachmentMeta[]): void {
+    attachments.update(change);
+    options.onChange?.(attachments.get());
+  }
 
   async function addImageFiles(files: FileList | File[]): Promise<void> {
     for (const file of Array.from(files)) {
@@ -69,7 +80,7 @@ export function createComposerAttachments(initial: AttachmentMeta[] = []) {
         continue;
       }
       const bytes = new Uint8Array(await file.arrayBuffer());
-      attachments.update((current) => [
+      mutate((current) => [
         ...current,
         {
           file_name: file.name || "image",
@@ -84,7 +95,7 @@ export function createComposerAttachments(initial: AttachmentMeta[] = []) {
 
   function addLocalFile(path: string): void {
     const fileName = path.split(/[\\/]/).pop() ?? "attachment";
-    attachments.update((current) => [
+    mutate((current) => [
       ...current,
       {
         file_name: fileName,
@@ -97,11 +108,11 @@ export function createComposerAttachments(initial: AttachmentMeta[] = []) {
   }
 
   function remove(index: number): void {
-    attachments.set(attachments.get().filter((_, current) => current !== index));
+    mutate((current) => current.filter((_, position) => position !== index));
   }
 
   function clear(): void {
-    attachments.set([]);
+    mutate(() => []);
   }
 
   function onPaste(event: ClipboardEvent): void {

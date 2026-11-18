@@ -148,19 +148,16 @@ export default function NewSessionChat() {
   const [fileInput, setFileInput] = createSignal<HTMLInputElement>();
   const [useCustomPath, setUseCustomPath] = createSignal(initialUrl.path !== "");
 
-  const composer = createComposerAttachments(draft.attachments);
+  const composer = createComposerAttachments(draft.attachments, {
+    onChange: (next) => composerDrafts.setAttachments(NEW_SESSION_DRAFT_ID, next),
+  });
   const attachments = () => composer.attachments;
 
-  // Keep the prompt while the user visits another screen and comes back.
-  createEffect(
-    () => promptText(),
-    (value) => composerDrafts.setText(NEW_SESSION_DRAFT_ID, value),
-  );
-
-  createEffect(
-    () => attachments(),
-    (value) => composerDrafts.setAttachments(NEW_SESSION_DRAFT_ID, value),
-  );
+  /** Write the prompt through to the draft store (see `Composer.updateText`). */
+  function updatePromptText(value: string): void {
+    setPromptText(value);
+    composerDrafts.setText(NEW_SESSION_DRAFT_ID, value);
+  }
 
   // Picker popovers
   const [projectOpen, setProjectOpen] = createSignal(false);
@@ -1728,7 +1725,7 @@ export default function NewSessionChat() {
           >
             <ComposerTextarea
               value={promptText()}
-              onValueChange={setPromptText}
+              onValueChange={updatePromptText}
               onkeydown={onKeydown}
               onpaste={composer.onPaste}
               ondrop={composer.onDrop}

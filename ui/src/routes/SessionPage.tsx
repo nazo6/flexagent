@@ -276,15 +276,13 @@ export default function SessionPage() {
     });
   }
 
-  createEffect(
-    () => undefined,
-    () => () => {
-      if (scrollFrame !== null) {
-        cancelAnimationFrame(scrollFrame);
-        scrollFrame = null;
-      }
-    },
-  );
+  // Cancel the pending scroll frame when the page goes away.
+  onSettled(() => () => {
+    if (scrollFrame !== null) {
+      cancelAnimationFrame(scrollFrame);
+      scrollFrame = null;
+    }
+  });
 
   createEffect(
     () => ({

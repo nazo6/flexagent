@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Show, untrack } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from "solid-js";
 import { Button } from "#lib/components/ui/button/index.ts";
 import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.ts";
 import ComposerCard from "#lib/components/composer/ComposerCard.tsx";
@@ -65,9 +65,12 @@ export default function Composer(props: ComposerProps) {
 
   /** Replace the composer text (e.g. restoring a reverted user turn). */
   function restoreText(value: string): void {
-    setText(value);
+    updateText(value);
   }
-  props.onReady?.({ restoreText });
+  // Hand the imperative handle to the page once this composer has settled:
+  // writing the parent's state from the component body is outside Solid's
+  // allowed write scopes.
+  onSettled(() => props.onReady?.({ restoreText }));
 
   const [sending, setSending] = createSignal(false);
   const [controlBusy, setControlBusy] = createSignal(false);
@@ -95,20 +98,22 @@ export default function Composer(props: ComposerProps) {
       : policy() === "auto_allow_all";
   };
 
-  const composer = createComposerAttachments(draft.attachments);
+  const composer = createComposerAttachments(draft.attachments, {
+    onChange: (next) => composerDrafts.setAttachments(props.sessionId, next),
+  });
   const attachments = () => composer.attachments;
 
-  // Mirror edits into the draft store so leaving the screen (or switching to
-  // another session) does not discard the prompt.
-  createEffect(
-    () => text(),
-    (value) => composerDrafts.setText(props.sessionId, value),
-  );
-
-  createEffect(
-    () => attachments(),
-    (value) => composerDrafts.setAttachments(props.sessionId, value),
-  );
+  /**
+   * Write the prompt through to the draft store.
+   *
+   * Every edit goes through here, so leaving the screen (or switching to
+   * another session) does not discard the prompt without an effect that
+   * mirrors the signal back into the store.
+   */
+  function updateText(value: string): void {
+    setText(value);
+    composerDrafts.setText(props.sessionId, value);
+  }
 
   async function toggleAutoApprove(): Promise<void> {
     const next = autoApprove() ? "ask" : "auto_allow_all";
@@ -175,7 +180,7 @@ export default function Composer(props: ComposerProps) {
   const hasMoreActions = () => (props.node ?? null) !== null || (canCompact() && !isStopped());
 
   function applyCommand(name: string): void {
-    setText(`/${name} `);
+    updateText(`/${name} `);
   }
 
   const placeholderText = () => {
@@ -218,7 +223,7 @@ export default function Composer(props: ComposerProps) {
         }
         return;
       }
-      setText("");
+      updateText("");
       composer.clear();
       setResumeRequired(false);
     } catch (error) {
@@ -553,7 +558,7 @@ export default function Composer(props: ComposerProps) {
       >
         <ComposerTextarea
           value={text()}
-          onValueChange={setText}
+          onValueChange={updateText}
           onkeydown={onKeydown}
           onpaste={composer.onPaste}
           ondrop={composer.onDrop}

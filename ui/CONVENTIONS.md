@@ -54,10 +54,30 @@ if the code here disagrees with this file, fix one of them in the same change.
 | `{#if} {:else}`            | `<Show fallback>` / `<Switch><Match>`                            |
 | `{#snippet}` / `{@render}` | children props / JSX                                             |
 | `bind:value`               | `value` + `onInput` (wrapper owns the decision)                  |
-| `class:active`             | `classList={{ active }}`                                         |
+| `class:active`             | `class={{ active }}`                                             |
 | `use:action`               | `ref` callback returning a cleanup                               |
 | `onMount`                  | `onSettled`; **return** a cleanup, never call `onCleanup` inside |
 | class with runes           | factory function returning accessors                             |
+
+## Reactivity rules
+
+- **No state mirroring.** Do not keep a signal in sync with props or with
+  another signal through `createEffect`; read the source in JSX, a memo, or
+  compute the value. When a write must be observed by a store, write both at
+  the mutation site (see `Composer.updateText` and
+  `createComposerAttachments({ onChange })`).
+- **Effects only for the outside world** (DOM, timers, storage, navigation).
+  A data fetch belongs in an async `createMemo` with `<Loading>` / `isPending`,
+  not in an effect that sets loading flags.
+- **Allowed write scopes** are event handlers, effect apply callbacks and
+  `onSettled`. Writes from a component body or a memo throw
+  `REACTIVE_WRITE_IN_OWNED_SCOPE`; do not opt out with `ownedWrite`.
+- **Props are values.** Pass `value={count()}`, never `value={count}`. A
+  getter prop is reserved for render props and lazy slots, and needs a
+  comment.
+- `unicorn/consistent-function-scoping` is off: a Solid component body runs
+  once per instance, so helper functions are not re-created per call, and
+  hoisting them would take `props` out of scope.
 | `$app/state` `page.url`    | `useLocation()` / `useSearchParams()`                            |
 | `goto(...)`                | `useNavigate()` or a plain `<a href>`                            |
 | `+page.ts` `error(404)`    | `matchFilters` on the route                                      |

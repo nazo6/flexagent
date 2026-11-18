@@ -76,11 +76,7 @@ export class ConnectionStore {
   readonly #tokenRequired = new ReactiveCell(false);
   readonly #ready = new ReactiveCell(false);
   readonly #error = new ReactiveCell<string | null>(null);
-  readonly #targets = new ReactiveCell<ConnectionTarget[]>([]);
-
-  constructor() {
-    this.#targets.set(loadStoredTargets());
-  }
+  readonly #targets = new ReactiveCell<ConnectionTarget[]>(loadStoredTargets());
 
   /** Connection target backend info (null when not fetched). */
   get systemInfo(): SystemInfoResponse | null {

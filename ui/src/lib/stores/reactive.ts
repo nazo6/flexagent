@@ -12,9 +12,13 @@
  * - `set()` / `update()` write immediately and notify subscribers, which read
  *   the new value on the next flush.
  *
- * `ownedWrite` is enabled because these stores are mutated from lifecycle hooks
- * and effects (`onSettled`, `createEffect`) as well as event handlers; without
- * it Solid 2 throws `REACTIVE_WRITE_IN_OWNED_SCOPE`.
+ * `ownedWrite` is enabled for the notification signal because one real write
+ * runs inside an owned scope: an effect cleanup that resets store state while
+ * its owner is being disposed (`SessionPage` clears the active session on
+ * unmount). Solid has no unowned place to run that reset, and skipping it
+ * would leave the previous session active in the store. `sync-effect.test.ts`
+ * pins the behaviour; do not widen this to new writes — a write from a
+ * component body or a memo means the state belongs somewhere else.
  */
 import { createSignal, type Accessor, type Setter } from "solid-js";
 

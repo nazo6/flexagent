@@ -6,7 +6,8 @@
     "suspicious": "warn"
   },
   "rules": {
-    "no-empty": ["error", { "allowEmptyCatch": false }]
+    "no-empty": ["error", { "allowEmptyCatch": false }],
+    "unicorn/consistent-function-scoping": "off"
   },
   "ignorePatterns": ["src/lib/generated/**", "src/lib/paraglide/**", "dist/**", "node_modules/**"]
 }
