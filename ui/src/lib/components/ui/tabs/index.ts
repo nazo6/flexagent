@@ -1,7 +1,4 @@
-import Content from "./tabs-content.svelte";
-import Trigger from "./tabs-trigger.svelte";
-import Root from "./tabs.svelte";
-import List, { tabsListVariants, type TabsListVariant } from "./tabs-list.svelte";
+import { Content, List, Root, Trigger } from "./tabs.tsx";
 
 export {
   Root,
@@ -10,9 +7,11 @@ export {
   Trigger,
   tabsListVariants,
   type TabsListVariant,
-  //
-  Root as Tabs,
-  Content as TabsContent,
-  List as TabsList,
-  Trigger as TabsTrigger,
-};
+  type RootProps,
+  type ListProps,
+  type TriggerProps,
+  type ContentProps,
+} from "./tabs.tsx";
+
+/** Namespace shape, so `import * as Tabs` keeps working unchanged. */
+export const Tabs = { Root, Content, List, Trigger };

@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["typescript", "unicorn", "oxc", "vitest"],
+  "plugins": ["typescript", "unicorn", "oxc"],
   "categories": {
     "correctness": "error",
     "suspicious": "warn"
@@ -8,11 +8,5 @@
   "rules": {
     "no-empty": ["error", { "allowEmptyCatch": false }]
   },
-  "ignorePatterns": [
-    "src/lib/generated/**",
-    "src/lib/paraglide/**",
-    ".svelte-kit/**",
-    "build/**",
-    "node_modules/**"
-  ]
+  "ignorePatterns": ["src/lib/generated/**", "src/lib/paraglide/**", "dist/**", "node_modules/**"]
 }

@@ -1,8 +1,8 @@
 # 2026-11-18 Web UI の Solid 2 移行
 
 - **日付**: 2026-11-18
-- **ステータス**: `In Progress`（2026-11-18: 方針決定 + Phase 0 の足場を `ui-solid` ブランチに作成）
-- **対象パッケージ**: `ui`（新規 `ui-solid`）、`fxg-ui-assets`、`fxg-api`
+- **ステータス**: `Implemented`（2026-11-18: Phase 0〜5 を `ui-solid` ブランチで実施し、`ui-solid` を `ui/` に統合）
+- **対象パッケージ**: `ui`、`fxg-ui-assets`、`fxg-api`
 - **対象スクリプト / 設定**: `mise run build:ui` / `mise run check:ui` / `mise run test:ui` / `mise run types` / `mise run fmt`
 - **関連ドキュメント**:
   - [`docs/07-web-ui-and-pwa.md`](../07-web-ui-and-pwa.md)（Desk デザインシステム・PWA）
@@ -16,7 +16,7 @@
 ## 0. 結論
 
 - Web UI を **Svelte 5 / SvelteKit から Solid 2 へ移行する**。動機は性能ではなく、**型チェックを `tsc` 一本にすること**、**Solid 2 のリアクティブ診断でエージェントの誤りを自己修復させること**、ビルド構成を薄くすること。
-- 新アプリは `ui-solid/` に**並走で新規作成**し、Svelte 版は Phase 5 まで出荷可能な状態で維持する。`ui/` を場当たり的に書き換えない。
+- 新アプリは `ui-solid/` に**並走で新規作成**し、Phase 5 で `ui/` に統合した（Svelte 版はマージまで履歴に残る）。
 - ルーターは **`@solidjs/router` 2.0.0**（stable、型付き `paths`）。
 - ヘッドレスは **Terracotta 2.0.0**（stable、`solid-js ^2.0.0`）を主とし、**配置（geometry）だけを自前の共通ヘルパー**で持つ。ポップアップの土台に `solid-floating-ui` + `@floating-ui/dom` を使う。
 - Drawer / ScrollArea / Skeleton は Terracotta に無いため**自前のプリミティブ**として実装する。
@@ -114,10 +114,10 @@
 
 ### 4.1 ディレクトリ
 
-移行中は `ui/`（Svelte）と `ui-solid/`（Solid）を併存させる。
+移行中は `ui/`（Svelte）と `ui-solid/`（Solid）を併存させ、Phase 5 で `ui/` に統合した。
 
 ```
-ui-solid/
+ui/
   index.html
   vite.config.ts        # solid + tailwind + paraglide + API プロキシ
   src/
@@ -132,8 +132,8 @@ ui-solid/
   test/
 ```
 
-- Phase 5 で `git mv ui-solid ui` し、`ui/build` の契約は変えない。
-- 移行中に実バイナリで確認したい場合に備え、`fxg-ui-assets/build.rs` に `FXG_UI_DIR`（既定 `../../ui/build`）を追加する。切替後も開発用の逃げ道として残してよい。
+- 旧 `ui/` を削除し、`git mv ui-solid ui` で統合済み。`ui/build` の契約は変えていない。
+- `fxg-ui-assets/build.rs` の `FXG_UI_DIR` は導入しなかった（必要になった時点で追加する）。
 
 ### 4.2 共有するもの / しないもの
 
@@ -189,7 +189,7 @@ ui-solid/
 | **4 特殊**     | ghostty-web、Monaco、Shiki、Markdown、diff、画像、サービスワーカー / Web Push、アイコン一式                                     | ターミナル・diff・Markdown・PWA インストール・通知が Svelte 版と同等                                  |
 | **5 切替**     | `git mv ui-solid ui`、`mise` / CI / docs 更新、Svelte 版の削除、`app.css` の一本化、bindings 出力先の移動                       | `mise run check` が通り、リリースビルドで UI が同梱される                                             |
 
-**Phase 0 は完了**（2026-11-18）。`ui-solid` に Vite + Solid + Router + Tailwind + Paraglide + bindings alias + 開発プロキシ + `PORTING.md` を作成し、`tsc --noEmit` と `vite build` がクリーン（100 kB / gzip 37 kB）。Terracotta の Dialog / Toast、アイコン、Paraglide、`ui/` の型が実画面で動作することを確認済み。
+**Phase 0〜5 は完了**（2026-11-18）。`ui-solid` を `ui/` に統合し、`ui/build` を `rust-embed` が同梱する契約は変えていない。`tsc --noEmit` / `oxlint` / `vite build` / Vitest（20 ファイル・169 テスト）がクリーン。実ノードに対してセッション一覧・セッション画面・設定・プロジェクト・検索・ドックを描画確認済み。
 
 ### 5.1 並列化の単位
 
@@ -304,3 +304,36 @@ ui-solid/
 - Solid 2.0 リリースノート: <https://www.solidjs.com/blog/solid-2-0-the-long-hold>
 - Terracotta: <https://terracotta-docs.vercel.app/> / <https://github.com/lxsmnsyc/terracotta>
 - `@solidjs/router` 2.0: <https://docs.solidjs.com/solid-router>
+
+## 12. 実装結果と既知の差分
+
+### 12.1 結果
+
+- `ui/` は Solid 2 + `@solidjs/router` 2.0 + Terracotta 2.0 の SPA になり、`ui/build` を `rust-embed` が同梱する契約は不変。
+- `tsc --noEmit`、`oxlint`、`vite build`、Vitest（20 ファイル / 169 テスト）が通る。CI は `ci-ui.yml`（tsc / oxlint / Vitest / build）に一本化。
+- 実ノードに対して、セッション一覧・セッション画面（履歴・ツールコール・コンポーザ）・設定（ノード / ブラウザ）・プロジェクト・検索・ドック（Files / Changes / Terminal）の描画と遷移を確認。
+- 本番ビルドは service worker を生成し、`build/sw.js` にビルド資産のプリキャッシュ一覧を注入する。
+
+### 12.2 Svelte 版からの差分（意図的）
+
+- **Select は Listbox + Popover の合成**。Terracotta の Listbox が開閉と値を所有するため、`Select.Root` は単一選択のみ（`multiple` は未実装）。うちの利用箇所はすべて単一選択。
+- **DropdownMenu は Popover + Menu**。サブメニューはクリック / `ArrowRight` / `Enter` で開く（ホバー開閉は親メニューのフォーカスを奪うため行わない）。
+- **Drawer にドラッグ閉じ / スナップポイントは無い**（`vaul-svelte` 依存の解消）。
+- **ScrollArea はネイティブ overflow + スクロールバーのスタイル**。カスタムサムの計測は行わない。
+- **Toast に `promise` と閉じるボタンは無い**（`dismiss(id)` はある）。アクション付きトーストは説明文に置換。
+- **AlertDialog の Action は自動で閉じない**。呼び出し側が明示的に閉じる（移植済みの画面はすべて閉じている）。
+- **`mode-watcher` を `ui/src/lib/mode.ts` に置換**。`localStorage["mode-watcher-mode"]` と値は同じで、既存の設定を引き継ぐ。
+- **`@lucide/svelte` を `unplugin-icons`（`~icons/lucide/*`）に置換**。型は Solid 1 向けのため `ui/src/env.d.ts` で宣言し直している。
+- **Svelte 専用テスト 5 ファイルは移植しない**（`*.test.svelte.ts` はコンポーネント/ルーン固有の挙動を検証していた）。純粋なロジックの 20 ファイルは移植済み。
+
+### 12.3 検証できていないもの
+
+- ローカルの `fxg` ノードが PTY の `open` を持たない古いバイナリのため、ターミナルの実接続は失敗状態までしか確認できていない（UI 側のメッセージは Svelte 版と同一）。
+- 同じ理由で Files ツールの API が 404 を返し、実データのツリー / 変更一覧 / 画像・バイナリのプレビューは未確認。
+- ライト / ダーク / 3 パレットの全画面スクリーンショット比較は、主要画面のみ。
+
+### 12.4 フォローアップ候補
+
+- モバイルでドラッグ閉じが必要なら Drawer に追加する。
+- Toast のアクション / 進捗 API が必要になったら `ToasterStore` の data に載せる。
+- 古いノードバイナリを更新したうえで、Files / Terminal / diff の実データ確認を行う。

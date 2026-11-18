@@ -32,7 +32,7 @@ env:
 
 jobs:
   ui:
-    name: ui (oxlint / svelte-check / vitest / build)
+    name: ui (oxlint / tsc / vitest / build)
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:

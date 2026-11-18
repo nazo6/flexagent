@@ -1,2 +1,8 @@
-export { default as Badge } from "./badge.svelte";
-export { badgeVariants, type BadgeVariant } from "./badge.svelte";
+export {
+  Root,
+  Root as Badge,
+  badgeVariants,
+  type BadgeProps,
+  type BadgeVariant,
+  type BadgeVariantsOptions,
+} from "./badge.tsx";

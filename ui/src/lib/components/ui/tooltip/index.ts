@@ -1,19 +1,14 @@
-import Content from "./tooltip-content.svelte";
-import Portal from "./tooltip-portal.svelte";
-import Provider from "./tooltip-provider.svelte";
-import Trigger from "./tooltip-trigger.svelte";
-import Root from "./tooltip.svelte";
+import { Content, PortalRoot, Provider, Root, Trigger } from "./tooltip.tsx";
 
-export {
-  Root,
-  Trigger,
-  Content,
-  Provider,
-  Portal,
-  //
-  Root as Tooltip,
-  Content as TooltipContent,
-  Trigger as TooltipTrigger,
-  Provider as TooltipProvider,
-  Portal as TooltipPortal,
-};
+export { Root, Trigger, Content, Provider, PortalRoot as Portal };
+
+/** Namespace shape, so `import * as Tooltip` keeps working unchanged. */
+export const Tooltip = { Root, Trigger, Content, Provider, Portal: PortalRoot };
+
+export type {
+  RootProps,
+  TriggerProps,
+  ContentProps,
+  ProviderProps,
+  PortalProps,
+} from "./tooltip.tsx";

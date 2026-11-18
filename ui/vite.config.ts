@@ -1,19 +1,20 @@
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
-import adapter from "@sveltejs/adapter-static";
-import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
-import { sveltekit } from "@sveltejs/kit/vite";
+import solid from "@solidjs/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
+import fs from "node:fs";
+import path from "node:path";
+import Icons from "unplugin-icons/vite";
+import { defineConfig, type Plugin, type ProxyOptions } from "vite";
 import type { ClientRequest } from "node:http";
-import { defineConfig, type ProxyOptions } from "vite";
-
-/** API proxy target in development (default: the local `fxg daemon` node). */
-const proxyTarget = process.env.FXG_DEV_PROXY ?? "http://127.0.0.1:7860";
 
 /**
- * `fxg`'s shared middleware validates the Host / Origin headers (DNS rebinding
- * and CSWSH protection). The proxy rewrites Host (`changeOrigin`) and aligns
- * Origin with the proxy target so validation passes (development only).
+ * API proxy target in development (default: the local `fxg daemon` node).
+ *
+ * The shared middleware validates Host / Origin (DNS rebinding and CSWSH
+ * protection), so the proxy rewrites Host and aligns Origin with the target.
  */
+const proxyTarget = process.env.FXG_DEV_PROXY ?? "http://127.0.0.1:7860";
+
 const rewriteOrigin = (proxyReq: ClientRequest) => {
   proxyReq.setHeader("origin", proxyTarget);
 };
@@ -28,43 +29,69 @@ const apiProxy: ProxyOptions = {
   },
 };
 
+const libRoot = path.resolve(import.meta.dirname, "src/lib");
+
+/**
+ * Emits `sw.js` after the build: injects a fresh cache version and the list of
+ * every emitted file, so the service worker can precache the app shell.
+ */
+function serviceWorkerPlugin(): Plugin {
+  return {
+    name: "fxg-service-worker",
+    apply: "build",
+    closeBundle() {
+      const outDir = path.resolve(import.meta.dirname, "build");
+      const files: string[] = [];
+      const walk = (dir: string, prefix: string) => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const url = `${prefix}/${entry.name}`;
+          if (entry.isDirectory()) walk(path.join(dir, entry.name), url);
+          else files.push(url);
+        }
+      };
+      walk(outDir, "");
+      const precache = files.filter((file) => file !== "/sw.js");
+      const version = Date.now().toString(36);
+      const source = fs
+        .readFileSync(path.join(import.meta.dirname, "src/service-worker.js"), "utf8")
+        .replace("__FXG_VERSION__", JSON.stringify(version))
+        .replace("__FXG_PRECACHE__", JSON.stringify(precache));
+      fs.writeFileSync(path.join(outDir, "sw.js"), source);
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     tailwindcss(),
-    sveltekit({
-      preprocess: vitePreprocess(),
-      // SPA mode: render every page on the client and fall back to index.html
-      // (`rust-embed` embeds `ui/build` into the `fxg` binary)
-      adapter: adapter({ fallback: "index.html" }),
-
-      // PWA: register `src/service-worker.ts` (App Shell cache + Web Push)
-      serviceWorker: { register: true },
-    }),
-    // i18n: messages live in `messages/{locale}.json` and compile to
-    // `src/lib/paraglide` (generated, Git-ignored).
+    solid(),
+    Icons({ compiler: "solid" }),
+    serviceWorkerPlugin(),
     paraglideVitePlugin({
       project: "./project.inlang",
       outdir: "./src/lib/paraglide",
       emitTsDeclarations: true,
       strategy: ["baseLocale"],
-      // Per-locale modules: one module per locale instead of one per message.
-      // Per-message modules make Vite resolve 1601 virtual modules, which slows
-      // down the dev server startup and the build without shrinking the bundle.
       outputStructure: "locale-modules",
     }),
   ],
-  build: {
-    // Monaco and shiki are lazily loaded chunks, not part of the initial load.
-    chunkSizeWarningLimit: 3000,
+  resolve: {
+    alias: [{ find: /^#lib\//, replacement: `${libRoot}/` }],
   },
-  optimizeDeps: {
-    // lucide has a very large number of per-icon deep imports, so lazy
-    // discovery triggers dependency re-optimization (forced reload) each time;
-    // exclude it from pre-bundling.
-    exclude: ["@lucide/svelte"],
+  build: {
+    // `rust-embed` embeds `ui/build` into the fxg binary.
+    outDir: "build",
+    chunkSizeWarningLimit: 3000,
   },
   server: {
     port: 5173,
+    strictPort: true,
+    proxy: {
+      "/api": apiProxy,
+    },
+  },
+  preview: {
+    port: 4173,
     strictPort: true,
     proxy: {
       "/api": apiProxy,

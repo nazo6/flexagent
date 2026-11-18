@@ -1,6 +1,6 @@
 import type { SystemInfoResponse } from "#lib/generated/bindings.ts";
 import { m } from "#lib/paraglide/messages.js";
-import { connection } from "#lib/stores/app.svelte.ts";
+import { connection } from "#lib/stores/app.ts";
 import { isValidVapidKey, urlBase64ToUint8Array } from "./push-keys";
 
 /**

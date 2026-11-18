@@ -1,6 +1,0 @@
-node_modules
-dist
-build
-src/lib/paraglide
-src/lib/generated
-*.log

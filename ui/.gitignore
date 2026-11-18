@@ -1,5 +1,5 @@
-node_modules/
-.svelte-kit/
-build/
-vite.config.ts.timestamp-*
-*.local
+node_modules
+dist
+build
+src/lib/paraglide
+*.log

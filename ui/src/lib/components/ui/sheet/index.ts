@@ -1,34 +1,53 @@
-import Close from "./sheet-close.svelte";
-import Content from "./sheet-content.svelte";
-import Description from "./sheet-description.svelte";
-import Footer from "./sheet-footer.svelte";
-import Header from "./sheet-header.svelte";
-import Overlay from "./sheet-overlay.svelte";
-import Portal from "./sheet-portal.svelte";
-import Title from "./sheet-title.svelte";
-import Trigger from "./sheet-trigger.svelte";
-import Root from "./sheet.svelte";
+import {
+  Close,
+  Content,
+  Description,
+  Footer,
+  Header,
+  Overlay,
+  PortalRoot,
+  Root,
+  Title,
+  Trigger,
+} from "./sheet.tsx";
 
 export {
   Root,
-  Close,
   Trigger,
-  Portal,
+  PortalRoot as Portal,
   Overlay,
   Content,
   Header,
   Footer,
   Title,
   Description,
-  //
-  Root as Sheet,
-  Close as SheetClose,
-  Trigger as SheetTrigger,
-  Portal as SheetPortal,
-  Overlay as SheetOverlay,
-  Content as SheetContent,
-  Header as SheetHeader,
-  Footer as SheetFooter,
-  Title as SheetTitle,
-  Description as SheetDescription,
+  Close,
 };
+
+/** Namespace shape, so `import * as Sheet` keeps working unchanged. */
+export const Sheet = {
+  Root,
+  Trigger,
+  Portal: PortalRoot,
+  Overlay,
+  Content,
+  Header,
+  Footer,
+  Title,
+  Description,
+  Close,
+};
+
+export type {
+  RootProps,
+  TriggerProps,
+  PortalProps,
+  OverlayProps,
+  ContentProps,
+  HeaderProps,
+  FooterProps,
+  TitleProps,
+  DescriptionProps,
+  CloseProps,
+  Side,
+} from "./sheet.tsx";
