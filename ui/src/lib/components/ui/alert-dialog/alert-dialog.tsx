@@ -138,21 +138,23 @@ export function Content(props: ContentProps) {
 
   return (
     <Show when={state.open()}>
-      <AlertDialogPrimitive isOpen onChange={(next) => state.setOpen(next)}>
-        <Overlay />
-        <AlertDialogPanel
-          {...rest}
-          ref={props.ref}
-          data-slot="alert-dialog-content"
-          data-size={props.size ?? "default"}
-          class={cn(
-            "bg-popover text-popover-foreground border-border animate-in fade-in-0 zoom-in-95 gap-5 rounded-xl border p-6 text-sm duration-100 shadow-lg data-[size=default]:max-w-xs data-[size=sm]:max-w-xs data-[size=default]:sm:max-w-lg group/alert-dialog-content fixed top-1/2 left-1/2 z-50 grid w-full -translate-x-1/2 -translate-y-1/2 outline-none",
-            props.class,
-          )}
-        >
-          {props.children}
-        </AlertDialogPanel>
-      </AlertDialogPrimitive>
+      <Portal>
+        <AlertDialogPrimitive isOpen onChange={(next) => state.setOpen(next)}>
+          <Overlay />
+          <AlertDialogPanel
+            {...rest}
+            ref={props.ref}
+            data-slot="alert-dialog-content"
+            data-size={props.size ?? "default"}
+            class={cn(
+              "bg-popover text-popover-foreground border-border animate-in fade-in-0 zoom-in-95 gap-5 rounded-xl border p-6 text-sm duration-100 shadow-lg data-[size=default]:max-w-xs data-[size=sm]:max-w-xs data-[size=default]:sm:max-w-lg group/alert-dialog-content fixed top-1/2 left-1/2 z-50 grid w-full -translate-x-1/2 -translate-y-1/2 outline-none",
+              props.class,
+            )}
+          >
+            {props.children}
+          </AlertDialogPanel>
+        </AlertDialogPrimitive>
+      </Portal>
     </Show>
   );
 }

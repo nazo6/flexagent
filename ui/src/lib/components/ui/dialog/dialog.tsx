@@ -26,11 +26,10 @@ import { makeDialogContext, useDialogState } from "./dialog-context.ts";
  *
  * Consequences worth knowing:
  *
- * - The panel is rendered where `Content` sits, not portaled: Terracotta marks
- *   everything outside the dialog root `inert`, and a panel in another subtree
- *   would be caught by that. It is `position: fixed`, so it still escapes
- *   `overflow` and paints above the page. A caller that must escape a stacking
- *   context wraps the whole `<Dialog.Root>` in `<Dialog.Portal>`.
+ * - `Content` portals the whole Terracotta dialog (overlay + panel) to `<body>`.
+ *   This keeps the panel out of surrounding links and transformed or clipped
+ *   ancestors. Terracotta's modal focus walks up from the dialog root to mark
+ *   the rest of the page `inert`, so a portaled dialog still traps focus.
  * - Focus returns to whatever was focused when the dialog opened; that is done
  *   here because a dialog that unmounts on close runs no close effect.
  */
@@ -90,7 +89,7 @@ export type PortalProps = {
   children?: JSX.Element;
 };
 
-/** Wraps a whole dialog root, not its content: see the note on `Content`. */
+/** Wraps a whole dialog root in a custom-mount portal (`Content` portals by itself). */
 export function PortalRoot(props: PortalProps) {
   return <Portal mount={props.mount}>{props.children}</Portal>;
 }
@@ -154,31 +153,33 @@ export function Content(props: ContentProps) {
 
   return (
     <Show when={state.open()}>
-      <DialogPrimitive isOpen onChange={(next) => state.setOpen(next)}>
-        <Overlay />
-        <DialogPanel
-          {...rest}
-          ref={props.ref}
-          data-slot="dialog-content"
-          class={cn(
-            "bg-popover text-popover-foreground border-border animate-in fade-in-0 zoom-in-95 grid max-w-[calc(100%_-_2rem)] gap-5 rounded-xl border p-6 text-sm duration-100 sm:max-w-md fixed top-1/2 left-1/2 z-50 w-full -translate-x-1/2 -translate-y-1/2 shadow-lg outline-none",
-            props.class,
-          )}
-        >
-          {props.children}
-          {props.showCloseButton === false ? null : (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              class="absolute top-4 right-4"
-              onClick={() => state.close()}
-            >
-              <IconX />
-              <span class="sr-only">Close</span>
-            </Button>
-          )}
-        </DialogPanel>
-      </DialogPrimitive>
+      <Portal>
+        <DialogPrimitive isOpen onChange={(next) => state.setOpen(next)}>
+          <Overlay />
+          <DialogPanel
+            {...rest}
+            ref={props.ref}
+            data-slot="dialog-content"
+            class={cn(
+              "bg-popover text-popover-foreground border-border animate-in fade-in-0 zoom-in-95 grid max-w-[calc(100%_-_2rem)] gap-5 rounded-xl border p-6 text-sm duration-100 sm:max-w-md fixed top-1/2 left-1/2 z-50 w-full -translate-x-1/2 -translate-y-1/2 shadow-lg outline-none",
+              props.class,
+            )}
+          >
+            {props.children}
+            {props.showCloseButton === false ? null : (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                class="absolute top-4 right-4"
+                onClick={() => state.close()}
+              >
+                <IconX />
+                <span class="sr-only">Close</span>
+              </Button>
+            )}
+          </DialogPanel>
+        </DialogPrimitive>
+      </Portal>
     </Show>
   );
 }
