@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, Show } from "solid-js";
+import { createEffect, createSignal, For, onSettled, Show } from "solid-js";
 import AgentUsage from "#lib/components/session/AgentUsage.tsx";
 import SessionInfo from "#lib/components/session/SessionInfo.tsx";
 import SessionActionsMenu from "#lib/components/session/SessionActionsMenu.tsx";
@@ -81,14 +81,12 @@ export default function SessionHeader(props: SessionHeaderProps) {
     },
   );
 
-  createEffect(
-    () => true,
-    () => {
-      if (typeof window === "undefined") return;
-      window.addEventListener("resize", syncDesktop);
-      return () => window.removeEventListener("resize", syncDesktop);
-    },
-  );
+  // Component-level setup and teardown (not a reactive dependency).
+  onSettled(() => {
+    if (typeof window === "undefined") return;
+    window.addEventListener("resize", syncDesktop);
+    return () => window.removeEventListener("resize", syncDesktop);
+  });
 
   /** Attention badge shared by the drawer and sidebar-restore buttons. */
   const attentionBadge = () => (

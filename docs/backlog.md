@@ -88,5 +88,6 @@ Phase 0（ACP v1 端末のライフサイクル・単体停止・スナップシ
 - [ ] 主要画面のライト / ダーク / Bone・Graphite・Moss のスクリーンショット比較を一巡する
 - [ ] 初期バンドル（約 1.5 MB）をルート単位の遅延読み込みで分割するかを判断する（Monaco / Shiki は既に遅延チャンク）
 - [x] 設定 URL の形を `settings-routes.ts` に集約する（route patterns / builders / pathname 判定）。型付き `paths` は採用しない
-- [ ] oxlint の `consistent-function-scoping` 警告（約 80 件）を整理するか、ルールを無効化して意図を記録する
+- [x] oxlint の `consistent-function-scoping` 警告を整理した（Solid のコンポーネント本体はインスタンスごとに 1 回しか走らないため、ルールを無効化し理由を `ui/CONVENTIONS.md` に記録した）
 - [ ] Service Worker の型検査と、precache（約 16 MB / 423 ファイル）の見直し
+- [ ] 非同期ロードを async `createMemo` + `<Loading>` / `<Errored>` へ寄せるか、画面単位で判断する。現状は失敗時に直前のスナップショットを残して toast を出す画面があり、`<Errored>` は内容を置換するため挙動が変わる（`ui/CONVENTIONS.md` の Reactivity rules を参照）

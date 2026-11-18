@@ -66,9 +66,13 @@ if the code here disagrees with this file, fix one of them in the same change.
   compute the value. When a write must be observed by a store, write both at
   the mutation site (see `Composer.updateText` and
   `createComposerAttachments({ onChange })`).
-- **Effects only for the outside world** (DOM, timers, storage, navigation).
-  A data fetch belongs in an async `createMemo` with `<Loading>` / `isPending`,
-  not in an effect that sets loading flags.
+- **Effects only for the outside world** (DOM, timers, storage, navigation) and
+  for loads that do not map to a pure input → output: polling, a manual refresh
+  that must keep the last snapshot on failure, or a click-driven browse. A load
+  that is a pure function of its inputs and replaces the panel on failure
+  belongs in an async `createMemo` with `<Loading>` / `isPending`. Check the
+  failure path before converting: `<Errored>` replaces the content, while the
+  current toast keeps it.
 - **Allowed write scopes** are event handlers, effect apply callbacks and
   `onSettled`. Writes from a component body or a memo throw
   `REACTIVE_WRITE_IN_OWNED_SCOPE`; do not opt out with `ownedWrite`.
@@ -78,9 +82,9 @@ if the code here disagrees with this file, fix one of them in the same change.
 - `unicorn/consistent-function-scoping` is off: a Solid component body runs
   once per instance, so helper functions are not re-created per call, and
   hoisting them would take `props` out of scope.
-| `$app/state` `page.url`    | `useLocation()` / `useSearchParams()`                            |
-| `goto(...)`                | `useNavigate()` or a plain `<a href>`                            |
-| `+page.ts` `error(404)`    | `matchFilters` on the route                                      |
+  | `$app/state` `page.url` | `useLocation()` / `useSearchParams()` |
+  | `goto(...)` | `useNavigate()` or a plain `<a href>` |
+  | `+page.ts` `error(404)` | `matchFilters` on the route |
 
 ## Component mapping
 
