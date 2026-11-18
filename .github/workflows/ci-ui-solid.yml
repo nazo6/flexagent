@@ -1,0 +1,47 @@
+# FlexAgent (`fxg`) CI — Solid UI (`ui-solid`, migration branch)
+#
+# The Svelte UI (`ui/`) keeps shipping until the cutover, so its workflow is
+# unchanged. This one type-checks, lints and builds the Solid app that will
+# replace it.
+
+name: CI (ui-solid)
+
+on:
+  push:
+    branches: [ui-solid]
+    paths:
+      - "ui-solid/**"
+      - "ui/src/lib/generated/**"
+      - "ui/project.inlang"
+      - "ui/messages/**"
+      - "mise.toml"
+      - ".github/workflows/ci-ui-solid.yml"
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "ui-solid/**"
+      - "ui/src/lib/generated/**"
+      - "ui/project.inlang"
+      - "ui/messages/**"
+      - "mise.toml"
+      - ".github/workflows/ci-ui-solid.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MISE_DISABLE_TOOLS: cargo:sqlx-cli
+
+jobs:
+  ui-solid:
+    name: ui-solid (oxlint / tsc / build)
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+      - run: mise run ui-solid:install
+      - run: mise run lint:ui-solid
+      - run: mise run check:ui-solid
+      - run: mise run build:ui-solid
