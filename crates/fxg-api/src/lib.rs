@@ -72,6 +72,7 @@ use handlers::agents::{
     import_registry_agent, list_agents, probe_agent_config, refresh_catalog, remove_custom_agent,
     upsert_custom_agent,
 };
+use handlers::nodes::{node_audit_logs, node_diagnostics, node_shutdown};
 use handlers::projects::{
     add_project, create_worktree, delete_provisioner, inspect_project, link_project, list_nodes,
     list_projects, list_provisioners, list_worktrees, prune_worktrees, remove_worktree,
@@ -216,6 +217,15 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         )
         .route("/api/v1/auth/rotate-token", post(rotate_auth_token::<B>))
         .route("/api/v1/nodes", get(list_nodes::<B>))
+        .route(
+            "/api/v1/nodes/{node_id}/diagnostics",
+            get(node_diagnostics::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/audit/logs",
+            get(node_audit_logs::<B>),
+        )
+        .route("/api/v1/nodes/{node_id}/shutdown", post(node_shutdown::<B>))
         .route(
             "/api/v1/nodes/{node_id}/agents/{agent_id}/management",
             get(agent_management::<B>),

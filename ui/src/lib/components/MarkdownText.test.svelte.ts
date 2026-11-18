@@ -99,7 +99,7 @@ describe("MarkdownText file links", () => {
     expect(dock.activeFile).toBeNull();
   });
 
-  it("does nothing when the node is reached through the hub", () => {
+  it("opens a relative link when the node is reached through the hub", () => {
     sync.connection.role = "hub";
     const target = render("[main](src/main.ts)");
     const anchor = target.querySelector("a");
@@ -107,7 +107,7 @@ describe("MarkdownText file links", () => {
 
     const event = click(anchor);
 
-    expect(event.defaultPrevented).toBe(false);
-    expect(dock.activeFile).toBeNull();
+    expect(event.defaultPrevented).toBe(true);
+    expect(dock.activeFile).toBe("/repo/src/main.ts");
   });
 });

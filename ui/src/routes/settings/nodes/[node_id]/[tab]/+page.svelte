@@ -15,7 +15,7 @@
   let { data }: { data: PageData } = $props();
 
   const isHub = $derived(sync.connection.role === "hub");
-  const tabAvailable = $derived(isNodeTabAvailable(data.tab, isHub));
+  const tabAvailable = $derived(isNodeTabAvailable(data.tab));
 </script>
 
 {#if !tabAvailable}
@@ -35,11 +35,11 @@
     <ClientTokenCard />
   {/if}
 {:else if data.tab === "process"}
-  <ProcessSettingsPanel />
+  <ProcessSettingsPanel nodeId={data.nodeId} />
 {:else if data.tab === "pairing"}
   <PairingPanel nodeId={data.nodeId} />
 {:else if data.tab === "agents"}
   <AgentManager nodeId={data.nodeId} />
 {:else if data.tab === "audit"}
-  <AuditLog />
+  <AuditLog nodeId={data.nodeId} />
 {/if}

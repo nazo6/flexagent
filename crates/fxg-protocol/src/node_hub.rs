@@ -13,15 +13,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::client_api::HubLinkStatus;
 use crate::client_api::{
-    AgentCapabilitiesPreview, AgentsResponse, FsBrowseResponse, ProjectLinkResponse,
-    ProjectPreview, ProjectScanResponse, ProjectUnlinkResponse, TerminalsResponse,
-    WorkspaceFileView, WorkspaceFsListResponse, WorkspaceGitCommitResponse,
-    WorkspaceGitStatusResponse, WorkspaceGitSyncResponse, WorktreeInfo,
+    AgentCapabilitiesPreview, AgentManagementSnapshot, AgentMcpAction, AgentMcpDefinition,
+    AgentsResponse, DiagnosticsResponse, FsBrowseResponse, ProjectLinkResponse, ProjectPreview,
+    ProjectScanResponse, ProjectUnlinkResponse, TerminalsResponse, WorkspaceFileView,
+    WorkspaceFsListResponse, WorkspaceGitCommitResponse, WorkspaceGitStatusResponse,
+    WorkspaceGitSyncResponse, WorktreeInfo,
 };
 use crate::common::{
-    AgentAction, AgentUsageLimits, ClientSource, DataSafety, DiffScope, ElicitationContent,
-    ErrorCode, ErrorInfo, NodeProjectReport, PromptInput, ResolvedBy, SessionControlAction,
-    WarningInfo, WorkspaceDiffResponse, WorktreeAction,
+    AgentAction, AgentUsageLimits, AuditLogEntry, ClientSource, DataSafety, DiffScope,
+    ElicitationContent, ErrorCode, ErrorInfo, NodeProjectReport, PromptInput, ResolvedBy,
+    SessionControlAction, WarningInfo, WorkspaceDiffResponse, WorktreeAction,
 };
 use crate::events::SessionEventEnvelope;
 use crate::settings::{
@@ -147,6 +148,45 @@ pub enum NodeRpcRequest {
         #[serde(default)]
         force: bool,
     },
+    /// Read the agent-native management snapshot.
+    AgentManagement {
+        /// Agent ID
+        agent_id: String,
+    },
+    /// Connect or disconnect an MCP server.
+    AgentMcpAction {
+        /// Agent ID
+        agent_id: String,
+        /// MCP server name
+        name: String,
+        /// Operation to execute
+        action: AgentMcpAction,
+    },
+    /// Add or replace an MCP server definition.
+    AgentMcpUpsert {
+        /// Agent ID
+        agent_id: String,
+        /// MCP server name
+        name: String,
+        /// Definition to store
+        definition: AgentMcpDefinition,
+    },
+    /// Remove an MCP server.
+    AgentMcpRemove {
+        /// Agent ID
+        agent_id: String,
+        /// MCP server name
+        name: String,
+    },
+    /// Collect the diagnostics snapshot (component health, counters, log path).
+    Diagnostics,
+    /// Read the newest audit log entries.
+    ListAuditLogs {
+        /// Maximum number of entries
+        limit: u32,
+    },
+    /// Shut the node down gracefully.
+    Shutdown,
     /// Fetch the node settings snapshot.
     GetNodeSettings,
     /// Update node-owned settings.
@@ -288,23 +328,6 @@ pub enum NodeRpcRequest {
 }
 
 impl NodeRpcRequest {
-    /// Whether the operation exposes workspace files and is therefore limited
-    /// to a direct (non-hub) client connection.
-    pub fn requires_local_workspace_access(&self) -> bool {
-        matches!(
-            self,
-            Self::WorkspaceFsList { .. }
-                | Self::WorkspaceFsFile { .. }
-                | Self::WorkspaceGitStatus { .. }
-                | Self::WorkspaceGitDiff { .. }
-                | Self::WorkspaceGitCommit { .. }
-                | Self::WorkspaceGitPull { .. }
-                | Self::WorkspaceGitPush { .. }
-        )
-    }
-}
-
-impl NodeRpcRequest {
     /// Time the hub waits for the node before failing the operation.
     ///
     /// Project scans, catalog refreshes, resumes and deletes can exceed the
@@ -315,6 +338,10 @@ impl NodeRpcRequest {
             | Self::ListAgents
             | Self::ProbeAgentConfig { .. }
             | Self::AgentUsage { .. }
+            | Self::AgentManagement { .. }
+            | Self::AgentMcpAction { .. }
+            | Self::AgentMcpUpsert { .. }
+            | Self::AgentMcpRemove { .. }
             | Self::ImportSession { .. }
             | Self::ListExternalSessions { .. }
             | Self::ResumeSession { .. }
@@ -424,6 +451,23 @@ pub enum NodeRpcResponse {
         /// Current limits
         usage: Option<AgentUsageLimits>,
     },
+    /// Agent-native management snapshot (`AgentManagement` / `AgentMcp*`).
+    AgentManagement {
+        /// Snapshot after the operation
+        snapshot: Box<AgentManagementSnapshot>,
+    },
+    /// Diagnostics snapshot (`Diagnostics`).
+    Diagnostics {
+        /// Component health, counters and log path
+        diagnostics: Box<DiagnosticsResponse>,
+    },
+    /// Newest audit log entries (`ListAuditLogs`).
+    AuditLogs {
+        /// Entries, newest first
+        logs: Vec<AuditLogEntry>,
+    },
+    /// Shutdown accepted (`Shutdown`).
+    Shutdown,
     /// Settings snapshot (`GetNodeSettings` / `UpdateNodeSettings` /
     /// `UpdateAgentSettings`).
     NodeSettings {
@@ -1012,6 +1056,53 @@ mod tests {
                     },
                 },
             ),
+            (
+                "node_rpc",
+                HubToNodeMsg::NodeRpc {
+                    request_id: "r1".into(),
+                    request: NodeRpcRequest::AgentManagement {
+                        agent_id: "opencode".into(),
+                    },
+                },
+            ),
+            (
+                "node_rpc",
+                HubToNodeMsg::NodeRpc {
+                    request_id: "r1".into(),
+                    request: NodeRpcRequest::AgentMcpUpsert {
+                        agent_id: "opencode".into(),
+                        name: "fxg".into(),
+                        definition: AgentMcpDefinition {
+                            kind: crate::client_api::AgentMcpKind::Remote,
+                            command: Vec::new(),
+                            environment: std::collections::BTreeMap::new(),
+                            url: Some("https://example.com/mcp".into()),
+                            enabled: true,
+                        },
+                    },
+                },
+            ),
+            (
+                "node_rpc",
+                HubToNodeMsg::NodeRpc {
+                    request_id: "r1".into(),
+                    request: NodeRpcRequest::Diagnostics,
+                },
+            ),
+            (
+                "node_rpc",
+                HubToNodeMsg::NodeRpc {
+                    request_id: "r1".into(),
+                    request: NodeRpcRequest::ListAuditLogs { limit: 25 },
+                },
+            ),
+            (
+                "node_rpc",
+                HubToNodeMsg::NodeRpc {
+                    request_id: "r1".into(),
+                    request: NodeRpcRequest::Shutdown,
+                },
+            ),
         ];
 
         for (expected_op, msg) in cases {
@@ -1085,6 +1176,17 @@ mod tests {
             }
             .timeout(),
             Duration::from_secs(600)
+        );
+        assert_eq!(
+            NodeRpcRequest::AgentManagement {
+                agent_id: "opencode".into(),
+            }
+            .timeout(),
+            Duration::from_secs(120)
+        );
+        assert_eq!(
+            NodeRpcRequest::Diagnostics.timeout(),
+            Duration::from_secs(30)
         );
     }
 }

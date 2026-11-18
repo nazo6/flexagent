@@ -1718,6 +1718,11 @@ mod tests {
         crate::git::run_git(&path, &["init"])
             .await
             .expect("git init");
+        // Keep LF in the working tree so the assertions do not depend on the
+        // platform default (Git for Windows enables `core.autocrlf`).
+        crate::git::run_git(&path, &["config", "core.autocrlf", "false"])
+            .await
+            .expect("git autocrlf");
         crate::git::run_git(&path, &["config", "user.email", "test@example.com"])
             .await
             .expect("git email");
@@ -1912,6 +1917,11 @@ mod tests {
         crate::git::run_git(&path, &["init"])
             .await
             .expect("git init");
+        // Keep LF in the working tree so the assertions do not depend on the
+        // platform default (Git for Windows enables `core.autocrlf`).
+        crate::git::run_git(&path, &["config", "core.autocrlf", "false"])
+            .await
+            .expect("git autocrlf");
         crate::git::run_git(&path, &["config", "user.email", "test@example.com"])
             .await
             .expect("git email");
@@ -1953,6 +1963,9 @@ mod tests {
         )
         .await
         .expect("clone");
+        crate::git::run_git(&other, &["config", "core.autocrlf", "false"])
+            .await
+            .expect("other autocrlf");
         crate::git::run_git(&other, &["config", "user.email", "test@example.com"])
             .await
             .expect("other email");

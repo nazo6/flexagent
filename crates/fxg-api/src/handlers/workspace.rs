@@ -1,7 +1,7 @@
 //! Workspace file browsing and Git inspection (`/api/v1/nodes/:id/workspace/*`).
 //!
-//! The node enforces that the path belongs to a registered workspace and that
-//! the request came from a direct (non-hub) client connection.
+//! The node enforces that the path belongs to a registered workspace. The hub
+//! relays these calls to the owning node.
 
 use axum::Extension;
 use axum::Json;

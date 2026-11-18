@@ -233,9 +233,11 @@
 
   type Row = { label: string; value: string; source: string; detail?: string | null };
 
+  // Bootstrap values describe a process: the hub's own when no node target is set,
+  // otherwise the selected node's.
   const bootstrapRows = $derived<Row[]>(
     section === "bootstrap"
-      ? isHub
+      ? isHub && targetNode === ""
         ? hubSnapshot
           ? [
               {
@@ -336,14 +338,14 @@
 
   /** Data directory shown by the bootstrap tab (hub or target node). */
   const dataDir = $derived(
-    isHub
+    isHub && targetNode === ""
       ? (hubSnapshot?.bootstrap.data_dir.value ?? "")
       : (nodeSnapshot?.bootstrap.data_dir.value ?? ""),
   );
 
   /** Files and directories in the role data directory, with what each one is for. */
   const dataFiles = $derived<{ name: string; use: string }[]>(
-    isHub
+    isHub && targetNode === ""
       ? [
           { name: "auth_token", use: "Hub-only Web access token for browsers and CLI" },
           { name: "hub.db", use: "Hub settings, project projection and audit log" },

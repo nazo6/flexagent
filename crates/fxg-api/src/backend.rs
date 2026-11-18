@@ -648,6 +648,8 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     }
 
     /// `GET /api/v1/nodes/:node_id/agents/:agent_id/management`.
+    ///
+    /// The node reads the snapshot in-process; the hub relays it to the node.
     async fn agent_management(
         &self,
         _node_id: &str,
@@ -655,7 +657,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     ) -> Result<AgentManagementSnapshot, ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
-            "agent management is only available on the local node",
+            "agent management is not supported by this endpoint",
         ))
     }
 
@@ -672,7 +674,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     ) -> Result<AgentUsageResponse, ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
-            "agent usage is only available on the local node",
+            "agent usage is not supported by this endpoint",
         ))
     }
 
@@ -686,7 +688,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     ) -> Result<AgentManagementSnapshot, ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
-            "agent management is only available on the local node",
+            "agent management is not supported by this endpoint",
         ))
     }
 
@@ -700,7 +702,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     ) -> Result<AgentManagementSnapshot, ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
-            "agent management is only available on the local node",
+            "agent management is not supported by this endpoint",
         ))
     }
 
@@ -713,7 +715,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     ) -> Result<AgentManagementSnapshot, ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
-            "agent management is only available on the local node",
+            "agent management is not supported by this endpoint",
         ))
     }
 

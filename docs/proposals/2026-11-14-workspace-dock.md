@@ -1,7 +1,7 @@
 # 2026-11-14 右ペインの Workspace Dock 化
 
 - **日付**: 2026-11-14
-- **ステータス**: `Partially Implemented`（Phase 0 / 1 と Terminal タブを実装。ファイル編集は Phase 2 として TODO）
+- **ステータス**: `Partially Implemented`（Phase 0 / 1 と Terminal タブを実装。ファイル編集は Phase 2 として TODO。2026-11-18 にハブ経由の制限を撤去）
 - **対象パッケージ**: `fxg-protocol`, `fxg-node`, `fxg-hub`, `ui`
 - **対象スクリプト / 設定**: `mise run check` / `mise run fmt` / `mise run types` / `pnpm --dir ui test`
 - **関連ドキュメント**:
@@ -23,7 +23,7 @@
   - 現在の `activePanel = null` リセットを廃止する。
 - ツールは **Files / Changes / Terminal**。File プレビューは Files の中にあり、Changes の行やチャットの tool diff から Files のプレビューにファイルを開く。プレビュー内で `View | Diff` を切り替える。
 - ファイルアクセスの境界は **workspace の git toplevel（worktree ならその worktree）配下**。worktree / メイン repo / 別 worktree をまたがない。
-- Phase 1 のファイル API は **ローカル接続のみ**。ハブ経由での読み書きは設定で解禁するまで無効にする。
+- Phase 1 のファイル API は **ローカル接続のみ**（2026-11-18 に方針変更: ハブは対象ノードへ中継する。[changelog](../changelog/2026-11/2026-11-18-hub-node-feature-parity.md)）。
 - 段階は Phase 0（UI 基盤）→ Phase 1（閲覧と連携）→ Phase 2（編集）→ Phase 3（更新検知・追加ツール）。
 
 ## 1. 現状と課題

@@ -205,9 +205,9 @@ prune します。`sessions` は最大 1000 件で、超過時は
 - 認証不要: `GET /api/v1/meta`、`GET /healthz`、`GET /readyz`。
 - `Host` ヘッダ検証（DNS Rebinding 対策）と、WebSocket の `Origin` 検証
   （CSWSH 対策）。
-- 監査ログは、セッション起動、承認 / 質問の解決、kill switch、Worktree 操作、
-  プロジェクト紐付け、エージェント管理、ノードトークン、認証トークン再生成、
-  設定更新、ペアリング、秘密管理を記録する。プロンプト送信は
+- 監査ログは、セッション起動、承認 / 質問の解決、kill switch、ノード停止、
+  Worktree 操作、プロジェクト紐付け、エージェント管理、ノードトークン、
+  認証トークン再生成、設定更新、ペアリング、秘密管理を記録する。プロンプト送信は
   `UserMessage` イベントとして `session_events` に残す。
 
 ### 3.1 REST API
@@ -247,8 +247,8 @@ prune します。`sessions` は最大 1000 件で、超過時は
 | `GET /api/v1/nodes/:node_id/workspace/fs/file`                     | workspace 内のファイル内容（テキスト / 画像 / バイナリ / 大きすぎる）。 |
 | `GET /api/v1/nodes/:node_id/workspace/git/status`                  | workspace の `git status`（branch / ahead / behind / 変更一覧）。       |
 | `GET /api/v1/nodes/:node_id/workspace/git/diff`                    | workspace または 1 ファイルの diff（scope / base / file）。             |
-| `POST /api/v1/nodes/:node_id/workspace/git/commit`                 | worktree の全変更を stage して 1 コミット作成（ローカル接続のみ）。     |
-| `POST /api/v1/nodes/:node_id/workspace/git/pull`                   | upstream を fetch し fast-forward のみ（ローカル接続のみ）。            |
+| `POST /api/v1/nodes/:node_id/workspace/git/commit`                 | worktree の全変更を stage して 1 コミット作成。                         |
+| `POST /api/v1/nodes/:node_id/workspace/git/pull`                   | upstream を fetch し fast-forward のみ。                                |
 | `POST /api/v1/nodes/:node_id/workspace/git/push`                   | 現在のブランチを push（force なし、初回は `origin` に upstream 設定）。 |
 | `GET /api/v1/nodes/:node_id/settings`                              | ノード設定スナップショット（トークン値は返さない）。                    |
 | `PATCH /api/v1/nodes/:node_id/settings/node` / `.../agents`        | ノード所有設定の更新。                                                  |
@@ -257,13 +257,18 @@ prune します。`sessions` は最大 1000 件で、超過時は
 | `GET /api/v1/nodes/:node_id/secrets` / `PUT/DELETE .../:secret_id` | ノード所有の秘密メタデータ。値は返さない。                              |
 | `GET /api/v1/hub/secrets` / `PUT/DELETE .../:secret_id`            | ハブ所有の秘密メタデータ。                                              |
 | `GET /api/v1/nodes/tokens` / `POST` / `DELETE .../:node_id`        | ノード個別トークンの一覧 / 発行 / 失効（ハブのみ）。                    |
+| `GET /api/v1/nodes/:node_id/diagnostics`                           | 指定ノードの診断（component health / counters / log path）。            |
+| `GET /api/v1/nodes/:node_id/audit/logs`                            | 指定ノードの監査ログ。                                                  |
+| `POST /api/v1/nodes/:node_id/shutdown`                             | 指定ノードの graceful shutdown。                                        |
 
-`workspace/*` は **直接ノードへ接続したクライアント専用**です。ハブ経由の
-リクエストはノードが `FORBIDDEN` で拒否します。パスは登録済み workspace
+`workspace/*` はハブ経由でも利用できます。ハブは要求を対象ノードへ中継し、
+ノード側で同じ検証を行います。パスは登録済み workspace
 （`project_node_bindings` / `project_path_links` / セッションの作業ディレクトリ）から
 解決した access root（Git の worktree toplevel、非 Git ならそのディレクトリ）の
 配下だけを許可し、`.git` とシンボリックリンク経由の脱出を拒否します。
 読み取りは UTF-8 / 2 MiB までで、バイナリと超過は正常系の列挙として返します。
+ハブの認証トークンは全ノードの workspace を読み書きできるため、ハブは
+信頼できるネットワーク（LAN / Tailscale 等）に置いてください。
 
 #### エージェント
 
@@ -276,11 +281,12 @@ prune します。`sessions` は最大 1000 件で、超過時は
 | `PUT/DELETE /api/v1/nodes/:node_id/agents/custom/:agent_id`    | カスタム ACP エージェント定義の作成・更新 / 削除。 |
 | `POST /api/v1/nodes/:node_id/agents/registry/:agent_id/import` | Registry エントリを custom 定義として保存。        |
 
-#### エージェントネイティブ管理（ローカルノード専用）
+#### エージェントネイティブ管理（ノード API / ハブ中継）
 
 `AgentManagement` を実装するエージェント（現在は Tier 3 の `opencode`）は、
-セッションプロトコル外の設定情報を共通 API で公開する。ハブ経由の backend は
-明示エラーを返し、credential の値は決して返さない。
+セッションプロトコル外の設定情報を共通 API で公開する。ハブは
+`NodeRpcRequest::AgentManagement` 系で対象ノードへ中継し、credential の
+値は決して返さない。
 
 | Method / Path                                                               | 内容                                                    |
 | :-------------------------------------------------------------------------- | :------------------------------------------------------ |

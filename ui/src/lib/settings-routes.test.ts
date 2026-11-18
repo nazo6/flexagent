@@ -10,11 +10,10 @@ import {
 } from "./settings-routes.ts";
 
 describe("settings-routes", () => {
-  it("hides node-local tabs when viewing a node via the hub", () => {
-    expect(isNodeTabAvailable("process", false)).toBe(true);
-    expect(isNodeTabAvailable("process", true)).toBe(false);
-    expect(isNodeTabAvailable("audit", true)).toBe(false);
-    expect(isNodeTabAvailable("agents", true)).toBe(true);
+  it("offers every node tab regardless of the connection role", () => {
+    expect(isNodeTabAvailable("process")).toBe(true);
+    expect(isNodeTabAvailable("audit")).toBe(true);
+    expect(isNodeTabAvailable("agents")).toBe(true);
   });
 
   it("builds settings paths and encodes node ids", () => {

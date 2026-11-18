@@ -73,7 +73,6 @@ fn audit_source(client: &ClientInfo) -> AuditSource {
         client_ip: client.ip.clone(),
         auth_subject: client.auth_subject.clone(),
         user_agent: client.user_agent.clone(),
-        via_hub: false,
     }
 }
 

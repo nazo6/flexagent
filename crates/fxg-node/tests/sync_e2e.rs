@@ -1540,8 +1540,13 @@ async fn hub_relays_workspace_terminal_and_replays_output() {
     )
     .expect("Web access token");
 
-    // Workspace file access is local-only: the hub relay must be rejected.
+    // Workspace file access is relayed to the node like the local connection.
     let workspace_path = repo.path().to_string_lossy().into_owned();
+    // The access root is canonicalized by the node (`/var` → `/private/var` on macOS).
+    let canonical_repo = fxg_pty::canonicalize(repo.path())
+        .expect("canonical repo")
+        .to_string_lossy()
+        .into_owned();
     let mut workspace_url = reqwest::Url::parse(&format!(
         "http://127.0.0.1:{port}/api/v1/nodes/node-1/workspace/fs/list"
     ))
@@ -1549,18 +1554,20 @@ async fn hub_relays_workspace_terminal_and_replays_output() {
     workspace_url
         .query_pairs_mut()
         .append_pair("path", &workspace_path);
-    let forbidden = reqwest::Client::new()
+    let listing = reqwest::Client::new()
         .get(workspace_url)
         .bearer_auth(&client_token)
         .send()
         .await
-        .expect("workspace fs request")
-        .status();
+        .expect("workspace fs request");
     assert_eq!(
-        forbidden,
-        reqwest::StatusCode::FORBIDDEN,
-        "workspace files must not be exposed through the hub"
+        listing.status(),
+        reqwest::StatusCode::OK,
+        "the hub must relay workspace files to the node"
     );
+    let listing: fxg_protocol::client_api::WorkspaceFsListResponse =
+        listing.json().await.expect("workspace listing");
+    assert_eq!(listing.root_path, canonical_repo);
 
     let url = format!("ws://127.0.0.1:{port}/api/v1/pty/ws");
     let open = serde_json::to_string(&PtyClientMessage::Open {
