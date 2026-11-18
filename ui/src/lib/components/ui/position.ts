@@ -127,7 +127,19 @@ export function useAnchoredPanel(options: AnchoredPanelOptions): AnchoredPanel {
     }),
     (state) => {
       const { element, anchor } = state;
-      if (!element || !anchor || !state.open || !element.isConnected) return;
+      // A trigger ref can be stale (for example a re-created slot tree). A
+      // detached anchor makes floating-ui walk a different document's tree, so
+      // wait for a live element in the panel's document instead.
+      if (
+        !element ||
+        !anchor ||
+        !state.open ||
+        !element.isConnected ||
+        !anchor.isConnected ||
+        anchor.ownerDocument !== element.ownerDocument
+      ) {
+        return;
+      }
 
       // A panel kept mounted while closed (`unmount={false}`) would otherwise
       // paint once at the viewport's top-left before the first measurement.

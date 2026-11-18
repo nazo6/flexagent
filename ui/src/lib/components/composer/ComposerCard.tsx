@@ -1,5 +1,5 @@
 import type { JSX } from "@solidjs/web";
-import { Show } from "solid-js";
+import { children, Show } from "solid-js";
 import { cn } from "#lib/utils.ts";
 
 export interface ComposerCardProps {
@@ -21,6 +21,14 @@ export interface ComposerCardProps {
 
 /** Frame of a composer: notices, the input, and the selector / action row. */
 export default function ComposerCard(props: ComposerCardProps) {
+  // Reading a JSX-element prop creates its tree. Passing it to both `when` and
+  // the inserted content (or comparing it with `undefined`) would create a
+  // second, detached tree whose effects still run (popovers, portals). Resolve
+  // each slot once and render that value.
+  const above = children(() => props.above);
+  const selectors = children(() => props.selectors);
+  const actions = children(() => props.actions);
+
   return (
     <div
       class={cn(
@@ -28,17 +36,17 @@ export default function ComposerCard(props: ComposerCardProps) {
         props.class,
       )}
     >
-      <Show when={props.above}>{props.above}</Show>
+      {above()}
       {props.children}
-      <Show when={props.selectors !== undefined || props.actions !== undefined}>
+      <Show when={selectors() !== undefined || actions() !== undefined}>
         <div class="border-border flex items-center gap-1.5 border-t px-0.5 pt-1">
           <div class="relative min-w-0 flex-1">
             <div class="flex items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {props.selectors}
+              {selectors()}
             </div>
             <div class="from-card pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l to-transparent" />
           </div>
-          <div class="flex shrink-0 items-center gap-1">{props.actions}</div>
+          <div class="flex shrink-0 items-center gap-1">{actions()}</div>
         </div>
       </Show>
     </div>
