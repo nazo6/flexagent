@@ -62,3 +62,17 @@ incidents とサポートバンドルは 2026-11-17 に削除済み
 - [ ] 保存後の Changes / Git status / ファイルプレビュー更新
 - [ ] モバイルは閲覧のみとし、編集はデスクトップに限定する
 - [ ] 編集 API も読み取りと同じくハブ経由で中継し、監査ログに記録する
+
+## 7. エージェント端末の管理（Phase 1〜3, TODO）
+
+出典: [`docs/proposals/2026-11-18-agent-terminal-management.md`](./proposals/2026-11-18-agent-terminal-management.md)
+
+Phase 0（ACP v1 端末のライフサイクル・単体停止・スナップショット）は実装済み。
+
+- [ ] MCP 端末サーバー（`terminal_create` / `terminal_read` / `terminal_kill` / `terminal_close`）をノードでホストし、`TerminalOutput` に正規化する
+- [ ] MCP サーバーのエージェントへの注入（OpenCode の MCP 設定 / ACP エージェントの起動設定）と `agent_settings` への保存、UI からの有効化
+- [ ] MCP 端末への入力（`terminal_send`）。cwd の封じ込め・env・permission ポリシーの検証を含む
+- [ ] OpenCode の experimental persistent PTY を feature flag 付き・読み取り専用で「エージェント端末」として表示する
+- [ ] ACP v2 のエージェント所有 Terminal Output を `TerminalOutput` に正規化する（停止可否は v2 の手段が決まってから）
+- [ ] `ToolCallContent::Terminal` の `terminal_id` を `ToolCall` に保持し、ツールカードから端末カードへリンクする（§4 と共通）
+- [ ] 停止できない経路（自前実行・OpenCode ネイティブ）で「単体停止は不可」を UI に明示する
