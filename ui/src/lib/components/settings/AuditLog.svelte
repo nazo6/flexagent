@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { untrack } from "svelte";
   import { errorMessage } from "#lib/api/error-messages.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
@@ -12,24 +12,38 @@
   import { toast } from "svelte-sonner";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
 
+  /** Target node (`""` = the endpoint itself, i.e. the hub's own audit log). */
+  let { nodeId = "" }: { nodeId?: string } = $props();
+
   let logs = $state<AuditLogEntry[]>([]);
   let loading = $state(false);
+  let generation = 0;
 
-  const roleLabel = $derived(connection.role === "hub" ? "hub.db" : "node.db");
+  const roleLabel = $derived(nodeId !== "" || connection.role !== "hub" ? "node.db" : "hub.db");
 
-  async function load() {
+  async function load(): Promise<void> {
+    const current = ++generation;
     loading = true;
     try {
-      logs = await connection.client.auditLogs(100);
+      const next =
+        nodeId === ""
+          ? await connection.client.auditLogs(100)
+          : await connection.client.nodeAuditLogs(nodeId, 100);
+      if (current !== generation) return;
+      logs = next;
     } catch (error) {
-      toast.error(errorMessage(error));
+      if (current === generation) toast.error(errorMessage(error));
     } finally {
-      loading = false;
+      if (current === generation) loading = false;
     }
   }
 
-  onMount(() => {
-    void load();
+  $effect(() => {
+    const target = nodeId;
+    untrack(() => {
+      logs = [];
+      void load();
+    });
   });
 
   function sessionTitle(sessionId: string): string {
@@ -38,8 +52,8 @@
     );
   }
 
-  function nodeName(nodeId: string): string {
-    return sync.nodes.find((node) => node.node_id === nodeId)?.name ?? shortId(nodeId);
+  function nodeName(id: string): string {
+    return sync.nodes.find((node) => node.node_id === id)?.name ?? shortId(id);
   }
 
   const ACTION_LABELS: Record<string, string> = {
@@ -48,6 +62,7 @@
     elicitation_resolved: m.settings_audit_action_elicitation_resolved(),
     pty_spawn: m.settings_audit_action_pty_spawn(),
     kill_switch: m.settings_audit_action_kill_switch(),
+    node_shutdown: m.settings_audit_action_node_shutdown(),
     workspace_git_commit: m.settings_audit_action_workspace_git_commit(),
     workspace_git_pull: m.settings_audit_action_workspace_git_pull(),
     workspace_git_push: m.settings_audit_action_workspace_git_push(),

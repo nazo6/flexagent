@@ -11,7 +11,8 @@ use fxg_api::{
 use fxg_db::Db;
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
-    AgentOpResponse, AgentUsageResponse, AgentsResponse, ConnectionRole, CreateSessionRequest,
+    AgentManagementSnapshot, AgentMcpAction, AgentMcpDefinition, AgentOpResponse,
+    AgentUsageResponse, AgentsResponse, ConnectionRole, CreateSessionRequest,
     CreateSessionResponse, CreateWorktreeRequest, ExternalSessionListResponse,
     IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse, NodeTokenSummary,
     NodeTokensResponse, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
@@ -337,6 +338,96 @@ impl ClientApiBackend for HubState {
             .await?;
         match response {
             NodeRpcResponse::AgentUsage { usage } => Ok(AgentUsageResponse { usage }),
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
+    }
+
+    async fn agent_management(
+        &self,
+        node_id: &str,
+        agent_id: &str,
+    ) -> Result<AgentManagementSnapshot, ApiError> {
+        let response = self
+            .execute_node_rpc(
+                &fxg_protocol::NodeId::from(node_id),
+                NodeRpcRequest::AgentManagement {
+                    agent_id: agent_id.to_owned(),
+                },
+                None,
+            )
+            .await?;
+        match response {
+            NodeRpcResponse::AgentManagement { snapshot } => Ok(*snapshot),
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
+    }
+
+    async fn agent_mcp_action(
+        &self,
+        node_id: &str,
+        agent_id: &str,
+        name: &str,
+        action: AgentMcpAction,
+    ) -> Result<AgentManagementSnapshot, ApiError> {
+        let response = self
+            .execute_node_rpc(
+                &fxg_protocol::NodeId::from(node_id),
+                NodeRpcRequest::AgentMcpAction {
+                    agent_id: agent_id.to_owned(),
+                    name: name.to_owned(),
+                    action,
+                },
+                None,
+            )
+            .await?;
+        match response {
+            NodeRpcResponse::AgentManagement { snapshot } => Ok(*snapshot),
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
+    }
+
+    async fn agent_mcp_upsert(
+        &self,
+        node_id: &str,
+        agent_id: &str,
+        name: &str,
+        definition: AgentMcpDefinition,
+    ) -> Result<AgentManagementSnapshot, ApiError> {
+        let response = self
+            .execute_node_rpc(
+                &fxg_protocol::NodeId::from(node_id),
+                NodeRpcRequest::AgentMcpUpsert {
+                    agent_id: agent_id.to_owned(),
+                    name: name.to_owned(),
+                    definition,
+                },
+                None,
+            )
+            .await?;
+        match response {
+            NodeRpcResponse::AgentManagement { snapshot } => Ok(*snapshot),
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
+    }
+
+    async fn agent_mcp_remove(
+        &self,
+        node_id: &str,
+        agent_id: &str,
+        name: &str,
+    ) -> Result<AgentManagementSnapshot, ApiError> {
+        let response = self
+            .execute_node_rpc(
+                &fxg_protocol::NodeId::from(node_id),
+                NodeRpcRequest::AgentMcpRemove {
+                    agent_id: agent_id.to_owned(),
+                    name: name.to_owned(),
+                },
+                None,
+            )
+            .await?;
+        match response {
+            NodeRpcResponse::AgentManagement { snapshot } => Ok(*snapshot),
             _ => Err(ApiError::internal("unexpected node RPC response")),
         }
     }

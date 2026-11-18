@@ -12,7 +12,6 @@ export type SettingsScopeRef = SettingsScope | "current";
 
 export const HUB_TABS = ["general", "process", "tokens", "provisioners", "audit"] as const;
 export const NODE_TABS_ALL = ["general", "process", "pairing", "agents", "audit"] as const;
-export const NODE_TABS_HUB = ["general", "pairing", "agents"] as const;
 export const BROWSER_TABS = ["appearance", "notifications"] as const;
 
 export type HubSettingsTab = (typeof HUB_TABS)[number];
@@ -22,12 +21,11 @@ export type SettingsTabId = HubSettingsTab | NodeSettingsTab | BrowserSettingsTa
 
 const HUB_TAB_SET = new Set<string>(HUB_TABS);
 const NODE_TAB_SET = new Set<string>(NODE_TABS_ALL);
-const NODE_TAB_HUB_SET = new Set<string>(NODE_TABS_HUB);
 const BROWSER_TAB_SET = new Set<string>(BROWSER_TABS);
 
-/** Tabs shown under the Node scope for the current connection role. */
-export function nodeTabsForRole(isHub: boolean): readonly NodeSettingsTab[] {
-  return isHub ? NODE_TABS_HUB : NODE_TABS_ALL;
+/** Tabs shown under the Node scope. */
+export function nodeTabsForRole(): readonly NodeSettingsTab[] {
+  return NODE_TABS_ALL;
 }
 
 /** First / default tab for a scope. */
@@ -43,8 +41,8 @@ export function isNodeTab(tab: string): tab is NodeSettingsTab {
   return NODE_TAB_SET.has(tab);
 }
 
-export function isNodeTabAvailable(tab: NodeSettingsTab, isHub: boolean): boolean {
-  return isHub ? NODE_TAB_HUB_SET.has(tab) : NODE_TAB_SET.has(tab);
+export function isNodeTabAvailable(tab: NodeSettingsTab): boolean {
+  return NODE_TAB_SET.has(tab);
 }
 
 export function isBrowserTab(tab: string): tab is BrowserSettingsTab {

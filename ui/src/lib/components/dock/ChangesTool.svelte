@@ -1,5 +1,4 @@
 <script lang="ts">
-  import DiffPane from "#lib/components/diff/DiffPane.svelte";
   import GitStatusBadge from "#lib/components/dock/GitStatusBadge.svelte";
   import { errorMessage } from "#lib/api/error-messages.ts";
   import { ApiError } from "#lib/api/errors.ts";
@@ -26,8 +25,6 @@
 
   type Scope = "session" | "uncommitted" | "branch_base";
 
-  const remote = $derived(sync.connection.role === "hub");
-
   let scope = $state<Scope>("session");
   let status = $state<WorkspaceGitStatusResponse | null>(null);
   let branchDiff = $state<WorkspaceDiffResponse | null>(null);
@@ -43,8 +40,7 @@
   let syncAction = $state<"pull" | "push" | null>(null);
 
   const canCommit = $derived(
-    !remote &&
-      scope === "uncommitted" &&
+    scope === "uncommitted" &&
       status !== null &&
       status.is_repository &&
       status.entries.length > 0 &&
@@ -53,8 +49,7 @@
   );
 
   const canSync = $derived(
-    !remote &&
-      scope === "uncommitted" &&
+    scope === "uncommitted" &&
       status !== null &&
       status.is_repository &&
       status.branch !== null &&
@@ -89,7 +84,6 @@
   $effect(() => {
     const token = refreshToken;
     void token;
-    if (remote) return;
     void loadStatus();
   });
 
@@ -97,7 +91,7 @@
     const current = scope;
     const token = refreshToken;
     void token;
-    if (remote || current !== "branch_base") return;
+    if (current !== "branch_base") return;
     void loadBranchDiff();
   });
 
@@ -226,203 +220,195 @@
   }
 </script>
 
-{#if remote}
-  <div class="app-scroll min-h-0 flex-1 overflow-y-auto p-3">
-    <DiffPane sessionId={ctx.sessionId} {items} />
+<div class="border-border flex h-9 shrink-0 items-center gap-1 border-b px-1.5">
+  <div class="bg-muted flex min-w-0 items-center rounded-md p-0.5">
+    {#each scopes as option (option.value)}
+      <button
+        type="button"
+        class={cn(
+          "truncate rounded-sm px-2 py-0.5 text-[11px] font-medium transition-colors",
+          scope === option.value
+            ? "bg-card text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+        aria-pressed={scope === option.value}
+        onclick={() => (scope = option.value)}
+      >
+        {option.label}
+      </button>
+    {/each}
   </div>
-{:else}
-  <div class="border-border flex h-9 shrink-0 items-center gap-1 border-b px-1.5">
-    <div class="bg-muted flex min-w-0 items-center rounded-md p-0.5">
-      {#each scopes as option (option.value)}
-        <button
-          type="button"
-          class={cn(
-            "truncate rounded-sm px-2 py-0.5 text-[11px] font-medium transition-colors",
-            scope === option.value
-              ? "bg-card text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-          aria-pressed={scope === option.value}
-          onclick={() => (scope = option.value)}
-        >
-          {option.label}
-        </button>
-      {/each}
-    </div>
+  <button
+    type="button"
+    class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md transition-colors"
+    title={m.dock_files_refresh()}
+    aria-label={m.dock_files_refresh()}
+    onclick={refresh}
+  >
+    <RefreshCwIcon class="size-3.5" />
+  </button>
+  {#if scope === "uncommitted" && status?.is_repository}
+    <span class="text-muted-foreground ml-1 flex shrink-0 items-center gap-1 font-mono text-[11px]">
+      {#if status.ahead > 0}
+        <span title={m.dock_changes_ahead()}>↑{status.ahead}</span>
+      {/if}
+      {#if status.behind > 0}
+        <span title={m.dock_changes_behind()}>↓{status.behind}</span>
+      {/if}
+    </span>
     <button
       type="button"
-      class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md transition-colors"
-      title={m.dock_files_refresh()}
-      aria-label={m.dock_files_refresh()}
-      onclick={refresh}
+      class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-50"
+      title={m.dock_changes_pull_hint()}
+      aria-label={m.dock_changes_pull()}
+      disabled={!canSync}
+      onclick={() => void pull()}
     >
-      <RefreshCwIcon class="size-3.5" />
-    </button>
-    {#if scope === "uncommitted" && status?.is_repository}
-      <span
-        class="text-muted-foreground ml-1 flex shrink-0 items-center gap-1 font-mono text-[11px]"
-      >
-        {#if status.ahead > 0}
-          <span title={m.dock_changes_ahead()}>↑{status.ahead}</span>
-        {/if}
-        {#if status.behind > 0}
-          <span title={m.dock_changes_behind()}>↓{status.behind}</span>
-        {/if}
-      </span>
-      <button
-        type="button"
-        class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-50"
-        title={m.dock_changes_pull_hint()}
-        aria-label={m.dock_changes_pull()}
-        disabled={!canSync}
-        onclick={() => void pull()}
-      >
-        {#if syncAction === "pull"}
-          <LoaderCircleIcon class="size-3.5 animate-spin" />
-        {:else}
-          <ArrowDownToLineIcon class="size-3.5" />
-        {/if}
-      </button>
-      <button
-        type="button"
-        class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-50"
-        title={m.dock_changes_push_hint()}
-        aria-label={m.dock_changes_push()}
-        disabled={!canSync}
-        onclick={() => void push()}
-      >
-        {#if syncAction === "push"}
-          <LoaderCircleIcon class="size-3.5 animate-spin" />
-        {:else}
-          <ArrowUpFromLineIcon class="size-3.5" />
-        {/if}
-      </button>
-    {/if}
-    {#if scope === "branch_base" && branchDiff !== null}
-      <span class="text-muted-foreground ml-auto truncate font-mono text-[11px]">
-        {branchDiff.base_branch ?? branchDiff.scope}
-        {#if branchDiff.head_commit !== ""}
-          @ {branchDiff.head_commit.slice(0, 8)}
-        {/if}
-      </span>
-    {/if}
-  </div>
-
-  <div class="app-scroll min-h-0 flex-1 overflow-y-auto p-1">
-    {#if branchDiff?.truncated}
-      <p class="text-warning p-2 text-[12px]">{m.diff_truncated()}</p>
-    {/if}
-    {#if scope === "session"}
-      {#if sessionFiles.length === 0}
-        <p class="text-muted-foreground p-2 text-[12px]">{m.diff_session_empty()}</p>
-      {:else}
-        {#each sessionFiles as file (file.path)}
-          {@const absolute = sessionAbsolute(file)}
-          {@const badge = statusByPath.get(absolute)}
-          <button
-            type="button"
-            class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
-            title={file.path}
-            onclick={() => openDiff(absolute)}
-            ondblclick={() => openDiff(absolute, "uncommitted", false)}
-          >
-            {#if badge !== undefined}
-              <GitStatusBadge status={badge} />
-            {:else}
-              <span class="size-4 shrink-0"></span>
-            {/if}
-            <span class="min-w-0 flex-1 truncate font-mono">{file.path}</span>
-            <span class="text-ok shrink-0 text-[11px]">+{file.additions}</span>
-            <span class="text-danger shrink-0 text-[11px]">-{file.deletions}</span>
-          </button>
-        {/each}
-      {/if}
-    {:else if scope === "uncommitted"}
-      {#if statusLoading && status === null}
-        <div class="text-muted-foreground flex items-center justify-center gap-2 p-4 text-[12px]">
-          <LoaderCircleIcon class="size-3.5 animate-spin" />
-          {m.dock_changes_loading()}
-        </div>
-      {:else if statusError !== null}
-        <p class="text-destructive p-2 text-[12px]">{statusError}</p>
-      {:else if status === null}
-        <p class="text-muted-foreground p-2 text-[12px]">{m.dock_changes_loading()}</p>
-      {:else if !status.is_repository}
-        <p class="text-muted-foreground p-2 text-[12px]">{m.dock_changes_not_repository()}</p>
-      {:else if status.entries.length === 0}
-        <p class="text-muted-foreground p-2 text-[12px]">{m.diff_no_changes()}</p>
-      {:else}
-        {#each status.entries as entry (entry.absolute_path)}
-          <button
-            type="button"
-            class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
-            title={entry.old_path === null ? entry.path : `${entry.old_path} → ${entry.path}`}
-            onclick={() => openDiff(entry.absolute_path)}
-            ondblclick={() => openDiff(entry.absolute_path, "uncommitted", false)}
-          >
-            <GitStatusBadge status={entry.status} />
-            <span class="min-w-0 flex-1 truncate font-mono">{entry.path}</span>
-          </button>
-        {/each}
-        {#if status.truncated}
-          <p class="text-muted-foreground px-1.5 py-1 text-[11px]">{m.dock_files_truncated()}</p>
-        {/if}
-      {/if}
-    {:else if branchLoading && branchDiff === null}
-      <div class="text-muted-foreground flex items-center justify-center gap-2 p-4 text-[12px]">
+      {#if syncAction === "pull"}
         <LoaderCircleIcon class="size-3.5 animate-spin" />
-        {m.dock_changes_loading()}
-      </div>
-    {:else if branchError !== null}
-      <p class="text-destructive p-2 text-[12px]">{branchError}</p>
-    {:else if branchDiff === null}
-      <p class="text-muted-foreground p-2 text-[12px]">{m.dock_changes_loading()}</p>
-    {:else if branchDiff.files.length === 0}
-      <p class="text-muted-foreground p-2 text-[12px]">{m.diff_no_changes()}</p>
+      {:else}
+        <ArrowDownToLineIcon class="size-3.5" />
+      {/if}
+    </button>
+    <button
+      type="button"
+      class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-50"
+      title={m.dock_changes_push_hint()}
+      aria-label={m.dock_changes_push()}
+      disabled={!canSync}
+      onclick={() => void push()}
+    >
+      {#if syncAction === "push"}
+        <LoaderCircleIcon class="size-3.5 animate-spin" />
+      {:else}
+        <ArrowUpFromLineIcon class="size-3.5" />
+      {/if}
+    </button>
+  {/if}
+  {#if scope === "branch_base" && branchDiff !== null}
+    <span class="text-muted-foreground ml-auto truncate font-mono text-[11px]">
+      {branchDiff.base_branch ?? branchDiff.scope}
+      {#if branchDiff.head_commit !== ""}
+        @ {branchDiff.head_commit.slice(0, 8)}
+      {/if}
+    </span>
+  {/if}
+</div>
+
+<div class="app-scroll min-h-0 flex-1 overflow-y-auto p-1">
+  {#if branchDiff?.truncated}
+    <p class="text-warning p-2 text-[12px]">{m.diff_truncated()}</p>
+  {/if}
+  {#if scope === "session"}
+    {#if sessionFiles.length === 0}
+      <p class="text-muted-foreground p-2 text-[12px]">{m.diff_session_empty()}</p>
     {:else}
-      {#each branchDiff.files as file (file.path)}
-        {@const absolute = branchAbsolute(file)}
+      {#each sessionFiles as file (file.path)}
+        {@const absolute = sessionAbsolute(file)}
+        {@const badge = statusByPath.get(absolute)}
         <button
           type="button"
           class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
           title={file.path}
-          onclick={() => openDiff(absolute, "branch_base")}
-          ondblclick={() => openDiff(absolute, "branch_base", false)}
+          onclick={() => openDiff(absolute)}
+          ondblclick={() => openDiff(absolute, "uncommitted", false)}
         >
+          {#if badge !== undefined}
+            <GitStatusBadge status={badge} />
+          {:else}
+            <span class="size-4 shrink-0"></span>
+          {/if}
           <span class="min-w-0 flex-1 truncate font-mono">{file.path}</span>
           <span class="text-ok shrink-0 text-[11px]">+{file.additions}</span>
           <span class="text-danger shrink-0 text-[11px]">-{file.deletions}</span>
         </button>
       {/each}
     {/if}
-  </div>
-
-  {#if scope === "uncommitted" && status?.is_repository && status.entries.length > 0}
-    <form
-      class="border-border flex shrink-0 items-center gap-1.5 border-t p-1.5"
-      onsubmit={(event) => {
-        event.preventDefault();
-        void commit();
-      }}
-    >
-      <input
-        class="border-border bg-background focus-visible:ring-ring min-w-0 flex-1 rounded-md border px-2 py-1 text-[12px] outline-none focus-visible:ring-1"
-        placeholder={m.dock_changes_commit_placeholder()}
-        aria-label={m.dock_changes_commit_placeholder()}
-        bind:value={commitMessage}
-        disabled={committing}
-      />
+  {:else if scope === "uncommitted"}
+    {#if statusLoading && status === null}
+      <div class="text-muted-foreground flex items-center justify-center gap-2 p-4 text-[12px]">
+        <LoaderCircleIcon class="size-3.5 animate-spin" />
+        {m.dock_changes_loading()}
+      </div>
+    {:else if statusError !== null}
+      <p class="text-destructive p-2 text-[12px]">{statusError}</p>
+    {:else if status === null}
+      <p class="text-muted-foreground p-2 text-[12px]">{m.dock_changes_loading()}</p>
+    {:else if !status.is_repository}
+      <p class="text-muted-foreground p-2 text-[12px]">{m.dock_changes_not_repository()}</p>
+    {:else if status.entries.length === 0}
+      <p class="text-muted-foreground p-2 text-[12px]">{m.diff_no_changes()}</p>
+    {:else}
+      {#each status.entries as entry (entry.absolute_path)}
+        <button
+          type="button"
+          class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
+          title={entry.old_path === null ? entry.path : `${entry.old_path} → ${entry.path}`}
+          onclick={() => openDiff(entry.absolute_path)}
+          ondblclick={() => openDiff(entry.absolute_path, "uncommitted", false)}
+        >
+          <GitStatusBadge status={entry.status} />
+          <span class="min-w-0 flex-1 truncate font-mono">{entry.path}</span>
+        </button>
+      {/each}
+      {#if status.truncated}
+        <p class="text-muted-foreground px-1.5 py-1 text-[11px]">{m.dock_files_truncated()}</p>
+      {/if}
+    {/if}
+  {:else if branchLoading && branchDiff === null}
+    <div class="text-muted-foreground flex items-center justify-center gap-2 p-4 text-[12px]">
+      <LoaderCircleIcon class="size-3.5 animate-spin" />
+      {m.dock_changes_loading()}
+    </div>
+  {:else if branchError !== null}
+    <p class="text-destructive p-2 text-[12px]">{branchError}</p>
+  {:else if branchDiff === null}
+    <p class="text-muted-foreground p-2 text-[12px]">{m.dock_changes_loading()}</p>
+  {:else if branchDiff.files.length === 0}
+    <p class="text-muted-foreground p-2 text-[12px]">{m.diff_no_changes()}</p>
+  {:else}
+    {#each branchDiff.files as file (file.path)}
+      {@const absolute = branchAbsolute(file)}
       <button
-        type="submit"
-        class="bg-primary text-primary-foreground hover:bg-primary/90 flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium transition-colors disabled:opacity-50"
-        title={m.dock_changes_commit_hint()}
-        disabled={!canCommit}
+        type="button"
+        class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
+        title={file.path}
+        onclick={() => openDiff(absolute, "branch_base")}
+        ondblclick={() => openDiff(absolute, "branch_base", false)}
       >
-        {#if committing}
-          <LoaderCircleIcon class="size-3.5 animate-spin" />
-        {/if}
-        {m.dock_changes_commit_button()}
+        <span class="min-w-0 flex-1 truncate font-mono">{file.path}</span>
+        <span class="text-ok shrink-0 text-[11px]">+{file.additions}</span>
+        <span class="text-danger shrink-0 text-[11px]">-{file.deletions}</span>
       </button>
-    </form>
+    {/each}
   {/if}
+</div>
+
+{#if scope === "uncommitted" && status?.is_repository && status.entries.length > 0}
+  <form
+    class="border-border flex shrink-0 items-center gap-1.5 border-t p-1.5"
+    onsubmit={(event) => {
+      event.preventDefault();
+      void commit();
+    }}
+  >
+    <input
+      class="border-border bg-background focus-visible:ring-ring min-w-0 flex-1 rounded-md border px-2 py-1 text-[12px] outline-none focus-visible:ring-1"
+      placeholder={m.dock_changes_commit_placeholder()}
+      aria-label={m.dock_changes_commit_placeholder()}
+      bind:value={commitMessage}
+      disabled={committing}
+    />
+    <button
+      type="submit"
+      class="bg-primary text-primary-foreground hover:bg-primary/90 flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium transition-colors disabled:opacity-50"
+      title={m.dock_changes_commit_hint()}
+      disabled={!canCommit}
+    >
+      {#if committing}
+        <LoaderCircleIcon class="size-3.5 animate-spin" />
+      {/if}
+      {m.dock_changes_commit_button()}
+    </button>
+  </form>
 {/if}

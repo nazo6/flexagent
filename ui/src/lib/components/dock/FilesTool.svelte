@@ -61,8 +61,6 @@
     ".nuxt",
   ]);
 
-  const remote = $derived(sync.connection.role === "hub");
-
   let rootPath = $state<string | null>(null);
   let dirs = $state<Record<string, DirState>>({});
   let expanded = $state<Record<string, boolean>>({});
@@ -124,7 +122,6 @@
     const token = refreshToken;
     void key;
     void token;
-    if (remote) return;
     void reload();
   });
 
@@ -300,258 +297,248 @@
   }
 </script>
 
-{#if remote}
-  <div class="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
-    <FolderIcon class="text-muted-foreground size-8" />
-    <p class="text-[13px] font-medium">{m.dock_files_remote_disabled()}</p>
-    <p class="text-muted-foreground text-[12px] leading-relaxed">
-      {m.dock_files_remote_hint()}
-    </p>
-  </div>
-{:else}
-  <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-    {#if !(mobile && showPreview)}
-      <div class="border-border flex h-9 shrink-0 items-center gap-0.5 border-b px-1.5">
-        <button
-          type="button"
-          class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 items-center justify-center rounded-md transition-colors disabled:opacity-50"
-          title={m.dock_files_refresh()}
-          aria-label={m.dock_files_refresh()}
-          disabled={loading}
-          onclick={refresh}
-        >
-          <RefreshCwIcon class="size-3.5" />
-        </button>
-        <button
-          type="button"
-          class={cn(
-            "flex size-7 items-center justify-center rounded-md transition-colors",
-            showHidden
-              ? "bg-signal-soft text-signal"
-              : "text-muted-foreground hover:bg-accent hover:text-foreground",
-          )}
-          title={showHidden ? m.dock_files_hide_hidden() : m.dock_files_show_hidden()}
-          aria-label={showHidden ? m.dock_files_hide_hidden() : m.dock_files_show_hidden()}
-          aria-pressed={showHidden}
-          onclick={() => (showHidden = !showHidden)}
-        >
-          {#if showHidden}
-            <EyeIcon class="size-3.5" />
-          {:else}
-            <EyeOffIcon class="size-3.5" />
-          {/if}
-        </button>
-        <button
-          type="button"
-          class={cn(
-            "flex size-7 items-center justify-center rounded-md transition-colors",
-            showIgnored
-              ? "bg-signal-soft text-signal"
-              : "text-muted-foreground hover:bg-accent hover:text-foreground",
-          )}
-          title={showIgnored ? m.dock_files_hide_ignored() : m.dock_files_show_ignored()}
-          aria-label={showIgnored ? m.dock_files_hide_ignored() : m.dock_files_show_ignored()}
-          aria-pressed={showIgnored}
-          onclick={() => (showIgnored = !showIgnored)}
-        >
-          <FolderTreeIcon class="size-3.5" />
-        </button>
-        <button
-          type="button"
-          class={cn(
-            "flex size-7 items-center justify-center rounded-md transition-colors",
-            changedOnly
-              ? "bg-signal-soft text-signal"
-              : "text-muted-foreground hover:bg-accent hover:text-foreground",
-          )}
-          title={m.dock_files_changed_only()}
-          aria-label={m.dock_files_changed_only()}
-          aria-pressed={changedOnly}
-          onclick={() => (changedOnly = !changedOnly)}
-        >
-          <ListFilterIcon class="size-3.5" />
-        </button>
-        {#if !mobile}
-          <button
-            type="button"
-            class={cn(
-              "flex size-7 items-center justify-center rounded-md transition-colors",
-              dock.treeVisible
-                ? "text-muted-foreground hover:bg-accent hover:text-foreground"
-                : "bg-signal-soft text-signal",
-            )}
-            title={dock.treeVisible ? m.dock_files_hide_tree() : m.dock_files_show_tree()}
-            aria-label={dock.treeVisible ? m.dock_files_hide_tree() : m.dock_files_show_tree()}
-            aria-pressed={!dock.treeVisible}
-            onclick={() => dock.setTreeVisible(!dock.treeVisible)}
-          >
-            <PanelLeftIcon class="size-3.5" />
-          </button>
+<div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+  {#if !(mobile && showPreview)}
+    <div class="border-border flex h-9 shrink-0 items-center gap-0.5 border-b px-1.5">
+      <button
+        type="button"
+        class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 items-center justify-center rounded-md transition-colors disabled:opacity-50"
+        title={m.dock_files_refresh()}
+        aria-label={m.dock_files_refresh()}
+        disabled={loading}
+        onclick={refresh}
+      >
+        <RefreshCwIcon class="size-3.5" />
+      </button>
+      <button
+        type="button"
+        class={cn(
+          "flex size-7 items-center justify-center rounded-md transition-colors",
+          showHidden
+            ? "bg-signal-soft text-signal"
+            : "text-muted-foreground hover:bg-accent hover:text-foreground",
+        )}
+        title={showHidden ? m.dock_files_hide_hidden() : m.dock_files_show_hidden()}
+        aria-label={showHidden ? m.dock_files_hide_hidden() : m.dock_files_show_hidden()}
+        aria-pressed={showHidden}
+        onclick={() => (showHidden = !showHidden)}
+      >
+        {#if showHidden}
+          <EyeIcon class="size-3.5" />
+        {:else}
+          <EyeOffIcon class="size-3.5" />
         {/if}
-        <span
-          class="text-muted-foreground ml-auto min-w-0 truncate pl-2 font-mono text-[11px]"
-          title={rootPath ?? ""}
+      </button>
+      <button
+        type="button"
+        class={cn(
+          "flex size-7 items-center justify-center rounded-md transition-colors",
+          showIgnored
+            ? "bg-signal-soft text-signal"
+            : "text-muted-foreground hover:bg-accent hover:text-foreground",
+        )}
+        title={showIgnored ? m.dock_files_hide_ignored() : m.dock_files_show_ignored()}
+        aria-label={showIgnored ? m.dock_files_hide_ignored() : m.dock_files_show_ignored()}
+        aria-pressed={showIgnored}
+        onclick={() => (showIgnored = !showIgnored)}
+      >
+        <FolderTreeIcon class="size-3.5" />
+      </button>
+      <button
+        type="button"
+        class={cn(
+          "flex size-7 items-center justify-center rounded-md transition-colors",
+          changedOnly
+            ? "bg-signal-soft text-signal"
+            : "text-muted-foreground hover:bg-accent hover:text-foreground",
+        )}
+        title={m.dock_files_changed_only()}
+        aria-label={m.dock_files_changed_only()}
+        aria-pressed={changedOnly}
+        onclick={() => (changedOnly = !changedOnly)}
+      >
+        <ListFilterIcon class="size-3.5" />
+      </button>
+      {#if !mobile}
+        <button
+          type="button"
+          class={cn(
+            "flex size-7 items-center justify-center rounded-md transition-colors",
+            dock.treeVisible
+              ? "text-muted-foreground hover:bg-accent hover:text-foreground"
+              : "bg-signal-soft text-signal",
+          )}
+          title={dock.treeVisible ? m.dock_files_hide_tree() : m.dock_files_show_tree()}
+          aria-label={dock.treeVisible ? m.dock_files_hide_tree() : m.dock_files_show_tree()}
+          aria-pressed={!dock.treeVisible}
+          onclick={() => dock.setTreeVisible(!dock.treeVisible)}
         >
-          {rootName}
-        </span>
+          <PanelLeftIcon class="size-3.5" />
+        </button>
+      {/if}
+      <span
+        class="text-muted-foreground ml-auto min-w-0 truncate pl-2 font-mono text-[11px]"
+        title={rootPath ?? ""}
+      >
+        {rootName}
+      </span>
+    </div>
+  {/if}
+
+  <div bind:this={splitContainer} class="flex min-h-0 flex-1">
+    {#if showTree}
+      <div
+        class={cn(
+          "flex min-h-0 flex-col",
+          mobile ? "w-full" : "min-w-[160px] max-w-[70%] shrink-0 border-r border-border",
+        )}
+        style={mobile ? undefined : `width:${treeWidth}%`}
+      >
+        <div class="app-scroll min-h-0 flex-1 overflow-y-auto p-1">
+          {#if error !== null}
+            <p class="text-destructive p-2 text-center text-[12px]">{error}</p>
+          {:else if loading}
+            <div
+              class="text-muted-foreground flex items-center justify-center gap-2 p-4 text-[12px]"
+            >
+              <LoaderCircleIcon class="size-3.5 animate-spin" />
+              {m.dock_files_loading()}
+            </div>
+          {:else}
+            {#if statusError !== null}
+              <p class="text-muted-foreground px-1.5 py-1 text-[11px]">{statusError}</p>
+            {/if}
+
+            {#if changedOnly}
+              {#if statusError !== null}
+                <p class="text-destructive p-2 text-[12px]">{statusError}</p>
+              {:else if status === null}
+                <p class="text-muted-foreground p-2 text-[12px]">{m.dock_changes_loading()}</p>
+              {:else if !status.is_repository}
+                <p class="text-muted-foreground p-2 text-[12px]">
+                  {m.dock_changes_not_repository()}
+                </p>
+              {:else if status.entries.length === 0}
+                <p class="text-muted-foreground p-2 text-[12px]">{m.diff_no_changes()}</p>
+              {:else}
+                {#each status.entries as entry (entry.absolute_path)}
+                  <button
+                    type="button"
+                    class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
+                    title={entry.path}
+                    onclick={() => openChanged(entry)}
+                    ondblclick={() => openChangedPinned(entry)}
+                  >
+                    <GitStatusBadge status={entry.status} />
+                    <span class="min-w-0 flex-1 truncate font-mono">{entry.path}</span>
+                  </button>
+                {/each}
+              {/if}
+            {:else if rows.length === 0}
+              <p class="text-muted-foreground p-2 text-[12px]">{m.dock_files_empty()}</p>
+            {:else}
+              {#each rows as row (row.entry.path)}
+                {@const badge = statusByPath.get(row.entry.path)}
+                <button
+                  type="button"
+                  class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm py-1 pr-1.5 text-left text-[12px]"
+                  style={`padding-left: ${row.depth * 12 + 6}px`}
+                  title={row.entry.path}
+                  onclick={() => openEntry(row.entry)}
+                  ondblclick={() => openEntryPinned(row.entry)}
+                >
+                  {#if isDirectory(row.entry)}
+                    {#if row.loading}
+                      <LoaderCircleIcon
+                        class="text-muted-foreground size-3.5 shrink-0 animate-spin"
+                      />
+                    {:else if row.expanded}
+                      <ChevronDownIcon class="text-muted-foreground size-3.5 shrink-0" />
+                    {:else}
+                      <ChevronRightIcon class="text-muted-foreground size-3.5 shrink-0" />
+                    {/if}
+                  {:else}
+                    <span class="size-3.5 shrink-0"></span>
+                  {/if}
+
+                  {#if isDirectory(row.entry)}
+                    <FolderIcon class="text-muted-foreground size-3.5 shrink-0" />
+                  {:else if row.entry.kind === "symlink"}
+                    <LinkIcon class="text-muted-foreground size-3.5 shrink-0" />
+                  {:else if row.entry.kind === "file"}
+                    <FileIcon class="text-muted-foreground size-3.5 shrink-0" />
+                  {:else}
+                    <FileQuestionIcon class="text-muted-foreground size-3.5 shrink-0" />
+                  {/if}
+
+                  <span class="min-w-0 flex-1 truncate">{row.entry.name}</span>
+                  {#if badge !== undefined}
+                    <GitStatusBadge status={badge} />
+                  {/if}
+                </button>
+                {#if row.error !== null}
+                  <p
+                    class="text-destructive pb-1 text-[11px]"
+                    style={`padding-left: ${row.depth * 12 + 30}px`}
+                  >
+                    {row.error}
+                  </p>
+                {/if}
+              {/each}
+            {/if}
+
+            {#if listingTruncated}
+              <p class="text-muted-foreground px-1.5 py-1 text-[11px]">
+                {m.dock_files_truncated()}
+              </p>
+            {/if}
+          {/if}
+        </div>
       </div>
     {/if}
 
-    <div bind:this={splitContainer} class="flex min-h-0 flex-1">
-      {#if showTree}
-        <div
-          class={cn(
-            "flex min-h-0 flex-col",
-            mobile ? "w-full" : "min-w-[160px] max-w-[70%] shrink-0 border-r border-border",
-          )}
-          style={mobile ? undefined : `width:${treeWidth}%`}
-        >
-          <div class="app-scroll min-h-0 flex-1 overflow-y-auto p-1">
-            {#if error !== null}
-              <p class="text-destructive p-2 text-center text-[12px]">{error}</p>
-            {:else if loading}
-              <div
-                class="text-muted-foreground flex items-center justify-center gap-2 p-4 text-[12px]"
-              >
-                <LoaderCircleIcon class="size-3.5 animate-spin" />
-                {m.dock_files_loading()}
-              </div>
-            {:else}
-              {#if statusError !== null}
-                <p class="text-muted-foreground px-1.5 py-1 text-[11px]">{statusError}</p>
-              {/if}
+    {#if showTree && !mobile}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={m.dock_files_resize_tree()}
+        class={cn(
+          "group relative w-1.5 shrink-0 cursor-col-resize touch-none transition-colors",
+          draggingTree ? "bg-signal/50" : "hover:bg-accent",
+        )}
+        onpointerdown={startResize}
+        onpointermove={moveResize}
+        onpointerup={endResize}
+        onpointercancel={endResize}
+      >
+        <span class="bg-border absolute inset-y-0 left-1/2 w-px -translate-x-1/2"></span>
+      </div>
+    {/if}
 
-              {#if changedOnly}
-                {#if statusError !== null}
-                  <p class="text-destructive p-2 text-[12px]">{statusError}</p>
-                {:else if status === null}
-                  <p class="text-muted-foreground p-2 text-[12px]">{m.dock_changes_loading()}</p>
-                {:else if !status.is_repository}
-                  <p class="text-muted-foreground p-2 text-[12px]">
-                    {m.dock_changes_not_repository()}
-                  </p>
-                {:else if status.entries.length === 0}
-                  <p class="text-muted-foreground p-2 text-[12px]">{m.diff_no_changes()}</p>
-                {:else}
-                  {#each status.entries as entry (entry.absolute_path)}
-                    <button
-                      type="button"
-                      class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
-                      title={entry.path}
-                      onclick={() => openChanged(entry)}
-                      ondblclick={() => openChangedPinned(entry)}
-                    >
-                      <GitStatusBadge status={entry.status} />
-                      <span class="min-w-0 flex-1 truncate font-mono">{entry.path}</span>
-                    </button>
-                  {/each}
-                {/if}
-              {:else if rows.length === 0}
-                <p class="text-muted-foreground p-2 text-[12px]">{m.dock_files_empty()}</p>
-              {:else}
-                {#each rows as row (row.entry.path)}
-                  {@const badge = statusByPath.get(row.entry.path)}
-                  <button
-                    type="button"
-                    class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm py-1 pr-1.5 text-left text-[12px]"
-                    style={`padding-left: ${row.depth * 12 + 6}px`}
-                    title={row.entry.path}
-                    onclick={() => openEntry(row.entry)}
-                    ondblclick={() => openEntryPinned(row.entry)}
-                  >
-                    {#if isDirectory(row.entry)}
-                      {#if row.loading}
-                        <LoaderCircleIcon
-                          class="text-muted-foreground size-3.5 shrink-0 animate-spin"
-                        />
-                      {:else if row.expanded}
-                        <ChevronDownIcon class="text-muted-foreground size-3.5 shrink-0" />
-                      {:else}
-                        <ChevronRightIcon class="text-muted-foreground size-3.5 shrink-0" />
-                      {/if}
-                    {:else}
-                      <span class="size-3.5 shrink-0"></span>
-                    {/if}
-
-                    {#if isDirectory(row.entry)}
-                      <FolderIcon class="text-muted-foreground size-3.5 shrink-0" />
-                    {:else if row.entry.kind === "symlink"}
-                      <LinkIcon class="text-muted-foreground size-3.5 shrink-0" />
-                    {:else if row.entry.kind === "file"}
-                      <FileIcon class="text-muted-foreground size-3.5 shrink-0" />
-                    {:else}
-                      <FileQuestionIcon class="text-muted-foreground size-3.5 shrink-0" />
-                    {/if}
-
-                    <span class="min-w-0 flex-1 truncate">{row.entry.name}</span>
-                    {#if badge !== undefined}
-                      <GitStatusBadge status={badge} />
-                    {/if}
-                  </button>
-                  {#if row.error !== null}
-                    <p
-                      class="text-destructive pb-1 text-[11px]"
-                      style={`padding-left: ${row.depth * 12 + 30}px`}
-                    >
-                      {row.error}
-                    </p>
-                  {/if}
-                {/each}
-              {/if}
-
-              {#if listingTruncated}
-                <p class="text-muted-foreground px-1.5 py-1 text-[11px]">
-                  {m.dock_files_truncated()}
-                </p>
-              {/if}
-            {/if}
-          </div>
-        </div>
-      {/if}
-
-      {#if showTree && !mobile}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label={m.dock_files_resize_tree()}
-          class={cn(
-            "group relative w-1.5 shrink-0 cursor-col-resize touch-none transition-colors",
-            draggingTree ? "bg-signal/50" : "hover:bg-accent",
-          )}
-          onpointerdown={startResize}
-          onpointermove={moveResize}
-          onpointerup={endResize}
-          onpointercancel={endResize}
-        >
-          <span class="bg-border absolute inset-y-0 left-1/2 w-px -translate-x-1/2"></span>
-        </div>
-      {/if}
-
-      {#if showPreview}
-        <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <FileTabs
-            tabs={dock.files}
-            activePath={dock.activeFile}
-            onactivate={(path) => dock.activateFile(path)}
-            onclose={(path) => dock.closeFile(path)}
-            onpin={(path) => dock.pinFile(path)}
+    {#if showPreview}
+      <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <FileTabs
+          tabs={dock.files}
+          activePath={dock.activeFile}
+          onactivate={(path) => dock.activateFile(path)}
+          onclose={(path) => dock.closeFile(path)}
+          onpin={(path) => dock.pinFile(path)}
+        />
+        {#if activePreview !== null}
+          <FilePreview
+            {ctx}
+            tab={activePreview}
+            {mobile}
+            onback={() => dock.setTreeVisible(true)}
           />
-          {#if activePreview !== null}
-            <FilePreview
-              {ctx}
-              tab={activePreview}
-              {mobile}
-              onback={() => dock.setTreeVisible(true)}
-            />
-          {:else}
-            <div
-              class="text-muted-foreground flex flex-1 items-center justify-center p-4 text-center text-[12px]"
-            >
-              {m.diff_select_file()}
-            </div>
-          {/if}
-        </div>
-      {/if}
-    </div>
+        {:else}
+          <div
+            class="text-muted-foreground flex flex-1 items-center justify-center p-4 text-center text-[12px]"
+          >
+            {m.diff_select_file()}
+          </div>
+        {/if}
+      </div>
+    {/if}
   </div>
-{/if}
+</div>

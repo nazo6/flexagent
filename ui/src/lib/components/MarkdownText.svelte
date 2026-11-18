@@ -16,7 +16,6 @@
   import { enhanceCodeBlocks } from "#lib/highlight.ts";
   import { renderMarkdown } from "#lib/markdown.ts";
   import { dock } from "#lib/stores/dock.svelte.ts";
-  import { sync } from "#lib/stores/app.svelte.ts";
 
   /** Minimum spacing between markdown re-renders while the text is streaming. */
   const STREAM_RENDER_INTERVAL_MS = 80;
@@ -36,9 +35,7 @@
 
   const workspaceRoot = $derived(dock.context?.localPath ?? null);
   const fileBaseDir = $derived(baseDirProp ?? workspaceRoot);
-  const fileLinksEnabled = $derived(
-    sync.connection.role === "local_node" && workspaceRoot !== null,
-  );
+  const fileLinksEnabled = $derived(workspaceRoot !== null);
 
   let root: HTMLDivElement | undefined = $state(undefined);
 

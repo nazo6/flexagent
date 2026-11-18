@@ -3,7 +3,6 @@
   import { joinPath } from "#lib/dock/paths.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { dock } from "#lib/stores/dock.svelte.ts";
-  import { sync } from "#lib/stores/app.svelte.ts";
   import type { TimelineItem } from "#lib/sync/reducer.ts";
   import { summarizeToolOutput } from "#lib/tool-output.ts";
   import { cn } from "#lib/utils.ts";
@@ -26,7 +25,7 @@
   let { tools }: Props = $props();
 
   let expandedDetails = $state<Record<string, boolean>>({});
-  const canOpenInDock = $derived(sync.connection.role === "local_node" && dock.context !== null);
+  const canOpenInDock = $derived(dock.context !== null);
 
   function openDiffInDock(tool: ToolItem): void {
     if (tool.diff === null || dock.context === null) return;

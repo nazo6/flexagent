@@ -1127,6 +1127,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rest_node_diagnostics_and_audit_logs_are_node_scoped() {
+        let (daemon, _dir) = test_daemon().await;
+        let app = router(daemon.state().clone(), daemon.http_addr());
+        let host = host_of(&daemon);
+        let token = daemon.state().auth_token();
+        let node_id = daemon.state().node_id().to_owned();
+
+        let diagnostics = app
+            .clone()
+            .oneshot(get(
+                &host,
+                &format!("/api/v1/nodes/{node_id}/diagnostics"),
+                Some(&token),
+            ))
+            .await
+            .expect("diagnostics");
+        assert_eq!(diagnostics.status(), StatusCode::OK);
+        let body = body_json(diagnostics).await;
+        assert_eq!(body["node_id"], node_id.as_str());
+        assert!(
+            body["health"]["components"]
+                .as_array()
+                .is_some_and(|components| !components.is_empty()),
+            "diagnostics must report component health: {body}"
+        );
+
+        let logs = app
+            .clone()
+            .oneshot(get(
+                &host,
+                &format!("/api/v1/nodes/{node_id}/audit/logs?limit=5"),
+                Some(&token),
+            ))
+            .await
+            .expect("audit logs");
+        assert_eq!(logs.status(), StatusCode::OK);
+        assert!(body_json(logs).await["logs"].is_array());
+
+        // A different node is not this endpoint, so the relay target is not found.
+        let missing = app
+            .oneshot(get(&host, "/api/v1/nodes/other/audit/logs", Some(&token)))
+            .await
+            .expect("other node");
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+        daemon.shutdown();
+        tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())
+            .await
+            .expect("stop");
+    }
+
+    #[tokio::test]
+    async fn rest_node_shutdown_stops_the_local_node() {
+        let (daemon, _dir) = test_daemon().await;
+        let app = router(daemon.state().clone(), daemon.http_addr());
+        let host = host_of(&daemon);
+        let token = daemon.state().auth_token();
+        let node_id = daemon.state().node_id().to_owned();
+
+        let response = app
+            .oneshot(post_json(
+                &host,
+                &format!("/api/v1/nodes/{node_id}/shutdown"),
+                Some(&token),
+                "{}",
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(body_json(response).await["ok"], true);
+
+        // The node acknowledges first, then stops (the delayed shutdown lets the ack flush).
+        tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())
+            .await
+            .expect("stop");
+    }
+
+    #[tokio::test]
     async fn standalone_node_exposes_web_push_and_hides_unsynced_count() {
         let (daemon, _dir) = test_daemon().await;
         let app = router(daemon.state().clone(), daemon.http_addr());

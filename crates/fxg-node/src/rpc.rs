@@ -6,10 +6,11 @@
 
 use std::path::{Path, PathBuf};
 
+use fxg_api::ClientApiBackend as _;
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
-    ProjectLinkResponse, ProjectScanResponse, ProjectUnlinkResponse, TerminalSummary,
-    TerminalsResponse, WorktreeInfo,
+    AgentManagementSnapshot, ProjectLinkResponse, ProjectScanResponse, ProjectUnlinkResponse,
+    TerminalSummary, TerminalsResponse, WorktreeInfo,
 };
 use fxg_protocol::common::WorktreeAction;
 use fxg_protocol::node_hub::{NodeRpcOutcome, NodeRpcRequest, NodeRpcResponse};
@@ -39,12 +40,6 @@ async fn execute_inner(
     request: NodeRpcRequest,
     source: &AuditSource,
 ) -> Result<NodeRpcResponse, NodeError> {
-    if source.via_hub && request.requires_local_workspace_access() {
-        return Err(NodeError::Forbidden(
-            "workspace file access is only available over the local connection".to_owned(),
-        ));
-    }
-
     match request {
         NodeRpcRequest::GetGitDiff {
             session_id,
@@ -356,6 +351,120 @@ async fn execute_inner(
                 .await
                 .map_err(|err| NodeError::Agent(format!("{err:#}")))?;
             Ok(NodeRpcResponse::AgentUsage { usage })
+        }
+        NodeRpcRequest::AgentManagement { agent_id } => {
+            let Some(management) = state.session_manager().catalog().management(&agent_id) else {
+                return Ok(NodeRpcResponse::AgentManagement {
+                    snapshot: Box::new(AgentManagementSnapshot::unavailable(&agent_id, &agent_id)),
+                });
+            };
+            let snapshot = management.snapshot().await.map_err(|err| {
+                NodeError::Agent(format!("agent management request failed: {err:#}"))
+            })?;
+            Ok(NodeRpcResponse::AgentManagement {
+                snapshot: Box::new(snapshot),
+            })
+        }
+        NodeRpcRequest::AgentMcpAction {
+            agent_id,
+            name,
+            action,
+        } => {
+            let snapshot = state
+                .agent_mcp_action(state.node_id(), &agent_id, &name, action)
+                .await
+                .map_err(|err| NodeError::Agent(err.message))?;
+            state
+                .record_audit(
+                    fxg_db::audit::actions::AGENT_MANAGE,
+                    source,
+                    None,
+                    serde_json::json!({
+                        "agent_id": agent_id,
+                        "action": "mcp_action",
+                        "name": name,
+                        "operation": action,
+                    }),
+                )
+                .await;
+            Ok(NodeRpcResponse::AgentManagement {
+                snapshot: Box::new(snapshot),
+            })
+        }
+        NodeRpcRequest::AgentMcpUpsert {
+            agent_id,
+            name,
+            definition,
+        } => {
+            let snapshot = state
+                .agent_mcp_upsert(state.node_id(), &agent_id, &name, definition)
+                .await
+                .map_err(|err| NodeError::Agent(err.message))?;
+            state
+                .record_audit(
+                    fxg_db::audit::actions::AGENT_MANAGE,
+                    source,
+                    None,
+                    serde_json::json!({
+                        "agent_id": agent_id,
+                        "action": "mcp_upsert",
+                        "name": name,
+                    }),
+                )
+                .await;
+            Ok(NodeRpcResponse::AgentManagement {
+                snapshot: Box::new(snapshot),
+            })
+        }
+        NodeRpcRequest::AgentMcpRemove { agent_id, name } => {
+            let snapshot = state
+                .agent_mcp_remove(state.node_id(), &agent_id, &name)
+                .await
+                .map_err(|err| NodeError::Agent(err.message))?;
+            state
+                .record_audit(
+                    fxg_db::audit::actions::AGENT_MANAGE,
+                    source,
+                    None,
+                    serde_json::json!({
+                        "agent_id": agent_id,
+                        "action": "mcp_remove",
+                        "name": name,
+                    }),
+                )
+                .await;
+            Ok(NodeRpcResponse::AgentManagement {
+                snapshot: Box::new(snapshot),
+            })
+        }
+        NodeRpcRequest::Diagnostics => {
+            let diagnostics = state
+                .diagnostics_response()
+                .await
+                .map_err(|err| NodeError::Internal(err.message))?;
+            Ok(NodeRpcResponse::Diagnostics {
+                diagnostics: Box::new(diagnostics),
+            })
+        }
+        NodeRpcRequest::ListAuditLogs { limit } => Ok(NodeRpcResponse::AuditLogs {
+            logs: state.db().audit_logs(limit).await?,
+        }),
+        NodeRpcRequest::Shutdown => {
+            state
+                .record_audit(
+                    fxg_db::audit::actions::NODE_SHUTDOWN,
+                    source,
+                    None,
+                    serde_json::json!({ "reason": "shutdown requested" }),
+                )
+                .await;
+            // Let the correlated response reach the hub before the process stops.
+            let shutdown_state = state.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                shutdown_state.request_shutdown();
+            });
+            Ok(NodeRpcResponse::Shutdown)
         }
         NodeRpcRequest::GetNodeSettings => Ok(NodeRpcResponse::NodeSettings {
             snapshot: Box::new(state.node_settings_snapshot().await?),

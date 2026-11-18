@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { untrack } from "svelte";
   import { errorMessage } from "#lib/api/error-messages.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
@@ -10,20 +10,37 @@
   import { toast } from "svelte-sonner";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
 
+  /** Target node (`""` = the endpoint itself, i.e. the hub's own diagnostics). */
+  let { nodeId = "" }: { nodeId?: string } = $props();
+
   let diagnostics = $state<DiagnosticsResponse | null>(null);
   let loading = $state(false);
+  let generation = 0;
 
-  async function load(): Promise<void> {
-    if (loading) return;
+  async function load(target = nodeId): Promise<void> {
+    const current = ++generation;
     loading = true;
     try {
-      diagnostics = await sync.connection.client.diagnostics();
+      const next =
+        target === ""
+          ? await sync.connection.client.diagnostics()
+          : await sync.connection.client.nodeDiagnostics(target);
+      if (current !== generation) return;
+      diagnostics = next;
     } catch (error) {
-      toast.error(errorMessage(error));
+      if (current === generation) toast.error(errorMessage(error));
     } finally {
-      loading = false;
+      if (current === generation) loading = false;
     }
   }
+
+  $effect(() => {
+    const target = nodeId;
+    untrack(() => {
+      diagnostics = null;
+      void load(target);
+    });
+  });
 
   function stateLabel(state: string): string {
     switch (state) {
@@ -48,10 +65,6 @@
         return "outline";
     }
   }
-
-  onMount(() => {
-    void load();
-  });
 </script>
 
 <div class="flex flex-col gap-3">

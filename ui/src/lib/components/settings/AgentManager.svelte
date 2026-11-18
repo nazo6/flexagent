@@ -35,7 +35,6 @@
 
   /** Target node passed by the settings page (catalog source and operation target). */
   let { nodeId = "" }: { nodeId?: string } = $props();
-  const isHub = $derived(sync.connection.role === "hub");
   let managedAgent = $state<AgentSummary | null>(null);
 
   let agents = $state<AgentSummary[]>([]);
@@ -363,7 +362,7 @@
           </div>
 
           <div class="flex shrink-0 items-center gap-1.5">
-            {#if agent.has_management && !isHub}
+            {#if agent.has_management}
               <Button
                 variant={managedAgent?.id === agent.id ? "secondary" : "ghost"}
                 size="icon-sm"
@@ -414,10 +413,7 @@
 </div>
 
 <!-- Agent runtime management dialog -->
-<Dialog.Root
-  open={managedAgent !== null && !isHub}
-  onOpenChange={(open) => !open && (managedAgent = null)}
->
+<Dialog.Root open={managedAgent !== null} onOpenChange={(open) => !open && (managedAgent = null)}>
   <Dialog.Content class="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-2xl">
     {#if managedAgent !== null}
       <Dialog.Header>

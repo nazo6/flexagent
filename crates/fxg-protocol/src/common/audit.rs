@@ -129,6 +129,8 @@ crate::open_string_enum! {
         PairingUpdate => "pairing_update",
         /// Secret created / updated / deleted / rotated
         SecretManage => "secret_manage",
+        /// Node shut down through the hub
+        NodeShutdown => "node_shutdown",
     }
 }
 

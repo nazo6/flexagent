@@ -63,6 +63,7 @@ import type {
   SessionEventBatch,
   SessionListResponse,
   SessionDetail,
+  ShutdownResponse,
   SecretsResponse,
   HubLinkStatus,
   HubSettingsSnapshot,
@@ -262,7 +263,17 @@ export class ApiClient {
     return this.#request("GET", "/api/v1/diagnostics");
   }
 
-  /** `GET /api/v1/nodes/:nodeId/agents/:agentId/management` (local node only). */
+  /** `GET /api/v1/nodes/:nodeId/diagnostics` (component health, counters, log path). */
+  nodeDiagnostics(nodeId: string): Promise<DiagnosticsResponse> {
+    return this.#request("GET", `/api/v1/nodes/${encodeURIComponent(nodeId)}/diagnostics`);
+  }
+
+  /** `POST /api/v1/nodes/:nodeId/shutdown` (graceful stop of the node process). */
+  nodeShutdown(nodeId: string): Promise<ShutdownResponse> {
+    return this.#request("POST", `/api/v1/nodes/${encodeURIComponent(nodeId)}/shutdown`);
+  }
+
+  /** `GET /api/v1/nodes/:nodeId/agents/:agentId/management` (relayed by the hub). */
   agentManagement(nodeId: string, agentId: string): Promise<AgentManagementSnapshot> {
     return this.#request(
       "GET",
@@ -635,6 +646,16 @@ export class ApiClient {
     const response = await this.#request<AuditLogsResponse>("GET", "/api/v1/audit/logs", {
       query: { limit },
     });
+    return response.logs;
+  }
+
+  /** `GET /api/v1/nodes/:nodeId/audit/logs` (this node's own audit log). */
+  async nodeAuditLogs(nodeId: string, limit = 100): Promise<AuditLogEntry[]> {
+    const response = await this.#request<AuditLogsResponse>(
+      "GET",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/audit/logs`,
+      { query: { limit } },
+    );
     return response.logs;
   }
 

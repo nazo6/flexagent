@@ -95,6 +95,9 @@ pub enum NodeError {
     /// Starting the target agent or operating its driver failed
     #[error("agent error: {0}")]
     Agent(String),
+    /// Unexpected internal failure (for example while building diagnostics)
+    #[error("internal error: {0}")]
+    Internal(String),
     /// Attempted to record an event that must not be persisted
     /// (mid-stream chunks, keystrokes, and so on)
     #[error("event is not persistable: {0}")]
@@ -178,6 +181,7 @@ impl NodeError {
             Self::CommandDuplicate(_) => ErrorCode::CommandDuplicate,
             Self::AlreadyResolved(_) => ErrorCode::AlreadyResolved,
             Self::Agent(_) => ErrorCode::AgentLaunchFailed,
+            Self::Internal(_) => ErrorCode::Internal,
             Self::Db(err) => match err {
                 fxg_db::DbError::SessionNotFound(_)
                 | fxg_db::DbError::NodeNotFound(_)

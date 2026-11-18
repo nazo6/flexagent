@@ -608,6 +608,7 @@
   "settings_args": "Arguments (space-separated)",
   "settings_audit_action_elicitation_resolved": "Elicitation resolved",
   "settings_audit_action_kill_switch": "Kill switch",
+  "settings_audit_action_node_shutdown": "Node shutdown",
   "settings_audit_action_permission_resolved": "Permission resolved",
   "settings_audit_action_pty_spawn": "PTY spawn",
   "settings_audit_action_session_resume": "Session resume",

@@ -70,6 +70,8 @@ pub mod actions {
     pub const PAIRING_UPDATE: AuditAction = AuditAction::PairingUpdate;
     /// Secret created / updated / deleted / rotated
     pub const SECRET_MANAGE: AuditAction = AuditAction::SecretManage;
+    /// Node shut down through the hub
+    pub const NODE_SHUTDOWN: AuditAction = AuditAction::NodeShutdown;
 }
 
 /// Contents of an audit log record.

@@ -73,10 +73,10 @@
     ],
     node: [
       { id: "general", label: m.settings_tab_general() },
-      ...(isHub ? [] : [{ id: "process" as const, label: m.settings_tab_process() }]),
+      { id: "process", label: m.settings_tab_process() },
       { id: "pairing", label: m.settings_tab_pairing() },
       { id: "agents", label: m.settings_tab_agents() },
-      ...(isHub ? [] : [{ id: "audit" as const, label: m.settings_tab_audit() }]),
+      { id: "audit", label: m.settings_tab_audit() },
     ],
     browser: [
       { id: "appearance", label: m.settings_tab_appearance() },
@@ -158,7 +158,7 @@
   function onSelectNode(nextNodeId: string): void {
     if (!nextNodeId || nextNodeId === routeNodeId) return;
     const nextTab: NodeSettingsTab =
-      isNodeTab(activeTab) && isNodeTabAvailable(activeTab, isHub) ? activeTab : "general";
+      isNodeTab(activeTab) && isNodeTabAvailable(activeTab) ? activeTab : "general";
     void goto(nodeSettingsPath(nextTab, nextNodeId));
   }
 
@@ -200,7 +200,7 @@
   }
 
   const fallbackNodeTab: NodeSettingsTab = $derived(
-    isNodeTab(activeTab) && isNodeTabAvailable(activeTab, isHub) ? activeTab : "general",
+    isNodeTab(activeTab) && isNodeTabAvailable(activeTab) ? activeTab : "general",
   );
   const isIndexRedirectRoute = $derived(
     page.route.id === "/settings" ||
