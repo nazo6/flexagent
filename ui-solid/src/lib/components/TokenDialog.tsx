@@ -50,8 +50,8 @@ export default function TokenDialog() {
               fallback={m.token_dialog_description_local_node()}
             >
               {m.token_dialog_description_hub()}
-            </Show>
-            {m.token_cookie_note_before()} <code>fxg_session</code>
+            </Show>{" "}
+            {m.token_cookie_note_before()} <code>fxg_session</code>{" "}
             {m.token_cookie_note_after()}
           </Dialog.Description>
         </Dialog.Header>
@@ -75,16 +75,16 @@ export default function TokenDialog() {
                 when={connection.role === "hub"}
                 fallback={
                   <>
-                    {m.token_help_node_prefix()} <code>&lt;data&gt;/flexagent/node/auth_token</code>
-                    {m.token_help_node_mid()} <code>fxg node access-token show</code>
+                    {m.token_help_node_prefix()} <code>&lt;data&gt;/flexagent/node/auth_token</code>{" "}
+                    {m.token_help_node_mid()} <code>fxg node access-token show</code>{" "}
                     {m.token_help_node_docker()}
                     <code>docker compose exec node fxg node access-token show</code>).
                   </>
                 }
               >
-                {m.token_help_hub_prefix()} <code>auth_token</code>
+                {m.token_help_hub_prefix()} <code>auth_token</code>{" "}
                 {m.token_help_hub_mid()}
-                <code>&lt;data&gt;/flexagent/hub/auth_token</code>
+                <code>&lt;data&gt;/flexagent/hub/auth_token</code>{" "}
                 {m.token_help_hub_docker()}
                 <code>docker compose exec hub cat /var/lib/flexagent/data/hub/auth_token</code>.
               </Show>
