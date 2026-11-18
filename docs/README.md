@@ -92,11 +92,12 @@ flexagent/
 └── ui/                         # 共通フロントエンド (Solid 2 + Vite SPA + TypeScript + Tailwind v4 + Terracotta)
     ├── package.json            # パッケージ管理: pnpm / 品質管理: oxlint, oxfmt, tsc, Vitest
     ├── pnpm-lock.yaml
-    ├── static/
+    ├── public/
     │   └── manifest.webmanifest
     └── src/
-        ├── service-worker/
-        │   └── index.ts        # Web Push & オフラインApp Shellキャッシュ ($app/manifest)
+        ├── app/                # ルート定義とアプリシェル
+        ├── service-worker.js   # PWA の App Shell キャッシュと Web Push
+        ├── styles.css          # Desk のデザイントークン
         ├── lib/
         └── routes/
 ```

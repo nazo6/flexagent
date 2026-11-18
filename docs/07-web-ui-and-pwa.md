@@ -12,7 +12,7 @@ PC ブラウザ、ローカル直結 (`node.addr`、既定 `localhost:7860`)、�
 - **スタイリング & コンポーネント**: Tailwind CSS v4 (`@tailwindcss/vite`) + Terracotta 2（ヘッドレス。状態は `tc-*` 属性で公開）+ `@floating-ui/dom` による自前配置 + `unplugin-icons`（Lucide）
 - **型安全性**: Rust の `fxg-protocol` から `specta` で自動生成された型定義 (`ui/src/lib/generated/bindings.ts`) をインポートする。
 - **状態管理 & 同期**:
-  - Solid の `createStore` / `createSignal` をストアオブジェクトに閉じ込めた WebSocket 差分同期ストア。読み書きは同期的に反映し、signal は変更通知としてのみ使う（`ui/src/lib/stores/reactive.ts`）。Svelte の flush 遅延に相当する挙動を持ち込まない。
+  - Solid の `createSignal` をストアオブジェクトに閉じ込めた WebSocket 差分同期ストア。書き込みは即時に反映し、signal は変更通知としてのみ使う（`ui/src/lib/stores/reactive.ts`）。
   - 接続先ストア（ハブ / ローカルノード）の `cursor` を保存し、再接続時に `Subscribe { since_cursor }` で差分再開する。DB 再作成・リセット時はカーソルの巻き戻りを検知してタイムラインを破棄し、0 から全量を再同期する。
   - イベントは `event_id` / `(session_id, node_seq)` で upsert し、`LiveStreamDelta` と永続イベントを `message_id` でマージする。
 - **リアクティブコレクション**:
@@ -129,9 +129,9 @@ Web ターミナルは `ghostty-web`（WASM 版 `libghostty-vt` + Canvas 2D）�
 ## 5. Android PWA・Window Controls Overlay・Web Push (VAPID)
 
 - **`manifest.webmanifest`**: `"display": "standalone"`, `"display_override": ["window-controls-overlay", "standalone"]` を設定。
-- **Window Controls Overlay (WCO)**: インストール済みデスクトップ Chromium では `env(titlebar-area-*)` と `.wco-*` クラス（`ui/src/app.css`）により OS タイトルバーとアプリトップバーを統合する。
-- **Service Worker (`ui/src/service-worker/index.ts`)**:
-  - `$app/manifest` と `$app/env` を用いた App Shell キャッシュ（`/api/**` は常にネットワーク素通し）。
+- **Window Controls Overlay (WCO)**: インストール済みデスクトップ Chromium では `env(titlebar-area-*)` と `.wco-*` クラス（`ui/src/styles.css`）により OS タイトルバーとアプリトップバーを統合する。
+- **Service Worker (`ui/src/service-worker.js`)**:
+  - Vite のビルド後プラグイン（`ui/vite.config.ts`）が `sw.js` にビルド資産の precache 一覧を注入する。`/api/**` は常にネットワーク素通しで、`/sw.js` は `no-cache` 配信とする。
   - **Web Push (VAPID)**: ハブ（`<data>/hub/vapid.json` / `hub.db`）とノード単体（`<data>/node/vapid.json` / `node.db`）がそれぞれ独立して `push_subscriptions` を管理する（RFC 8291 / 8292）。
   - **通知種別**:
     - 承認リクエスト: `[Approve]` / `[Reject]` アクションボタン付き（Service Worker からバックグラウンドで `POST /api/v1/sessions/:id/permissions/:req_id/respond` を実行。`ALREADY_RESOLVED` は正常終了扱い）。

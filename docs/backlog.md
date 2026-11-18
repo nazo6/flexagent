@@ -81,7 +81,8 @@ Phase 0（ACP v1 端末のライフサイクル・単体停止・スナップシ
 
 出典: [`docs/proposals/2026-11-18-solid2-ui-migration.md`](./proposals/2026-11-18-solid2-ui-migration.md) §12
 
-- [ ] 更新済みのノードバイナリで Files / Terminal / diff の実データ動作を確認する（現行のローカルノードは PTY `open` 以前のバイナリで、Files API も未実装）
+- [x] Files / Terminal の実データ動作を確認する（現行バイナリでツリー・Markdown プレビュー・PTY 接続を確認）
+- [ ] 変更のあるファイルで diff の実データ動作を確認する
 - [ ] モバイルで必要なら Drawer にドラッグ閉じ / スナップポイントを追加する（現状は閉じるボタンとオーバーレイのみ）
 - [ ] Toast にアクションボタン / 進捗 API が必要になったら `ToasterStore` の payload に載せる
 - [ ] 主要画面のライト / ダーク / Bone・Graphite・Moss のスクリーンショット比較を一巡する

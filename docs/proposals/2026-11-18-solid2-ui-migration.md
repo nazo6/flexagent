@@ -156,7 +156,7 @@ ui/
 | `+error.svelte`                             | `*404` ルート（シェル内に表示）                                    |
 | `+layout.svelte`, `settings/+layout.svelte` | `AppShell`, `SettingsShell`（親ルートの `component` + `children`） |
 
-- `ui/src/lib/settings-routes.ts` の手書きビルダーは `paths.settings.nodes(id)("general")` に置き換え、関数を削除する。
+- `ui/src/lib/settings-routes.ts` の手書きビルダーは今回は残した（`@solidjs/router` の型付き `paths` への置換は未実施。§12.2 参照）。
 - `goto(...)` は `useNavigate()` または `<a>` に置き換える。`{ replaceState: true }` は `navigate(url, { replace: true })`。
 - `page.url` / `page.url.searchParams` は `useLocation()` / `useSearchParams()`。`NewSessionChat` の「URL は入口で 1 回だけ読む」意図は `untrack` で維持する。
 
@@ -182,14 +182,14 @@ ui/
 
 | Phase          | 内容                                                                                                                            | 完了条件                                                                                              |
 | :------------- | :------------------------------------------------------------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------- |
-| **0 基盤**     | Vite + Solid + Tailwind + Router + Paraglide + bindings alias + 開発プロキシ + CI ジョブ。`PORTING.md`（変換規約）を作成        | `pnpm --dir ui-solid build` が通り、トークンが当たった空シェルが表示される。`tsc --noEmit` がクリーン |
+| **0 基盤**     | Vite + Solid + Tailwind + Router + Paraglide + bindings alias + 開発プロキシ + CI ジョブ。`CONVENTIONS.md`（変換規約）を作成    | `pnpm --dir ui-solid build` が通り、トークンが当たった空シェルが表示される。`tsc --noEmit` がクリーン |
 | **1 ラッパー** | 19 プリミティブ + `useAnchoredPanel` + Drawer / ScrollArea / Skeleton / Sub メニュー。`ui/` の Storybook 相当の確認ページを作る | 全ラッパーがキーボードで操作でき、ライト / ダーク / 3 パレットで表示が崩れない                        |
 | **2 ストア**   | `*.svelte.ts` 17 ファイルを Solid のモジュールへ。WS / SSE の受信、楽観更新、再接続                                             | 既存テスト相当のユニットテストが通り、イベント適用順序が変わらない                                    |
 | **3 画面**     | シェル、ルート 19、機能コンポーネント。依存の葉から。セッション一覧 → 新規セッション → チャット → 設定の順                      | 主要導線が実 API で動く。ルート遷移でフォーカス・スクロールが破綻しない                               |
 | **4 特殊**     | ghostty-web、Monaco、Shiki、Markdown、diff、画像、サービスワーカー / Web Push、アイコン一式                                     | ターミナル・diff・Markdown・PWA インストール・通知が Svelte 版と同等                                  |
 | **5 切替**     | `git mv ui-solid ui`、`mise` / CI / docs 更新、Svelte 版の削除、`app.css` の一本化、bindings 出力先の移動                       | `mise run check` が通り、リリースビルドで UI が同梱される                                             |
 
-**Phase 0〜5 は完了**（2026-11-18）。`ui-solid` を `ui/` に統合し、`ui/build` を `rust-embed` が同梱する契約は変えていない。`tsc --noEmit` / `oxlint` / `vite build` / Vitest（20 ファイル・169 テスト）がクリーン。実ノードに対してセッション一覧・セッション画面・設定・プロジェクト・検索・ドックを描画確認済み。
+**Phase 0〜5 は完了**（2026-11-18）。`ui-solid` を `ui/` に統合し、`ui/build` を `rust-embed` が同梱する契約は変えていない。`tsc --noEmit` / `oxlint` / `vite build` / Vitest（25 ファイル・212 テスト）がクリーン。実ノードに対してセッション一覧・セッション画面・設定・プロジェクト・検索・ドックを描画確認済み。
 
 ### 5.1 並列化の単位
 
@@ -198,7 +198,7 @@ ui/
 - 先に Phase 1 / 2 を終わらせる。ここを飛ばして画面から入ると、各担当が独自のラッパー・ストアを作って後で捨てる。
 - レビューは 1 人（メインセッション）。`tsc` / `oxlint` / `vitest` / `vite build` / スクショを PR の必須ゲートにする。
 
-### 5.2 `PORTING.md` に固定する規約（抜粋）
+### 5.2 `CONVENTIONS.md` に固定する規約（抜粋）
 
 | Svelte 5                   | Solid 2                                                                   |
 | :------------------------- | :------------------------------------------------------------------------ |
@@ -233,7 +233,7 @@ ui/
 | Terracotta 2.0.0 が公開 2 日で、個人メンテ | 部品の端で不具合               | ラッパー層に閉じ込める。バージョン固定 + lockfile。致命的なら Kobalte へその部品だけ差し替え                    |
 | 配置を自前で持つ                           | ポップアップの位置ズレ・画面外 | `useAnchoredPanel` を 1 本に集約し、flip / shift / autoUpdate を必ず有効化。ウィンドウ端のテストを追加          |
 | サブメニュー / Drawer / ScrollArea が無い  | 実装漏れ・見た目の差           | Phase 1 で先に作る。機能側では使わせず、ラッパー経由に限定                                                      |
-| エージェントが Solid 1.x の書き方をする    | 実行時に無反応・警告           | `PORTING.md`、dev 診断、レビュー。`onCleanup` / `createResource` / `solid-js/web` を grep で禁止                |
+| エージェントが Solid 1.x の書き方をする    | 実行時に無反応・警告           | `CONVENTIONS.md`、dev 診断、レビュー。`onCleanup` / `createResource` / `solid-js/web` を grep で禁止            |
 | `bind:` 205 箇所の判断がぶれる             | 入力の挙動差                   | 「制御 props かローカル状態か」を規約で固定し、ラッパーで吸収                                                   |
 | ストアのリアクティブ意味論の差             | 更新漏れ・過剰更新             | Phase 2 を先に完了。イベント適用のユニットテストを先に書く                                                      |
 | 重複実装期間の機能追加                     | 2 箇所修正                     | 移行中は `ui/` への機能追加を凍結（バグ修正のみ両方）                                                           |
@@ -310,7 +310,7 @@ ui/
 ### 12.1 結果
 
 - `ui/` は Solid 2 + `@solidjs/router` 2.0 + Terracotta 2.0 の SPA になり、`ui/build` を `rust-embed` が同梱する契約は不変。
-- `tsc --noEmit`、`oxlint`、`vite build`、Vitest（20 ファイル / 169 テスト）が通る。CI は `ci-ui.yml`（tsc / oxlint / Vitest / build）に一本化。
+- `tsc --noEmit`、`oxlint`、`vite build`、Vitest（25 ファイル / 212 テスト）が通る。CI は `ci-ui.yml`（tsc / oxlint / Vitest / build）に一本化。
 - 実ノードに対して、セッション一覧・セッション画面（履歴・ツールコール・コンポーザ）・設定（ノード / ブラウザ）・プロジェクト・検索・ドック（Files / Changes / Terminal）の描画と遷移を確認。
 - 本番ビルドは `ui/build`（約 16 MB。Monaco / Shiki は遅延チャンク）で、service worker を生成し `build/sw.js` にビルド資産のプリキャッシュ一覧を注入する。
 
@@ -324,16 +324,17 @@ ui/
 - **AlertDialog の Action は自動で閉じない**。呼び出し側が明示的に閉じる（移植済みの画面はすべて閉じている）。
 - **`mode-watcher` を `ui/src/lib/mode.ts` に置換**。`localStorage["mode-watcher-mode"]` と値は同じで、既存の設定を引き継ぐ。
 - **`@lucide/svelte` を `unplugin-icons`（`~icons/lucide/*`）に置換**。型は Solid 1 向けのため `ui/src/env.d.ts` で宣言し直している。
-- **Svelte 専用テスト 5 ファイルは移植しない**（`*.test.svelte.ts` はコンポーネント/ルーン固有の挙動を検証していた）。純粋なロジックの 20 ファイルは移植済み。
+- **設定 URL のビルダーは `ui/src/lib/settings-routes.ts` のまま**。`@solidjs/router` の型付き `paths` への置換は未実施で、ルート定義との二重管理が残る（§4.3）。
+- **Svelte 専用だった 5 ファイルも含め、既存 25 テストファイルをすべて移植した**。`*.test.svelte.ts` は Solid の `*.test.ts` / `*.test.tsx` になっている。
 
 ### 12.3 検証できていないもの
 
-- ローカルの `fxg` ノードが PTY の `open` を持たない古いバイナリのため、ターミナルの実接続は失敗状態までしか確認できていない（UI 側のメッセージは Svelte 版と同一）。
-- 同じ理由で Files ツールの API が 404 を返し、実データのツリー / 変更一覧 / 画像・バイナリのプレビューは未確認。
+- diff の実データ確認（変更のあるファイルを開いたときの Monaco / Shiki 表示）は未確認。Files ツリー・Markdown プレビュー・ターミナル接続は実ノードで確認済み。
+- 画像・バイナリなど、Files プレビューの全コンテンツ種別は未確認。
 - ライト / ダーク / 3 パレットの全画面スクリーンショット比較は、主要画面のみ。
 
 ### 12.4 フォローアップ候補
 
 - モバイルでドラッグ閉じが必要なら Drawer に追加する。
 - Toast のアクション / 進捗 API が必要になったら `ToasterStore` の data に載せる。
-- 古いノードバイナリを更新したうえで、Files / Terminal / diff の実データ確認を行う。
+- 変更のあるファイルで diff の実データ確認を行う。
