@@ -37,3 +37,18 @@ export const DOCK_TOOLS: readonly DockToolDefinition[] = [
     icon: IconSquareTerminal,
   },
 ];
+
+/** Tools shown in the desktop rail and the mobile header. */
+export const DOCK_LAUNCHERS: readonly DockToolDefinition[] = DOCK_TOOLS;
+
+export function dockTool(id: DockToolId): DockToolDefinition {
+  const tool = DOCK_TOOLS.find((candidate) => candidate.id === id);
+  if (tool === undefined) {
+    throw new Error(`unknown dock tool: ${id}`);
+  }
+  return tool;
+}
+
+export function isDockToolId(value: unknown): value is DockToolId {
+  return typeof value === "string" && DOCK_TOOLS.some((tool) => tool.id === value);
+}
