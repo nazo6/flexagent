@@ -62,3 +62,13 @@ incidents とサポートバンドルは 2026-11-17 に削除済み
 - [ ] 保存後の Changes / Git status / ファイルプレビュー更新
 - [ ] モバイルは閲覧のみとし、編集はデスクトップに限定する
 - [ ] 編集 API も読み取りと同じくハブ経由で中継し、監査ログに記録する
+
+## 7. Solid UI 移行のフォローアップ
+
+出典: [`docs/proposals/2026-11-18-solid2-ui-migration.md`](./proposals/2026-11-18-solid2-ui-migration.md) §12
+
+- [ ] 更新済みのノードバイナリで Files / Terminal / diff の実データ動作を確認する（現行のローカルノードは PTY `open` 以前のバイナリで、Files API も未実装）
+- [ ] モバイルで必要なら Drawer にドラッグ閉じ / スナップポイントを追加する（現状は閉じるボタンとオーバーレイのみ）
+- [ ] Toast にアクションボタン / 進捗 API が必要になったら `ToasterStore` の payload に載せる
+- [ ] 主要画面のライト / ダーク / Bone・Graphite・Moss のスクリーンショット比較を一巡する
+- [ ] 初期バンドル（約 1.5 MB）をルート単位の遅延読み込みで分割するかを判断する（Monaco / Shiki は既に遅延チャンク）
