@@ -6,27 +6,27 @@ PC ブラウザ、ローカル直結 (`node.addr`、既定 `localhost:7860`)、�
 
 ## 1. フロントエンド技術スタック & 状態管理
 
-- **フレームワーク & ルーティング**: SvelteKit (`Svelte 5` Runes + `@sveltejs/adapter-static` による SPA モード) + Vite + TypeScript
+- **フレームワーク & ルーティング**: Solid 2 (`solid-js` 2.x + `@solidjs/web`) + `@solidjs/router` 2.x（型付き `paths` / `matchFilters`） + Vite + TypeScript（TSX）。静的 SPA を `rust-embed` で同梱する
 - **パッケージマネージャ & タスクランナー**: `pnpm` + `mise`（`mise.toml` による `specta` 型生成 → UI ビルド → Cargo ビルドの一貫管理）
-- **Lint / Format / Test**: `oxlint` / `oxfmt` / `svelte-check` / `Vitest` (+ `happy-dom`)
-- **スタイリング & コンポーネント**: Tailwind CSS v4 (`@tailwindcss/vite`) + `shadcn-svelte` (`bits-ui` + モバイルシート用 `vaul-svelte`) + `@lucide/svelte`
+- **Lint / Format / Test**: `oxlint` / `oxfmt` / `tsc --noEmit` / `Vitest` (+ `jsdom`)
+- **スタイリング & コンポーネント**: Tailwind CSS v4 (`@tailwindcss/vite`) + Terracotta 2（ヘッドレス。状態は `tc-*` 属性で公開）+ `@floating-ui/dom` による自前配置 + `unplugin-icons`（Lucide）
 - **型安全性**: Rust の `fxg-protocol` から `specta` で自動生成された型定義 (`ui/src/lib/generated/bindings.ts`) をインポートする。
 - **状態管理 & 同期**:
-  - Svelte 5 Runes (`$state`, `$derived`) を用いた `*.svelte.ts` クラスベースの WebSocket 差分同期ストア。
+  - Solid の `createSignal` をストアオブジェクトに閉じ込めた WebSocket 差分同期ストア。書き込みは即時に反映し、signal は変更通知としてのみ使う（`ui/src/lib/stores/reactive.ts`）。
   - 接続先ストア（ハブ / ローカルノード）の `cursor` を保存し、再接続時に `Subscribe { since_cursor }` で差分再開する。DB 再作成・リセット時はカーソルの巻き戻りを検知してタイムラインを破棄し、0 から全量を再同期する。
   - イベントは `event_id` / `(session_id, node_seq)` で upsert し、`LiveStreamDelta` と永続イベントを `message_id` でマージする。
-- **Runes のリアクティブ境界 (`Map` / `Set`)**:
-  - `$state` が深く Proxy 化するのは plain object と配列だけのため、時間とともに書き換わるコレクション（`messageDeltas` / `thoughtDeltas` / `toolProgress` / `terminalDeltas` / `pendingPrompts` / `provisioningLogs` 等）は `svelte/reactivity` の `SvelteMap` / `SvelteSet` を使うか、更新のたびに値ごと再代入する（`ui/src/lib/sync/timeline-reactivity.test.svelte.ts` で回帰防止）。
-- **`$effect` の使い分け**:
-  - `$effect` は DOM・タイマー・ネットワーク・`localStorage` など外部系への副作用に限定する。
-  - prop をローカル state に写す、既定値を選ぶ、URL パラメータを反映するといった「値から値を作る」処理は `$derived` と明示的な上書き状態で表す。effect で「適用済みフラグ」を立てる初期化も行わない。
-  - effect が読んだ state を同じ effect で書かない。避けられない場合は `untrack` で読み取り依存を切る。ストアのアクション（`setActiveSession` など）は内部で `untrack` し、呼び出し元の effect に意図しない依存を作らない。
+- **リアクティブコレクション**:
+  - 時間とともに書き換わるコレクション（`messageDeltas` / `thoughtDeltas` / `toolProgress` / `terminalDeltas` / `pendingPrompts` / `provisioningLogs` 等）は `ReactiveMap` / `ReactiveSet` に閉じ込め、in-place 更新のあとに変更通知を明示する。素の `Map` を直接書き換えても UI は更新されない。
+- **`createEffect` の使い分け**:
+  - Solid 2 の分割 API（compute / apply）を使い、DOM・タイマー・ネットワーク・`localStorage` など外部系への副作用だけを apply 側に置く。
+  - prop をローカル状態に写す、既定値を選ぶ、URL パラメータを反映するといった「値から値を作る」処理は `createMemo` と明示的な上書き状態で表す。
+  - apply が読んだ signal を同じ effect で書かない。避けられない場合は `untrack` で読み取り依存を切る。`onSettled` の中で `onCleanup` を呼ばず、クリーンアップ関数を返す（Solid 2 は禁止スコープとして実行を停止する）。
 
 ---
 
 ## 2. Desk デザインシステムとテーマ
 
-配色を「デザインの一部」ではなく「差し替え可能なテーマ」として分離し、レイアウト・タイポグラフィ・角丸・コンポーネント構造を固定したままパレットを切り替えられる **Desk デザインシステム** を採用しています（正: `ui/src/app.css`）。
+配色を「デザインの一部」ではなく「差し替え可能なテーマ」として分離し、レイアウト・タイポグラフィ・角丸・コンポーネント構造を固定したままパレットを切り替えられる **Desk デザインシステム** を採用しています（正: `ui/src/styles.css`）。
 
 - **3 層トークン構成**:
   1. **Design constants**: type scale（11px 大文字ラベル / 12px メタデータ / 13px UI / 14px 本文）、spacing、radius（pill = full / control = 8px / surface = 12px / dialog = 14px）、border（1px ヘアライン主体）、layout、motion。
@@ -101,7 +101,7 @@ Web ターミナルは `ghostty-web`（WASM 版 `libghostty-vt` + Canvas 2D）�
 
 - ターミナルのスコープは **workspace**（`(node_id, session.local_path)`）と
   **terminal ID** の組です。セッションはターミナルの所有者ではなく**origin**で、
-  同じ worktree の別セッションへ切り替えても接続は維持されます（`TerminalView.svelte`
+  同じ worktree の別セッションへ切り替えても接続は維持されます（`TerminalView.tsx`
   は `sessionId` ではなく workspace + terminal ID の変化で再接続します）。
 - `/api/v1/pty/ws` の `open` は workspace + terminal ID に対して冪等で、既存の
   シェルがあれば attach します。タブを増やすと terminal ID が変わるため、同じ
@@ -129,9 +129,9 @@ Web ターミナルは `ghostty-web`（WASM 版 `libghostty-vt` + Canvas 2D）�
 ## 5. Android PWA・Window Controls Overlay・Web Push (VAPID)
 
 - **`manifest.webmanifest`**: `"display": "standalone"`, `"display_override": ["window-controls-overlay", "standalone"]` を設定。
-- **Window Controls Overlay (WCO)**: インストール済みデスクトップ Chromium では `env(titlebar-area-*)` と `.wco-*` クラス（`ui/src/app.css`）により OS タイトルバーとアプリトップバーを統合する。
-- **Service Worker (`ui/src/service-worker/index.ts`)**:
-  - `$app/manifest` と `$app/env` を用いた App Shell キャッシュ（`/api/**` は常にネットワーク素通し）。
+- **Window Controls Overlay (WCO)**: インストール済みデスクトップ Chromium では `env(titlebar-area-*)` と `.wco-*` クラス（`ui/src/styles.css`）により OS タイトルバーとアプリトップバーを統合する。
+- **Service Worker (`ui/src/service-worker.js`)**:
+  - Vite のビルド後プラグイン（`ui/vite.config.ts`）が `sw.js` にビルド資産の precache 一覧を注入する。`/api/**` は常にネットワーク素通しで、`/sw.js` は `no-cache` 配信とする。
   - **Web Push (VAPID)**: ハブ（`<data>/hub/vapid.json` / `hub.db`）とノード単体（`<data>/node/vapid.json` / `node.db`）がそれぞれ独立して `push_subscriptions` を管理する（RFC 8291 / 8292）。
   - **通知種別**:
     - 承認リクエスト: `[Approve]` / `[Reject]` アクションボタン付き（Service Worker からバックグラウンドで `POST /api/v1/sessions/:id/permissions/:req_id/respond` を実行。`ALREADY_RESOLVED` は正常終了扱い）。

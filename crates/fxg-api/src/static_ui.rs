@@ -5,8 +5,8 @@
 //!
 //! - Because this sits outside the authentication middleware, the UI assets themselves are
 //!   served without a token (the API returns 401 and the UI prompts for a token).
-//! - `index.html` / `service-worker.js` are `no-cache`; all other build assets have hashed
-//!   filenames and are cached long-term.
+//! - `index.html` / `sw.js` are `no-cache`; all other build assets have hashed filenames and
+//!   are cached long-term.
 
 use axum::body::Body;
 use axum::http::{StatusCode, Uri, header};

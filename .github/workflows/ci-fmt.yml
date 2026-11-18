@@ -31,6 +31,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: jdx/mise-action@v3
-      # oxfmt is a devDependency of `ui` (formatting `.svelte` needs `ui/node_modules/svelte`).
+      # oxfmt is a devDependency of `ui` (it formats Markdown / JSON / YAML / HTML / TS / TSX).
       - run: mise run ui:install
       - run: mise run fmt:check

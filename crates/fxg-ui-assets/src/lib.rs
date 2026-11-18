@@ -1,7 +1,7 @@
 //! Embeds the FlexAgent Web UI (`ui/build`) into the binary via `rust-embed`.
 //!
-//! - Embeds the SvelteKit + `@sveltejs/adapter-static` (SPA) build output so that
-//!   `fxg hub start` / `fxg node start` serve it from the same origin.
+//! - Embeds the Solid 2 + Vite (SPA) build output so that `fxg hub start` /
+//!   `fxg node start` serve it from the same origin.
 //! - When the UI has not been built, `build.rs` provides a placeholder `index.html`,
 //!   so the Rust build itself always succeeds.
 
@@ -63,7 +63,7 @@ pub fn content_type(path: &str) -> &'static str {
 
 /// Cacheability: `index.html` and the Service Worker must reflect updates immediately.
 pub fn cache_control(path: &str) -> &'static str {
-    if path == "index.html" || path == "service-worker.js" {
+    if path == "index.html" || path == "sw.js" {
         "no-cache"
     } else {
         "public, max-age=31536000, immutable"

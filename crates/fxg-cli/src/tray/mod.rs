@@ -55,7 +55,7 @@ const STATUS_FETCHING: &str = "Status: fetching…";
 /// Placeholder shown before the session count is fetched.
 const SESSIONS_FETCHING: &str = "Sessions: fetching…";
 /// Bundled icon (the same asset as the UI's PWA icon).
-const ICON_PNG: &[u8] = include_bytes!("../../../../ui/static/icon-192.png");
+const ICON_PNG: &[u8] = include_bytes!("../../../../ui/public/icon-192.png");
 
 /// Daemon state the tray relies on.
 #[derive(Clone)]

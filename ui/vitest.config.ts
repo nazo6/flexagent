@@ -1,32 +1,19 @@
-import { paraglideVitePlugin } from "@inlang/paraglide-js";
-import { svelte } from "@sveltejs/vite-plugin-svelte";
+import solid from "@solidjs/vite-plugin";
+import path from "node:path";
+import Icons from "unplugin-icons/vite";
 import { defineConfig } from "vitest/config";
 
+const libRoot = path.resolve(import.meta.dirname, "src/lib");
+
 export default defineConfig({
-  plugins: [
-    svelte({ configFile: false }),
-    paraglideVitePlugin({
-      project: "./project.inlang",
-      outdir: "./src/lib/paraglide",
-      emitTsDeclarations: true,
-      strategy: ["baseLocale"],
-      outputStructure: "locale-modules",
-    }),
-  ],
+  // `~icons/*` (unplugin-icons) is resolved by the app's Vite config; the test
+  // config does not inherit it, so register the same plugin here.
+  plugins: [solid(), Icons({ compiler: "solid" })],
   resolve: {
-    // Test the browser build of Svelte: runes (`$effect` / `flushSync`) are no-ops
-    // in the server build, so reactivity tests would silently observe nothing.
-    conditions: ["browser"],
-    alias: {
-      // Resolve SvelteKit's `#lib` alias in Vitest as well
-      $lib: new URL("./src/lib", import.meta.url).pathname,
-      "$app/state": new URL("./src/test/app-state-stub.ts", import.meta.url).pathname,
-      "$app/navigation": new URL("./src/test/app-navigation-stub.ts", import.meta.url).pathname,
-    },
+    alias: [{ find: /^#lib\//, replacement: `${libRoot}/` }],
   },
   test: {
-    environment: "happy-dom",
-    include: ["src/**/*.{test,spec}.ts", "src/**/*.{test,spec}.svelte.ts"],
-    restoreMocks: true,
+    environment: "jsdom",
+    include: ["src/**/*.test.{ts,tsx}"],
   },
 });

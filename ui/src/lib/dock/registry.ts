@@ -1,8 +1,8 @@
-import type { Component } from "svelte";
+import type { JSX } from "@solidjs/web";
 import { m } from "#lib/paraglide/messages.js";
-import FileCodeIcon from "@lucide/svelte/icons/file-code";
-import FolderTreeIcon from "@lucide/svelte/icons/folder-tree";
-import SquareTerminalIcon from "@lucide/svelte/icons/square-terminal";
+import IconFileCode from "~icons/lucide/file-code";
+import IconFolderTree from "~icons/lucide/folder-tree";
+import IconSquareTerminal from "~icons/lucide/square-terminal";
 
 /** Fixed tools of the session dock. */
 export type DockToolId = "files" | "changes" | "terminal";
@@ -13,7 +13,7 @@ export type DockLauncherId = DockToolId;
 export interface DockToolDefinition {
   id: DockToolId;
   label: () => string;
-  icon: Component;
+  icon: (props: { class?: string }) => JSX.Element;
 }
 
 /**
@@ -24,17 +24,17 @@ export const DOCK_TOOLS: readonly DockToolDefinition[] = [
   {
     id: "files",
     label: () => m.dock_files_title(),
-    icon: FolderTreeIcon,
+    icon: IconFolderTree,
   },
   {
     id: "changes",
     label: () => m.dock_changes_title(),
-    icon: FileCodeIcon,
+    icon: IconFileCode,
   },
   {
     id: "terminal",
     label: () => m.dock_terminal_title(),
-    icon: SquareTerminalIcon,
+    icon: IconSquareTerminal,
   },
 ];
 

@@ -5,8 +5,8 @@ import type {
   SessionListResponse,
   SessionSummary,
 } from "#lib/generated/bindings.ts";
-import type { ConnectionStore } from "./connection.svelte.ts";
-import { SyncStore } from "./sync.svelte.ts";
+import type { ConnectionStore } from "./connection.ts";
+import { SyncStore } from "./sync.ts";
 
 class MockWebSocket {
   static readonly OPEN = 1;

@@ -76,3 +76,17 @@ Phase 0（ACP v1 端末のライフサイクル・単体停止・スナップシ
 - [ ] ACP v2 のエージェント所有 Terminal Output を `TerminalOutput` に正規化する（停止可否は v2 の手段が決まってから）
 - [ ] `ToolCallContent::Terminal` の `terminal_id` を `ToolCall` に保持し、ツールカードから端末カードへリンクする（§4 と共通）
 - [ ] 停止できない経路（自前実行・OpenCode ネイティブ）で「単体停止は不可」を UI に明示する
+
+## 8. Solid UI 移行のフォローアップ
+
+出典: [`docs/proposals/2026-11-18-solid2-ui-migration.md`](./proposals/2026-11-18-solid2-ui-migration.md) §12
+
+- [x] Files / Terminal の実データ動作を確認する（現行バイナリでツリー・Markdown プレビュー・PTY 接続を確認）
+- [ ] 変更のあるファイルで diff の実データ動作を確認する
+- [ ] モバイルで必要なら Drawer にドラッグ閉じ / スナップポイントを追加する（現状は閉じるボタンとオーバーレイのみ）
+- [ ] Toast にアクションボタン / 進捗 API が必要になったら `ToasterStore` の payload に載せる
+- [ ] 主要画面のライト / ダーク / Bone・Graphite・Moss のスクリーンショット比較を一巡する
+- [ ] 初期バンドル（約 1.5 MB）をルート単位の遅延読み込みで分割するかを判断する（Monaco / Shiki は既に遅延チャンク）
+- [x] 設定 URL の形を `settings-routes.ts` に集約する（route patterns / builders / pathname 判定）。型付き `paths` は採用しない
+- [ ] oxlint の `consistent-function-scoping` 警告（約 80 件）を整理するか、ルールを無効化して意図を記録する
+- [ ] Service Worker の型検査と、precache（約 16 MB / 423 ファイル）の見直し

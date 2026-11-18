@@ -1,38 +1,56 @@
-import Close from "./drawer-close.svelte";
-import Content from "./drawer-content.svelte";
-import Description from "./drawer-description.svelte";
-import Footer from "./drawer-footer.svelte";
-import Header from "./drawer-header.svelte";
-import NestedRoot from "./drawer-nested.svelte";
-import Overlay from "./drawer-overlay.svelte";
-import Portal from "./drawer-portal.svelte";
-import Title from "./drawer-title.svelte";
-import Trigger from "./drawer-trigger.svelte";
-import Root from "./drawer.svelte";
+import {
+  Close,
+  Content,
+  Description,
+  Footer,
+  Header,
+  NestedRoot,
+  Overlay,
+  Portal,
+  Root,
+  Title,
+  Trigger,
+} from "./drawer.tsx";
 
 export {
   Root,
   NestedRoot,
-  Content,
-  Description,
-  Overlay,
-  Footer,
-  Header,
-  Title,
   Trigger,
   Portal,
+  Overlay,
+  Content,
+  Header,
+  Footer,
+  Title,
+  Description,
   Close,
+} from "./drawer.tsx";
 
-  //
-  Root as Drawer,
-  NestedRoot as DrawerNestedRoot,
-  Content as DrawerContent,
-  Description as DrawerDescription,
-  Overlay as DrawerOverlay,
-  Footer as DrawerFooter,
-  Header as DrawerHeader,
-  Title as DrawerTitle,
-  Trigger as DrawerTrigger,
-  Portal as DrawerPortal,
-  Close as DrawerClose,
+/** Namespace shape, so `import * as Drawer` keeps working unchanged. */
+export const Drawer = {
+  Root,
+  NestedRoot,
+  Trigger,
+  Portal,
+  Overlay,
+  Content,
+  Header,
+  Footer,
+  Title,
+  Description,
+  Close,
 };
+
+export type {
+  RootProps,
+  TriggerProps,
+  PortalProps,
+  OverlayProps,
+  ContentProps,
+  HeaderProps,
+  FooterProps,
+  TitleProps,
+  DescriptionProps,
+  CloseProps,
+  Side,
+} from "../sheet/sheet.tsx";

@@ -2,7 +2,6 @@
 target/
 ui/node_modules/
 ui/build/
-ui/.svelte-kit/
 ui/.vite/
 
 # Git メタデータ (ビルドコンテキストに含めない)

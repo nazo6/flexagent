@@ -1,40 +1,60 @@
-import Action from "./alert-dialog-action.svelte";
-import Cancel from "./alert-dialog-cancel.svelte";
-import Content from "./alert-dialog-content.svelte";
-import Description from "./alert-dialog-description.svelte";
-import Footer from "./alert-dialog-footer.svelte";
-import Header from "./alert-dialog-header.svelte";
-import Media from "./alert-dialog-media.svelte";
-import Overlay from "./alert-dialog-overlay.svelte";
-import Portal from "./alert-dialog-portal.svelte";
-import Title from "./alert-dialog-title.svelte";
-import Trigger from "./alert-dialog-trigger.svelte";
-import Root from "./alert-dialog.svelte";
+import {
+  Action,
+  Cancel,
+  Content,
+  Description,
+  Footer,
+  Header,
+  Media,
+  Overlay,
+  PortalRoot,
+  Root,
+  Title,
+  Trigger,
+} from "./alert-dialog.tsx";
 
 export {
   Root,
-  Title,
-  Action,
-  Cancel,
-  Portal,
-  Footer,
-  Header,
   Trigger,
+  PortalRoot as Portal,
   Overlay,
   Content,
+  Header,
+  Footer,
+  Title,
   Description,
+  Action,
+  Cancel,
   Media,
-  //
-  Root as AlertDialog,
-  Title as AlertDialogTitle,
-  Action as AlertDialogAction,
-  Cancel as AlertDialogCancel,
-  Portal as AlertDialogPortal,
-  Footer as AlertDialogFooter,
-  Header as AlertDialogHeader,
-  Trigger as AlertDialogTrigger,
-  Overlay as AlertDialogOverlay,
-  Content as AlertDialogContent,
-  Description as AlertDialogDescription,
-  Media as AlertDialogMedia,
 };
+
+/** Namespace shape, so `import * as AlertDialog` keeps working unchanged. */
+export const AlertDialog = {
+  Root,
+  Trigger,
+  Portal: PortalRoot,
+  Overlay,
+  Content,
+  Header,
+  Footer,
+  Title,
+  Description,
+  Action,
+  Cancel,
+  Media,
+};
+
+export type {
+  RootProps,
+  TriggerProps,
+  PortalProps,
+  OverlayProps,
+  ContentProps,
+  HeaderProps,
+  FooterProps,
+  TitleProps,
+  DescriptionProps,
+  ActionProps,
+  CancelProps,
+  MediaProps,
+} from "./alert-dialog.tsx";

@@ -1,0 +1,7 @@
+minimumReleaseAgeExclude:
+  - "@solidjs/vite-plugin@3.0.1"
+  - solid-use@1.0.0
+  - terracotta@2.0.0
+  - "@vitest/mocker@5.1.1"
+  - "@vitest/spy@5.1.1"
+  - vitest@5.1.1

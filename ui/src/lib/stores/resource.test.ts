@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createKeyedResource, createResource } from "./resource.svelte.ts";
+import { createKeyedResource, createResource } from "./resource.ts";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

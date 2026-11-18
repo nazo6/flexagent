@@ -11,11 +11,11 @@
 | タスク                                 | 用途                                                                                                    |
 | :------------------------------------- | :------------------------------------------------------------------------------------------------------ |
 | `mise run dev`                         | Vite dev server (`:5173`) と `fxg node start`（変更時自動リビルド）を並列起動                           |
-| `mise run fmt` / `fmt:check`           | Rust (`rustfmt`), TOML (`tombi`), Markdown/JSON/YAML/TS/Svelte (`oxfmt`) の一括整形・検査               |
+| `mise run fmt` / `fmt:check`           | Rust (`rustfmt`), TOML (`tombi`), Markdown/JSON/YAML/TS/TSX (`oxfmt`) の一括整形・検査                  |
 | `mise run lint`                        | `lint:rust` (`clippy`), `lint:errors` (型安全・エラー握りつぶし検査), `lint:toml`, `lint:ui` (`oxlint`) |
 | `mise run types`                       | `fxg-protocol` から `specta` で `ui/src/lib/generated/bindings.ts` を再生成                             |
 | `mise run sqlx:prepare` / `sqlx:check` | `crates/fxg-db/migrations/` を適用し `.sqlx` オフラインキャッシュを更新・検証                           |
-| `mise run check:ui`                    | `svelte-check` による UI 型・テンプレート検査                                                           |
+| `mise run check:ui`                    | `tsc --noEmit` による UI 型検査                                                                         |
 | `mise run test`                        | Rust ワークスペーステスト + UI (`Vitest`) を実行                                                        |
 | `mise run check`                       | コミット前の全検証（`fmt:check` + `lint` + `check:ui` + `test`）                                        |
 | `mise run build` / `build:docker`      | `fxg` リリースバイナリまたは Docker イメージをビルド                                                    |
@@ -33,7 +33,7 @@
 
 ## 3. 言語ポリシーと i18n (`paraglide-js`)
 
-- **コードは英語**: Rust / TypeScript / Svelte のコメント、doc コメント、ログ、CLI 出力、エラーメッセージ、UI 文言はすべて英語で記述する（多バイト境界テスト等の例外には `// allow-japanese: <理由>` を付記）。
+- **コードは英語**: Rust / TypeScript / TSX のコメント、doc コメント、ログ、CLI 出力、エラーメッセージ、UI 文言はすべて英語で記述する（多バイト境界テスト等の例外には `// allow-japanese: <理由>` を付記）。
 - **ドキュメントは日本語**: `docs/` 配下（ステート docs・`proposals/`・`changelog/`）は日本語で維持する。
 - **UI 多言語化**: `paraglide-js` を前提とし、Rust 側の API エラーは `ErrorCode` を i18n キーとして扱い、`message` は英語フォールバックとして返す（サーバー側でロケール交渉は行わない）。
 
@@ -45,7 +45,7 @@ CI は領域ごとに 3 つのワークフローへ分割している。目的�
 
 - `.github/workflows/ci-fmt.yml`: 整形チェック (rustfmt / tombi / oxfmt)。`docs/` の Markdown も整形対象なので常時実行する。
 - `.github/workflows/ci-rust.yml`: `crates/**`、TOML マニフェスト、`.sqlx/**`、生成 TS 型などの変更時に clippy / 3 OS テスト / specta 型同期を実行する。
-- `.github/workflows/ci-ui.yml`: `ui/**` の変更時に oxlint / svelte-check / Vitest / ビルドを実行する。
+- `.github/workflows/ci-ui.yml`: `ui/**` の変更時に oxlint / tsc / Vitest / ビルドを実行する。
 
 不変条件:
 

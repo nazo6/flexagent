@@ -23,7 +23,7 @@ run = "tombi format"
 
 [tasks."fmt:oxc"]
 description = "Format Markdown / JSON / YAML / HTML / TypeScript / Svelte with oxfmt"
-# oxfmt is a devDependency of `ui` (it needs `svelte` from the same node_modules);
+# oxfmt is a devDependency of `ui` (it formats Markdown / JSON / YAML / HTML / TS / TSX);
 # running its JS entry with node avoids the shell shim and works on Windows.
 run = "node ui/node_modules/oxfmt/bin/oxfmt -c .oxfmtrc.json ."
 
@@ -54,7 +54,7 @@ description = "Lint TOML with tombi (including JSON Schema validation)"
 run = "tombi lint"
 
 [tasks."lint:ui"]
-description = "Lint TypeScript / Svelte with oxlint"
+description = "Lint TypeScript / TSX with oxlint"
 run = "pnpm --dir ui run lint"
 
 [tasks.lint]
@@ -83,7 +83,7 @@ description = "Run Rust lint and tests together"
 run = [{ task = "lint:rust" }, { task = "test:rust" }]
 
 [tasks."check:ui"]
-description = "Type-check UI TypeScript / Svelte (svelte-check)"
+description = "Generate Paraglide messages, then type-check the UI with tsc"
 run = "pnpm --dir ui run check"
 
 [tasks.check]

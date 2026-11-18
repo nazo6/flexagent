@@ -74,11 +74,11 @@
   - `fxg-cli`: `fxg` バイナリエントリポイント (セッション開始時に Web UI
     をブラウザで自動オープン)
 - **Frontend (`ui/`)**:
-  - SvelteKit (Svelte 5 Runes + `@sveltejs/adapter-static` SPA) + TypeScript +
-    Tailwind CSS v4 + `shadcn-svelte`
+  - Solid 2 (`solid-js` + `@solidjs/web`) + `@solidjs/router` 2.x + Vite +
+    TypeScript (TSX) + Tailwind CSS v4 + Terracotta（ヘッドレス UI）
   - ターミナル: `ITerminalAdapter` 抽象化 + `ghostty-web` / Diff:
     `monaco-editor` (PC) & `shiki` (Mobile)
-  - ツールチェイン: `pnpm`, `oxlint`, `oxfmt`, `svelte-check`, `Vitest`
+  - ツールチェイン: `pnpm`, `oxlint`, `oxfmt`, `tsc`, `Vitest`
 
 ## 3. 設計ドキュメント参照先
 
@@ -139,7 +139,7 @@
   リファクタリングや仕様変更を行う際、楽だからと冗長な後方互換コード（ラッパー、別名引数、旧仕様のフォールバック等）を追加しないこと。関連する呼び出し元コードも含めて一貫して変更し、常に
   DRY (Don't Repeat Yourself) 原則を重視する。
 - **言語ポリシー (コードは英語 / docs は日本語)**:
-  - Rust / TypeScript / Svelte を問わず、**コメント・doc コメント・ログ・CLI
+  - Rust / TypeScript / TSX を問わず、**コメント・doc コメント・ログ・CLI
     出力・エラーメッセージ・UI 文言はすべて英語**で書く。
   - `fxg-protocol` の doc コメントは `specta` 経由で
     `ui/src/lib/generated/bindings.ts` に出力されるため、英語化の効果は UI
@@ -150,10 +150,10 @@
   - UI の多言語化は **`paraglide-js`** を前提とする。Rust 側の API エラーは
     `ErrorCode` を i18n キーとして扱い、`message` は英語のフォールバックとして残す
     (サーバーにロケール交渉を持ち込まない)。
-- **編集後チェック**: 必要に応じて TS (`svelte-check`, `oxlint`) や Rust
+- **編集後チェック**: 必要に応じて TS (`tsc`, `oxlint`) や Rust
   (`cargo check`, `cargo clippy`) のチェック、lint
   を行う。ファイルを編集した際はかならず format (`mise run fmt`) を行う
-  (Rust = rustfmt / TOML = tombi / それ以外 (Markdown・JSON・YAML・HTML・TS・Svelte)
+  (Rust = rustfmt / TOML = tombi / それ以外 (Markdown・JSON・YAML・HTML・TS・TSX)
   = oxfmt)。
   また、`fxg-protocol` の型を変更した際は `specta`
   の型出力 (`mise run types`) を同期すること。

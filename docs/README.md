@@ -89,14 +89,15 @@ flexagent/
 │   ├── fxg-hub/                # ハブ実装 (Axum・ノード管理・イベント集約・プロビジョナー)
 │   ├── fxg-ui-assets/          # `ui/build` を rust-embed でバイナリに同梱
 │   └── fxg-cli/                # `fxg` バイナリエントリポイント (CLI / node / hub サブコマンド・Web UI自動オープン)
-└── ui/                         # 共通フロントエンド (SvelteKit / Svelte 5 SPA + TypeScript + Tailwind v4 + shadcn-svelte)
-    ├── package.json            # パッケージ管理: pnpm / 品質管理: oxlint, oxfmt, svelte-check, Vitest
+└── ui/                         # 共通フロントエンド (Solid 2 + Vite SPA + TypeScript + Tailwind v4 + Terracotta)
+    ├── package.json            # パッケージ管理: pnpm / 品質管理: oxlint, oxfmt, tsc, Vitest
     ├── pnpm-lock.yaml
-    ├── static/
+    ├── public/
     │   └── manifest.webmanifest
     └── src/
-        ├── service-worker/
-        │   └── index.ts        # Web Push & オフラインApp Shellキャッシュ ($app/manifest)
+        ├── app/                # ルート定義とアプリシェル
+        ├── service-worker.js   # PWA の App Shell キャッシュと Web Push
+        ├── styles.css          # Desk のデザイントークン
         ├── lib/
         └── routes/
 ```

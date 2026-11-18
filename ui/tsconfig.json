@@ -1,9 +1,23 @@
 {
-  "extends": "$app/tsconfig",
   "compilerOptions": {
-    "sourceMap": true,
-    "strict": true
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "preserve",
+    "jsxImportSource": "@solidjs/web",
+    "types": ["vite/client"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "paths": {
+      "#lib/*": ["./src/lib/*"]
+    },
+    "allowImportingTsExtensions": true
   },
-  "include": ["src", "vite.config.ts"],
-  "exclude": ["src/service-worker"]
+  "include": ["src"]
 }
