@@ -20,10 +20,12 @@ import {
   isHubTab,
   isNodeTab,
   isNodeTabAvailable,
+  isSettingsIndexPath,
   nodeSettingsPath,
   resolveDefaultNodeId,
   resolveSettingsScope,
   settingsPathForTarget,
+  settingsScopeFromPath,
   type BrowserSettingsTab,
   type HubSettingsTab,
   type NodeSettingsTab,
@@ -70,10 +72,7 @@ export default function SettingsShell(props: { children?: JSX.Element }) {
 
   const activeScope = createMemo<SettingsScope>(() => {
     const pathname = location.pathname ?? "";
-    if (pathname.startsWith("/settings/hub")) return "hub";
-    if (pathname.startsWith("/settings/nodes")) return "node";
-    if (pathname.startsWith("/settings/browser")) return "browser";
-    return isHub() ? "hub" : "node";
+    return settingsScopeFromPath(pathname) ?? (isHub() ? "hub" : "node");
   });
 
   const routeNodeId = () => params.node_id ?? "";
@@ -223,17 +222,7 @@ export default function SettingsShell(props: { children?: JSX.Element }) {
     return isNodeTab(current) && isNodeTabAvailable(current) ? current : "general";
   });
 
-  const isIndexRedirectRoute = createMemo(() => {
-    const pathname = location.pathname ?? "";
-    if (
-      pathname === "/settings" ||
-      pathname === "/settings/hub" ||
-      pathname === "/settings/browser"
-    ) {
-      return true;
-    }
-    return pathname === "/settings/nodes" || /^\/settings\/nodes\/[^/]+$/.test(pathname);
-  });
+  const isIndexRedirectRoute = createMemo(() => isSettingsIndexPath(location.pathname ?? ""));
 
   createEffect(
     () => m.settings_page_title(),

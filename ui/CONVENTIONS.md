@@ -36,6 +36,8 @@ if the code here disagrees with this file, fix one of them in the same change.
   signal only as a change notification, so event handlers can read back what
   they just wrote.
 - `src/lib/sync/`: the pure reducer and the per-session timeline state.
+- `src/lib/settings-routes.ts`: the single source for the settings URL shape
+  (route patterns, builders and pathname parsing).
 - `src/routes/`: one component per URL. `ErrorPage` serves both `*404` and the
   root `Errored` fallback.
 

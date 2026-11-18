@@ -1,15 +1,58 @@
 import { describe, expect, it } from "vitest";
 import {
+  SETTINGS_BROWSER_ROUTE,
+  SETTINGS_HUB_ROUTE,
+  SETTINGS_NODE_ROUTE,
+  SETTINGS_NODES_ROUTE,
+  SETTINGS_ROOT,
   browserSettingsPath,
   hubSettingsPath,
   isNodeTabAvailable,
+  isSettingsIndexPath,
+  isSettingsPath,
   nodeSettingsPath,
   resolveDefaultNodeId,
   settingsHomePath,
   settingsPathForTarget,
+  settingsScopeFromPath,
 } from "./settings-routes.ts";
 
 describe("settings-routes", () => {
+  it("derives the route patterns and builders from the same bases", () => {
+    expect(SETTINGS_ROOT).toBe("/settings");
+    expect(SETTINGS_HUB_ROUTE).toBe("hub/:tab?");
+    expect(SETTINGS_NODES_ROUTE).toBe("nodes");
+    expect(SETTINGS_NODE_ROUTE).toBe("nodes/:node_id/:tab?");
+    expect(SETTINGS_BROWSER_ROUTE).toBe("browser/:tab?");
+    expect(hubSettingsPath("tokens")).toBe("/settings/hub/tokens");
+    expect(nodeSettingsPath("agents", "node-1")).toBe("/settings/nodes/node-1/agents");
+    expect(nodeSettingsPath("general")).toBe("/settings/nodes");
+    expect(browserSettingsPath()).toBe("/settings/browser/appearance");
+  });
+
+  it("classifies settings pathnames", () => {
+    expect(isSettingsPath("/settings")).toBe(true);
+    expect(isSettingsPath("/settings/nodes/n1")).toBe(true);
+    expect(isSettingsPath("/settings-other")).toBe(false);
+    expect(isSettingsPath("/projects")).toBe(false);
+
+    expect(settingsScopeFromPath("/settings/hub/tokens")).toBe("hub");
+    expect(settingsScopeFromPath("/settings/nodes/n1/agents")).toBe("node");
+    expect(settingsScopeFromPath("/settings/browser")).toBe("browser");
+    expect(settingsScopeFromPath("/settings")).toBeNull();
+    expect(settingsScopeFromPath("/projects")).toBeNull();
+  });
+
+  it("recognises the entry paths that redirect to a canonical tab", () => {
+    expect(isSettingsIndexPath("/settings")).toBe(true);
+    expect(isSettingsIndexPath("/settings/hub")).toBe(true);
+    expect(isSettingsIndexPath("/settings/browser")).toBe(true);
+    expect(isSettingsIndexPath("/settings/nodes")).toBe(true);
+    expect(isSettingsIndexPath("/settings/nodes/n1")).toBe(true);
+    expect(isSettingsIndexPath("/settings/nodes/n1/agents")).toBe(false);
+    expect(isSettingsIndexPath("/settings/hub/tokens")).toBe(false);
+  });
+
   it("offers every node tab regardless of the connection role", () => {
     expect(isNodeTabAvailable("process")).toBe(true);
     expect(isNodeTabAvailable("audit")).toBe(true);

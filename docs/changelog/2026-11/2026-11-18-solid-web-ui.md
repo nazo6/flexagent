@@ -26,6 +26,8 @@ Web UI を Svelte 5 / SvelteKit から **Solid 2 + Vite** の SPA へ移行し�
   置かれたメニューから開いても周囲のリンクへクリックが漏れない。
 - `mode-watcher` / `svelte-sonner` / `vaul-svelte` / `@lucide/svelte` を
   `lib/mode.ts`・Terracotta toast・自前 Drawer・`unplugin-icons` に置き換えた。
+- 設定画面の URL の形（ルートパターン・URL ビルダー・pathname 判定）を
+  `lib/settings-routes.ts` に集約し、ルート定義と二重管理しないようにした。
 - PWA は Vite のビルド後プラグインが `sw.js` を生成し、ビルド資産の一覧を
   注入する。`index.html` と `sw.js` は `no-cache` で配信し、それ以外の
   ハッシュ付き資産は immutable とする。

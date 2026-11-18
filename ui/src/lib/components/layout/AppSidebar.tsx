@@ -17,6 +17,7 @@ import {
   sessionNeedsAttention,
   sessionStatusLabel,
 } from "#lib/session-status.ts";
+import { SETTINGS_ROOT, isSettingsPath } from "#lib/settings-routes.ts";
 import { sync } from "#lib/stores/app.ts";
 import { layoutState } from "#lib/stores/layout.ts";
 import { pinned } from "#lib/stores/pinned.ts";
@@ -252,11 +253,11 @@ export default function AppSidebar(props: AppSidebarProps) {
           </a>
 
           <a
-            href="/settings"
+            href={SETTINGS_ROOT}
             onClick={handleLinkClick}
             class={cn(
               "flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors",
-              currentPath().startsWith("/settings")
+              isSettingsPath(currentPath())
                 ? "bg-signal-soft text-foreground"
                 : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
             )}

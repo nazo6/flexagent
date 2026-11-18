@@ -122,7 +122,7 @@ ui/
   vite.config.ts        # solid + tailwind + paraglide + API プロキシ
   src/
     index.tsx
-    app/router.tsx      # ルート定義（単一の情報源）+ 型付き paths
+    app/router.tsx      # ルート定義（単一の情報源）
     app/shells/         # AppShell / SettingsShell
     lib/components/ui/  # 自前ラッパー（Terracotta + floating-ui）
     lib/components/     # 機能コンポーネント（Svelte 版の移植先）
@@ -156,7 +156,7 @@ ui/
 | `+error.svelte`                             | `*404` ルート（シェル内に表示）                                    |
 | `+layout.svelte`, `settings/+layout.svelte` | `AppShell`, `SettingsShell`（親ルートの `component` + `children`） |
 
-- `ui/src/lib/settings-routes.ts` の手書きビルダーは今回は残した（`@solidjs/router` の型付き `paths` への置換は未実施。§12.2 参照）。
+- `ui/src/lib/settings-routes.ts` を Settings の URL の形の正とした。ルートパターンは `ui/src/app/router.tsx` が同モジュールの定数を import し、ビルダーと pathname 判定も同じベース定数から導出する（型付き `paths` は使わない。§12.2 参照）。
 - `goto(...)` は `useNavigate()` または `<a>` に置き換える。`{ replaceState: true }` は `navigate(url, { replace: true })`。
 - `page.url` / `page.url.searchParams` は `useLocation()` / `useSearchParams()`。`NewSessionChat` の「URL は入口で 1 回だけ読む」意図は `untrack` で維持する。
 
@@ -324,7 +324,7 @@ ui/
 - **AlertDialog の Action は自動で閉じない**。呼び出し側が明示的に閉じる（移植済みの画面はすべて閉じている）。
 - **`mode-watcher` を `ui/src/lib/mode.ts` に置換**。`localStorage["mode-watcher-mode"]` と値は同じで、既存の設定を引き継ぐ。
 - **`@lucide/svelte` を `unplugin-icons`（`~icons/lucide/*`）に置換**。型は Solid 1 向けのため `ui/src/env.d.ts` で宣言し直している。
-- **設定 URL のビルダーは `ui/src/lib/settings-routes.ts` のまま**。`@solidjs/router` の型付き `paths` への置換は未実施で、ルート定義との二重管理が残る（§4.3）。
+- **設定 URL は `ui/src/lib/settings-routes.ts` を単一の情報源**にした。`router.tsx` は `SETTINGS_*_ROUTE` を、画面はビルダーと pathname 判定ヘルパーを使う。`@solidjs/router` の型付き `paths` は採用せず、未使用の `paths` export も削除した。
 - **Svelte 専用だった 5 ファイルも含め、既存 25 テストファイルをすべて移植した**。`*.test.svelte.ts` は Solid の `*.test.ts` / `*.test.tsx` になっている。
 
 ### 12.3 検証できていないもの

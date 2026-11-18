@@ -87,6 +87,6 @@ Phase 0（ACP v1 端末のライフサイクル・単体停止・スナップシ
 - [ ] Toast にアクションボタン / 進捗 API が必要になったら `ToasterStore` の payload に載せる
 - [ ] 主要画面のライト / ダーク / Bone・Graphite・Moss のスクリーンショット比較を一巡する
 - [ ] 初期バンドル（約 1.5 MB）をルート単位の遅延読み込みで分割するかを判断する（Monaco / Shiki は既に遅延チャンク）
-- [ ] 型付き `paths` へ移行するか、`settings-routes.ts` を正とする決定を明文化する（現状はルート定義と URL ビルダーが二重管理）
+- [x] 設定 URL の形を `settings-routes.ts` に集約する（route patterns / builders / pathname 判定）。型付き `paths` は採用しない
 - [ ] oxlint の `consistent-function-scoping` 警告（約 80 件）を整理するか、ルールを無効化して意図を記録する
 - [ ] Service Worker の型検査と、precache（約 16 MB / 423 ファイル）の見直し

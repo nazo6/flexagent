@@ -10,7 +10,16 @@ import HubSettings from "../routes/settings/HubSettings";
 import NodeSettings from "../routes/settings/NodeSettings";
 import SettingsIndex from "../routes/settings/SettingsIndex";
 import SettingsShell from "../routes/settings/SettingsShell";
-import { isBrowserTab, isHubTab, isNodeTab } from "#lib/settings-routes.ts";
+import {
+  SETTINGS_BROWSER_ROUTE,
+  SETTINGS_HUB_ROUTE,
+  SETTINGS_NODE_ROUTE,
+  SETTINGS_NODES_ROUTE,
+  SETTINGS_ROOT,
+  isBrowserTab,
+  isHubTab,
+  isNodeTab,
+} from "#lib/settings-routes.ts";
 
 /**
  * Route table. URLs are identical to the Svelte app (deep links, PWA
@@ -26,19 +35,19 @@ const routes = defineRoutes([
       { path: "/projects", component: ProjectsPage },
       { path: "/search", component: SearchPage },
       {
-        path: "/settings",
+        path: SETTINGS_ROOT,
         component: SettingsShell,
         children: [
           { path: "/", component: SettingsIndex },
-          { path: "/nodes", component: NodeSettings },
-          { path: "/hub/:tab?", component: HubSettings, matchFilters: { tab: isHubTab } },
+          { path: SETTINGS_NODES_ROUTE, component: NodeSettings },
+          { path: SETTINGS_HUB_ROUTE, component: HubSettings, matchFilters: { tab: isHubTab } },
           {
-            path: "/browser/:tab?",
+            path: SETTINGS_BROWSER_ROUTE,
             component: BrowserSettings,
             matchFilters: { tab: isBrowserTab },
           },
           {
-            path: "/nodes/:node_id/:tab?",
+            path: SETTINGS_NODE_ROUTE,
             component: NodeSettings,
             matchFilters: { tab: isNodeTab },
           },
@@ -50,4 +59,3 @@ const routes = defineRoutes([
 ]);
 
 export const Router = createRouter({ routes });
-export const { paths } = Router;
