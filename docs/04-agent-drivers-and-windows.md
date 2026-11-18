@@ -240,6 +240,13 @@ ACPでは、エディタやオーケストレータ側が **`acp::Client` トレ
   `terminal_kill`**:
   - `fxg-pty` クレートを呼び出し、ConPTY (Windows) または Unix PTY
     でコマンドを実行し、出力をリアルタイムにストリーム配信。
+  - `terminal/create` の直後に開始イベント（空の出力・`running = true`）を記録し、
+    ターン終了時に実行中のターミナルの出力をスナップショットする。終了イベント
+    だけが exit code を持ち、各イベントは前回以降の差分だけを運ぶ（詳細は
+    [`docs/03-protocol-and-api.md`](03-protocol-and-api.md) §1.2）。
+  - `SessionControlAction::KillTerminal` はこの PTY を終了し、通常終了と同じ
+    終了イベントを流す。`cancel` はターンだけを止め、動き続けるターミナルは
+    残るため、バックグラウンドコマンドの停止はこの操作で行う。
 
 ### 2.3 サブエージェントのルーティング
 
@@ -541,12 +548,19 @@ GUI (Web UI / スマホPWA)
   (`PtyInput`) を Master `Write` に即時フラッシュ。終了検知は子プロセスの
   `wait()` 専用スレッドが担い、`Exit` は残存出力の配信完了後に配信します
   (Windows の ConPTY は子プロセス終了だけでは EOF にならないため)。
+- **終了経路 (Windows)**: 終了は `ChildKiller` ではなく Job Object のメンバーを
+  直接終了します。`portable-pty` 0.9 の `WinChildKiller::kill` は
+  `TerminateProcess` の**成功をエラーとして返す**ため、その戻り値を使うと停止が
+  失敗したように見えます (実際には停止している)。この経路はエージェント端末の
+  停止、アイドル回収、端末の置き換え、緊急停止のすべてに共通です。
 - **動的リサイズ**: 端末の画面サイズ変更に合わせて
   `master.resize(PtySize { rows, cols, .. })` を即時適用。
-- **対話型ACPコマンドへの直接入力**:
-  エージェントが実行したプロセスが標準入力を待機している場合（ACP
-  `terminal_create`
-  で作成されたPTY）、UI上のターミナルからキーストローク（`TerminalInput`）を注入して対話操作を完結。
+- **ACP 端末は入力を受け付けない (v1)**: ACP v1 の `terminal/*` は作成・出力取得・
+  終了待ち・kill・release のみで、クライアントから標準入力を送る method はありません。
+  そのためエージェントが `terminal/create` で起動した対話コマンドに fxg から
+  キーストロークを送ることはできず、UI の `TerminalInput` は統合ターミナル
+  (fxg 自身の PTY) 専用です。対話操作が必要な場合はワークスペースの統合
+  ターミナルで実行します。
 
 ### 5.4 バックグラウンド常駐化 (`fxg service`)
 

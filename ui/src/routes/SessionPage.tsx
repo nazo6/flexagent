@@ -403,6 +403,22 @@ export default function SessionPage() {
     }
   }
 
+  /** Terminate a command that is still running (a background dev server etc.). */
+  async function handleStopTerminal(terminalId: string): Promise<void> {
+    if (!sessionId()) return;
+    try {
+      const result = await sync.controlSession(sessionId(), {
+        action: "kill_terminal",
+        terminal_id: terminalId,
+      });
+      if (!result.success) {
+        toast.error(commandErrorMessage(result.error) ?? m.chat_terminal_stop_failed());
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   function handleForkItem(item: TimelineItem): void {
     const current = session();
     if (!sessionId() || !current) return;
@@ -602,6 +618,7 @@ export default function SessionPage() {
                   onfork={handleForkItem}
                   canRevert={canRevert()}
                   onrevert={(item) => void handleRevertItem(item)}
+                  onstopterminal={handleStopTerminal}
                   onsubagent={(childSessionId) => setSelectedSubagentId(childSessionId)}
                 />
               </div>
@@ -615,6 +632,7 @@ export default function SessionPage() {
                   items={subagent().items}
                   status={currentStatus()}
                   onclose={() => setSelectedSubagentId(null)}
+                  onstopterminal={handleStopTerminal}
                 />
               )}
             </Show>

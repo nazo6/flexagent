@@ -1,5 +1,5 @@
 import type { JSX } from "@solidjs/web";
-import { createMemo, For, Match, Show, Switch } from "solid-js";
+import { createMemo, createSignal, For, Match, Show, Switch } from "solid-js";
 import ElicitationCard from "#lib/components/ElicitationCard.tsx";
 import MarkdownText from "#lib/components/MarkdownText.tsx";
 import PermissionCard from "#lib/components/PermissionCard.tsx";
@@ -24,6 +24,7 @@ import type { TimelineItem } from "#lib/sync/reducer.ts";
 import { cn } from "#lib/utils.ts";
 import IconAlertTriangle from "~icons/lucide/alert-triangle";
 import IconBot from "~icons/lucide/bot";
+import IconCircleStop from "~icons/lucide/circle-stop";
 import IconClock from "~icons/lucide/clock";
 import IconListChecks from "~icons/lucide/list-checks";
 import IconLoaderCircle from "~icons/lucide/loader-circle";
@@ -54,6 +55,11 @@ export interface ChatTimelineProps {
   canRevert?: boolean;
   /** Called when the user chooses "Revert to here" on a message. */
   onrevert?: (item: TimelineItem) => void;
+  /**
+   * Called when the user stops a command that is still running. Must resolve
+   * when the request finished so the card re-enables the button on failure.
+   */
+  onstopterminal?: (terminalId: string) => Promise<void>;
 }
 
 /**
@@ -70,6 +76,10 @@ interface TimelineContext {
   onsubagent: () => ((childSessionId: string) => void) | undefined;
   onfork: () => ((item: TimelineItem) => void) | undefined;
   onrevert: () => ((item: TimelineItem) => void) | undefined;
+  onstopterminal: () => ((terminalId: string) => Promise<void>) | undefined;
+  stopTerminal: (terminalId: string) => void;
+  isStoppingTerminal: (terminalId: string) => boolean;
+  sessionStopped: () => boolean;
   lastForkableSeq: () => number | null;
   revert: () => { canRevert: boolean | null; reason: string | null };
   forkState: (item: TimelineItem) => { canFork: boolean | null; reason: string | null };
@@ -128,6 +138,7 @@ function GroupView(props: { group: TimelineGroup; ctx: TimelineContext }) {
               status={props.ctx.status()}
               nested
               onsubagent={props.ctx.onsubagent()}
+              onstopterminal={props.ctx.onstopterminal()}
               subagentTitle={group().subagent.title ?? group().subagent.description ?? null}
             />
           </SubagentGroup>
@@ -238,10 +249,39 @@ function SingleRow(props: { item: TimelineItem; ctx: TimelineContext }): JSX.Ele
               <span class="desk-mono">
                 {item().command === "" ? item().terminalId : item().command}
               </span>
-              <Show when={item().exitCode !== null}>
-                <Badge variant={item().exitCode === 0 ? "secondary" : "destructive"}>
-                  exit {item().exitCode}
-                </Badge>
+              <Show
+                when={item().running && !ctx.sessionStopped() && ctx.onstopterminal() !== undefined}
+                fallback={
+                  <Show when={item().exitCode !== null}>
+                    <Badge variant={item().exitCode === 0 ? "secondary" : "destructive"}>
+                      exit {item().exitCode}
+                    </Badge>
+                  </Show>
+                }
+              >
+                <button
+                  type="button"
+                  class="text-muted-foreground hover:bg-destructive/10 hover:text-destructive ml-auto flex size-5 shrink-0 items-center justify-center rounded transition-colors disabled:opacity-50"
+                  title={
+                    ctx.isStoppingTerminal(item().terminalId)
+                      ? m.chat_terminal_stopping()
+                      : m.chat_terminal_stop()
+                  }
+                  aria-label={
+                    ctx.isStoppingTerminal(item().terminalId)
+                      ? m.chat_terminal_stopping()
+                      : m.chat_terminal_stop()
+                  }
+                  disabled={ctx.isStoppingTerminal(item().terminalId)}
+                  onClick={() => ctx.stopTerminal(item().terminalId)}
+                >
+                  <Show
+                    when={ctx.isStoppingTerminal(item().terminalId)}
+                    fallback={<IconCircleStop class="size-3.5" />}
+                  >
+                    <IconLoaderCircle class="size-3.5 animate-spin" />
+                  </Show>
+                </button>
               </Show>
             </div>
             <pre class="bg-muted/40 border-border max-h-56 overflow-auto rounded-md border p-2.5 font-mono text-[13px] leading-relaxed whitespace-pre-wrap">
@@ -373,6 +413,24 @@ export default function ChatTimeline(props: ChatTimelineProps) {
   const forkAfterSeq = () => props.forkAfterSeq ?? null;
   const canRevert = () => props.canRevert ?? false;
 
+  /** Terminals whose stop request is in flight (per card). */
+  const [stoppingTerminals, setStoppingTerminals] = createSignal<ReadonlySet<string>>(new Set());
+
+  function stopTerminal(terminalId: string): void {
+    if (stoppingTerminals().has(terminalId) || props.onstopterminal === undefined) return;
+    setStoppingTerminals((current) => new Set(current).add(terminalId));
+    void props.onstopterminal(terminalId).finally(() => {
+      setStoppingTerminals((current) => {
+        if (!current.has(terminalId)) return current;
+        const next = new Set(current);
+        next.delete(terminalId);
+        return next;
+      });
+    });
+  }
+
+  const isStoppingTerminal = (terminalId: string): boolean => stoppingTerminals().has(terminalId);
+
   /**
    * The agent is running a turn (generating a response or executing tools).
    *
@@ -444,6 +502,12 @@ export default function ChatTimeline(props: ChatTimelineProps) {
     status() === "running" || status() === "waiting_permission" || status() === "waiting_input";
 
   /**
+   * A stopped session's agent process (and its terminals) is gone, even when the
+   * last recorded terminal event was a turn-end snapshot.
+   */
+  const sessionStopped = createMemo(() => status() === "stopped" || status() === "error");
+
+  /**
    * Latest message that can represent the current end of the conversation.
    * `last` scope only enables Fork there; `message` scope (future) enables all.
    */
@@ -490,6 +554,10 @@ export default function ChatTimeline(props: ChatTimelineProps) {
     onsubagent: () => props.onsubagent,
     onfork: () => props.onfork,
     onrevert: () => props.onrevert,
+    onstopterminal: () => props.onstopterminal,
+    stopTerminal,
+    isStoppingTerminal,
+    sessionStopped,
     lastForkableSeq,
     revert: revertState,
     forkState,

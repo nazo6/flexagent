@@ -523,6 +523,83 @@ async fn cancel_on_idle_session_is_safe_noop() {
 }
 
 #[tokio::test]
+async fn kill_terminal_control_terminates_the_command() {
+    let (manager, mock, dir) = setup().await;
+    let outcome = manager
+        .ensure_session(&CommandId::from("c1"), dir.path(), "mock", &[], None)
+        .await
+        .expect("ensure");
+    wait_idle(&manager, &outcome.session_id).await;
+
+    // A background command outlives the turn, so the control must work while idle too.
+    manager
+        .control(
+            &CommandId::from("c-kill-terminal"),
+            &outcome.session_id,
+            &SessionControlAction::KillTerminal {
+                terminal_id: "term-1".to_owned(),
+            },
+        )
+        .await
+        .expect("kill terminal");
+
+    assert_eq!(mock.killed_terminals(), vec!["term-1".to_owned()]);
+    // The final output (with the exit code) is recorded like a natural exit.
+    wait_event_type(&manager, &outcome.session_id, EventType::TerminalOutput).await;
+}
+
+#[tokio::test]
+async fn turn_end_snapshots_running_terminals() {
+    let (manager, mock, dir) = setup().await;
+    mock.set_snapshot_event(Some(UnifiedEventPayload::TerminalOutput {
+        terminal_id: "term-1".to_owned(),
+        command: "npm run dev".to_owned(),
+        data_b64: "cmVhZHkK".to_owned(), // "ready\n"
+        exit_code: None,
+        running: true,
+        subagent_id: None,
+    }));
+    let outcome = manager
+        .ensure_session(&CommandId::from("c1"), dir.path(), "mock", &[], None)
+        .await
+        .expect("ensure");
+    wait_idle(&manager, &outcome.session_id).await;
+
+    mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+        status: SessionStatus::Running,
+        error_message: None,
+    }));
+    let before = mock.terminal_snapshots();
+    mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+        status: SessionStatus::Idle,
+        error_message: None,
+    }));
+    wait_event_type(&manager, &outcome.session_id, EventType::TerminalOutput).await;
+    assert!(mock.terminal_snapshots() > before);
+
+    let batch = manager
+        .bus()
+        .db()
+        .session_events_after(&outcome.session_id, 0, 100)
+        .await
+        .expect("events");
+    let snapshot = batch.events.iter().find_map(|event| match &event.payload {
+        UnifiedEventPayload::TerminalOutput {
+            terminal_id,
+            running,
+            exit_code,
+            ..
+        } if terminal_id == "term-1" => Some((*running, *exit_code)),
+        _ => None,
+    });
+    assert_eq!(
+        snapshot,
+        Some((true, None)),
+        "a still running command is persisted with running = true"
+    );
+}
+
+#[tokio::test]
 async fn auto_approve_policy_responds_to_permission_requests() {
     let (manager, mock, dir) = setup().await;
     let outcome = manager

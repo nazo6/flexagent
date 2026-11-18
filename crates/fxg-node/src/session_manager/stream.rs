@@ -41,6 +41,13 @@ pub(super) async fn pump_events(
             DriverEvent::Event(payload) => {
                 let is_status_changed =
                     matches!(&payload, UnifiedEventPayload::StatusChanged { .. });
+                // A status change to a non-busy state ends the turn: commands that
+                // keep running must be persisted then (their final event may be
+                // minutes away, or never come).
+                let turn_ended = matches!(
+                    &payload,
+                    UnifiedEventPayload::StatusChanged { status, .. } if !status.is_busy()
+                );
                 let mut auto_permission: Option<(String, String)> = None;
                 match &payload {
                     UnifiedEventPayload::StatusChanged {
@@ -174,6 +181,9 @@ pub(super) async fn pump_events(
                             auto_respond_permission(&inner, &session_id, request_id, option_id)
                                 .await;
                         }
+                        if turn_ended {
+                            snapshot_terminals(&inner, &session_id).await;
+                        }
                         maybe_dispatch_queued(&inner, &session_id).await;
                     }
                     Err(err) => {
@@ -281,6 +291,24 @@ async fn auto_respond_permission(
     }
 }
 
+/// Asks the driver to persist the output of commands that outlive the turn.
+///
+/// ACP terminals keep running after the turn ends (a dev server, a watcher), but
+/// their next `TerminalOutput` event is the exit. Recording the output produced so
+/// far keeps the card and its log after a reload.
+async fn snapshot_terminals(inner: &Arc<Inner>, session_id: &str) {
+    let handle = inner
+        .sessions
+        .lock()
+        .expect("sessions poisoned")
+        .active
+        .get(session_id)
+        .map(|session| Arc::clone(&session.handle));
+    if let Some(handle) = handle {
+        handle.snapshot_terminals().await;
+    }
+}
+
 /// Updates the session status (busy is synchronized too).
 pub(super) fn mark_status(
     inner: &Inner,
@@ -290,10 +318,7 @@ pub(super) fn mark_status(
 ) {
     let mut sessions = inner.sessions.lock().expect("sessions poisoned");
     if let Some(session) = sessions.active.get_mut(session_id) {
-        session.busy = matches!(
-            status,
-            SessionStatus::Running | SessionStatus::WaitingPermission | SessionStatus::WaitingInput
-        );
+        session.busy = status.is_busy();
         session.status = status;
     }
 }

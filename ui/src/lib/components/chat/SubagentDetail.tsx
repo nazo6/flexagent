@@ -13,6 +13,8 @@ export interface SubagentDetailProps {
   items: TimelineItem[];
   status?: SessionStatus | null;
   onclose: () => void;
+  /** Called when the user stops a command still running in the subagent. */
+  onstopterminal?: (terminalId: string) => Promise<void>;
 }
 
 /** Slide-over panel that shows the conversation of one child session. */
@@ -57,6 +59,7 @@ export default function SubagentDetail(props: SubagentDetailProps) {
             status={props.status ?? null}
             nested
             subagentTitle={title()}
+            onstopterminal={props.onstopterminal}
           />
         </div>
       </dialog>

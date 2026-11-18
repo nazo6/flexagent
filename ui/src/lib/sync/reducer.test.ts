@@ -347,6 +347,77 @@ describe("tool calls", () => {
 });
 
 describe("terminal output", () => {
+  it("shows the command from the start event while it runs", () => {
+    const sources = emptySources([
+      makeEvent(1, {
+        type: "terminal_output",
+        data: {
+          terminal_id: "term-1",
+          command: "npm run dev",
+          data_b64: "",
+          exit_code: null,
+          running: true,
+        },
+      }),
+    ]);
+    const items = buildTimelineItems(sources);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: "terminal",
+      command: "npm run dev",
+      output: "",
+      exitCode: null,
+      running: true,
+    });
+  });
+
+  it("appends the turn-end snapshot without duplicating streamed output", () => {
+    const sources = emptySources();
+    applyStreamDelta(sources, {
+      delta_type: "terminal_output_delta",
+      terminal_id: "term-1",
+      data_b64: encodeTextToBase64("ready\n"),
+    });
+
+    // The snapshot carries the same bytes; the streamed buffer is dropped with it.
+    const snapshot = makeEvent(1, {
+      type: "terminal_output",
+      data: {
+        terminal_id: "term-1",
+        command: "npm run dev",
+        data_b64: encodeTextToBase64("ready\n"),
+        exit_code: null,
+        running: true,
+      },
+    });
+    insertEventSorted(sources.events, snapshot);
+    clearStreamBuffers(snapshot, sources);
+
+    const running = buildTimelineItems(sources);
+    expect(running[0]).toMatchObject({ output: "ready\n", running: true });
+
+    // The final event only carries the bytes produced after the snapshot.
+    const final = makeEvent(2, {
+      type: "terminal_output",
+      data: {
+        terminal_id: "term-1",
+        command: "npm run dev",
+        data_b64: encodeTextToBase64("stopped\n"),
+        exit_code: 0,
+        running: false,
+      },
+    });
+    insertEventSorted(sources.events, final);
+    clearStreamBuffers(final, sources);
+
+    const finished = buildTimelineItems(sources);
+    expect(finished[0]).toMatchObject({
+      output: "ready\nstopped\n",
+      exitCode: 0,
+      running: false,
+    });
+  });
+
   it("merges streamed output and drops the buffer on completion", () => {
     const sources = emptySources();
     applyStreamDelta(sources, {

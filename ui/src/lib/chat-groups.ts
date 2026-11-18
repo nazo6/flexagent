@@ -48,6 +48,9 @@ export type TimelineEntry = TimelineGroup | ActivitySection;
  * Whether a group is intermediate work rather than part of the answer. A run of
  * these is folded into one summary row; messages, approvals and notices stay
  * visible so the answer and anything that needs the reader remain in place.
+ *
+ * A command that is still running stays visible as well: it goes on producing
+ * output after the turn ended, and its card is where the user stops it.
  */
 function isActivity(group: TimelineGroup): boolean {
   switch (group.kind) {
@@ -57,10 +60,11 @@ function isActivity(group: TimelineGroup): boolean {
     case "single":
       switch (group.item.kind) {
         case "thought":
-        case "terminal":
         case "plan":
         case "subagent_message":
           return true;
+        case "terminal":
+          return !group.item.running;
         default:
           return false;
       }

@@ -41,6 +41,12 @@ Client ⇔ Hub / Local Node（HTTP / WebSocket）で共有する型を定義し�
 - `AgentMessage` / `AgentThought` はストリーミング中に `LiveStreamDelta` として
   メモリ配信し、完成した `is_complete = true` のイベントだけを永続化する。
 - `TerminalInput` はエフェメラルで、イベントログには永続化しない。
+- `TerminalOutput` は 1 つのターミナルにつき複数回記録する。各イベントは
+  **前回のイベント以降に増えたバイト列だけ**を持ち、UI は追記する。
+  開始イベント（出力なし / `running = true`）、ターン終了時のスナップショット
+  （実行中のコマンドのみ / `running = true`）、終了イベント（`running = false`、
+  exit code）の順に流れる。ライブ配信は `LiveStreamDelta` で行い、DB には
+  上記イベントだけを保存する。
 - `LiveStreamDelta` は再接続時にリプレイしない。
 
 ### 1.3 イベント種別と投影
@@ -76,9 +82,14 @@ Client ⇔ Hub / Local Node（HTTP / WebSocket）で共有する型を定義し�
 ### 1.4 制御アクション
 
 `SessionControlAction` は `set_mode` / `set_config` / `set_permission_policy` /
-`cancel` / `kill` / `dispose` を持ちます。
+`cancel` / `kill_terminal` / `kill` / `dispose` を持ちます。
 
-- `cancel`: 実行中のターンだけを中断する。
+- `cancel`: 実行中のターンだけを中断する。協調的な中断であり、エージェントが
+  実行中のツールを止めるかはエージェント側の判断に委ねる。
+- `kill_terminal`: エージェントが開始した 1 つのターミナル（ACP
+  `terminal/*`）を終了する。ターンを跨いで動き続けるバックグラウンドコマンドを
+  セッションを止めずに終わらせる唯一の経路で、終了時は通常の終了と同じ
+  `TerminalOutput`（exit code 付き）が記録される。
 - `kill`: セッションを終了し、エージェントプロセスを再利用プールへ返す。
 - `dispose`: セッションとプロセスツリーを強制終了する。
 

@@ -170,6 +170,16 @@ impl ProcessTreeGuard {
         self.job.terminate_all_except(keep_pid)
     }
 
+    /// Terminates the whole tree, including the root (Windows only, best effort).
+    ///
+    /// Preferred over `portable_pty`'s `ChildKiller`: version 0.9 reports a
+    /// successful `TerminateProcess` as an error, so its result cannot be
+    /// trusted.
+    #[cfg(windows)]
+    pub fn terminate_tree(&self) -> Result<usize, PtyError> {
+        self.job.terminate_all()
+    }
+
     /// Whether process tree management via Job Objects is enabled (diagnostic).
     pub fn is_job_object_backend(&self) -> bool {
         cfg!(windows)
@@ -371,6 +381,14 @@ impl WinJobGuard {
                 .map(|index| *list.add(index) as u32)
                 .collect())
         }
+    }
+
+    /// Terminates every Job member, including the root (best effort).
+    ///
+    /// Returns the number of processes terminated (already-exited ones are not
+    /// counted).
+    pub fn terminate_all(&self) -> Result<usize, PtyError> {
+        self.terminate_all_except(0)
     }
 
     /// Terminates every Job member except the given PID (best effort).
