@@ -548,6 +548,11 @@ GUI (Web UI / スマホPWA)
   (`PtyInput`) を Master `Write` に即時フラッシュ。終了検知は子プロセスの
   `wait()` 専用スレッドが担い、`Exit` は残存出力の配信完了後に配信します
   (Windows の ConPTY は子プロセス終了だけでは EOF にならないため)。
+- **終了経路 (Windows)**: 終了は `ChildKiller` ではなく Job Object のメンバーを
+  直接終了します。`portable-pty` 0.9 の `WinChildKiller::kill` は
+  `TerminateProcess` の**成功をエラーとして返す**ため、その戻り値を使うと停止が
+  失敗したように見えます (実際には停止している)。この経路はエージェント端末の
+  停止、アイドル回収、端末の置き換え、緊急停止のすべてに共通です。
 - **動的リサイズ**: 端末の画面サイズ変更に合わせて
   `master.resize(PtySize { rows, cols, .. })` を即時適用。
 - **対話型ACPコマンドへの直接入力**:

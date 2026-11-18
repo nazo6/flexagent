@@ -1,7 +1,8 @@
 # エージェント端末カードのコマンド表示・個別停止・ターン終了スナップショット
 
 - **日付**: 2026-11-18
-- **対象パッケージ**: `fxg-protocol`, `fxg-agent`, `fxg-node`, `ui`, `docs`
+- **対象パッケージ**: `fxg-protocol`, `fxg-agent`, `fxg-node`, `fxg-pty`, `ui`,
+  `docs`
 - **対象スクリプト**: `mise run types`, `mise run fmt`, `mise run lint:errors`,
   `cargo test --workspace --no-fail-fast`, `pnpm --dir ui run test`,
   `pnpm --dir ui run check`
@@ -56,6 +57,17 @@ ACP エージェントが `terminal/*` で開始したコマンドは、ター�
 - セッション終了時は端末レジストリを破棄し、ウォームプールで再利用する
   プロセスに前のセッションの出力バッファを残さない。
 
+### Windows の PTY 終了 (`fxg-pty`)
+
+- `portable-pty` 0.9 の `ChildKiller::kill` は `TerminateProcess` の**成功を
+  エラーとして返す**（成功時は `last_os_error()` が古い値のまま残るため、
+  `The wait operation timed out. (os error 258)` のような偽の失敗になる）。
+  Windows では Job Object のメンバーを直接終了する
+  `ProcessTreeGuard::terminate_tree` を使い、`PtySessionManager::kill` /
+  `kill_all` / アイドル回収 / 端末の置き換えが結果を正しく返すようにした。
+- これはエージェント端末の停止だけでなく、統合ターミナルのタブを閉じたときや
+  緊急停止（対象 PTY 一覧と workspace マッピングの掃除）にも効く。
+
 ## 検証
 
 - `cargo test --workspace --no-fail-fast`
@@ -65,3 +77,5 @@ ACP エージェントが `terminal/*` で開始したコマンドは、ター�
   重複防止、終了イベントの追記）
 - `pnpm --dir ui run check`
 - `mise run fmt:check`
+- `cargo check -p fxg-pty --target x86_64-pc-windows-msvc`（Windows 固有の
+  終了経路とテストがホストでコンパイルできることの確認）
