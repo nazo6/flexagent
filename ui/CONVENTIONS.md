@@ -91,6 +91,20 @@ Terracotta writes `tc-*` attributes instead of `data-state`:
 
 Keep `data-slot` on our wrappers: screenshot checks and tests select on it.
 
+## JSX props are lazy
+
+A JSX-valued prop (`children`, optional slots such as `above`, `icon`, ...) is
+compiled to a getter that builds its DOM tree and component effects on every
+read. Treat it as single-use:
+
+- Resolve optional slots once with `children(() => props.slot)` and render the
+  resolved accessor.
+- Never use a JSX prop as a condition (`<Show when={props.slot}>`) or read it
+  once for `!== undefined` and again to render it; the extra read creates a
+  detached tree whose effects (portals, popovers, timers) still run.
+- `<Show>` / `<Switch>` branch getters are lazy, so rendering `props.children`
+  in different, mutually exclusive branches is fine.
+
 ## Forbidden
 
 - `any` (and `as unknown as`), `solid-js/web`, Solid's removed `createResource`,
