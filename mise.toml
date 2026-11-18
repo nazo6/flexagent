@@ -23,7 +23,7 @@ run = "tombi format"
 
 [tasks."fmt:oxc"]
 description = "Format Markdown / JSON / YAML / HTML / TypeScript / Svelte with oxfmt"
-# oxfmt is a devDependency of `ui` (it needs `svelte` from the same node_modules);
+# oxfmt is a devDependency of `ui` (it formats Markdown / JSON / YAML / HTML / TS / TSX);
 # running its JS entry with node avoids the shell shim and works on Windows.
 run = "node ui/node_modules/oxfmt/bin/oxfmt -c .oxfmtrc.json ."
 

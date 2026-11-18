@@ -1,20 +1,20 @@
-# Porting contract (`ui/` → `ui-solid/`)
+# UI conventions (`ui/`, Solid 2)
 
-The rules every ported file follows. Written for humans and agents: if the code
-here disagrees with this file, fix one of them in the same change.
+The rules every change to the Solid app follows. Written for humans and agents:
+if the code here disagrees with this file, fix one of them in the same change.
 
 ## Stack
 
 | Piece       | Choice                                                        |
 | :---------- | :------------------------------------------------------------ |
 | Framework   | `solid-js` 2.0.0 + `@solidjs/web` 2.0.0                       |
-| Router      | `@solidjs/router` 2.0.0 (typed `paths`)                       |
+| Router      | `@solidjs/router` 2.0.0                                       |
 | Headless    | `terracotta` 2.0.0 (+ our own geometry)                       |
 | Positioning | `@floating-ui/dom` behind `useAnchoredPanel`                  |
 | Styles      | Tailwind CSS v4 + `src/styles.css` (Desk tokens)              |
 | Icons       | `unplugin-icons` + `@iconify-json/lucide` (`~icons/lucide/*`) |
 | i18n        | Paraglide, generated into `src/lib/paraglide`                 |
-| Types       | `tsc --noEmit` only (no `svelte-check`)                       |
+| Types       | `tsc --noEmit` only                                           |
 
 `solid-js/web` does not exist in Solid 2. Render with `@solidjs/web`
 (`render`, `Portal`, `JSX`). JSX types come from `@solidjs/web`; set
@@ -23,7 +23,23 @@ here disagrees with this file, fix one of them in the same change.
 `unplugin-icons/types/solid` types every prop as `never` under Solid 2, so
 `src/env.d.ts` declares `~icons/*` against `ComponentProps<"svg">` instead.
 
-## Conversion table
+## Where code lives
+
+- `src/app/router.tsx`: the route table. URLs are stable (deep links, PWA
+  shortcuts and history depend on them).
+- `src/app/shells/AppShell.tsx`: global chrome, connection gating and the root
+  error boundary (in `src/index.tsx`).
+- `src/lib/components/ui/`: the ported primitives (Terracotta + our geometry).
+  Feature components use these wrappers rather than Terracotta directly.
+- `src/lib/stores/`: module-scope singletons created inside `createRoot`.
+  `ReactiveCell` / `ReactiveMap` / `ReactiveSet` keep a plain value and use a
+  signal only as a change notification, so event handlers can read back what
+  they just wrote.
+- `src/lib/sync/`: the pure reducer and the per-session timeline state.
+- `src/routes/`: one component per URL. `ErrorPage` serves both `*404` and the
+  root `Errored` fallback.
+
+## Svelte habits → Solid 2
 
 | Svelte 5                   | Solid 2                                                          |
 | :------------------------- | :--------------------------------------------------------------- |
@@ -33,7 +49,7 @@ here disagrees with this file, fix one of them in the same change.
 | `$props()`                 | function argument; `merge` / `omit` for splitting                |
 | `$bindable()`              | getter + setter props                                            |
 | `{#each list as x (key)}`  | `<For each={list}>` (reference keyed) / `<Index>`                |
-| `{#if} {:else}`            | `<Show when fallback>` / `<Switch><Match>`                       |
+| `{#if} {:else}`            | `<Show fallback>` / `<Switch><Match>`                            |
 | `{#snippet}` / `{@render}` | children props / JSX                                             |
 | `bind:value`               | `value` + `onInput` (wrapper owns the decision)                  |
 | `class:active`             | `classList={{ active }}`                                         |
@@ -46,9 +62,9 @@ here disagrees with this file, fix one of them in the same change.
 
 ## Component mapping
 
-| `ui/src/lib/components/ui`                               | `ui-solid/src/lib/components/ui`                    |
+| shadcn-svelte component                                  | `src/lib/components/ui`                             |
 | :------------------------------------------------------- | :-------------------------------------------------- |
-| dialog, alert-dialog                                     | Terracotta `dialog` / `alert-dialog`                |
+| dialog, alert-dialog                                     | Terracotta `dialog` / `alert-dialog` (portaled)     |
 | dropdown-menu                                            | `Popover` + `Menu` (submenu: nested `Popover`)      |
 | popover                                                  | Terracotta `popover` + `useAnchoredPanel`           |
 | select                                                   | `Popover` + `Listbox`                               |
@@ -75,24 +91,23 @@ Keep `data-slot` on our wrappers: screenshot checks and tests select on it.
 
 ## Forbidden
 
-- `any` (and `as unknown as`), `solid-js/web`, `createResource`, `batch`,
-  `startTransition`, `produce`, `createMutable`, `createComputed`, `on(` at top
-  level of an effect body.
+- `any` (and `as unknown as`), `solid-js/web`, Solid's removed `createResource`,
+  `batch`, `startTransition`, `produce`, `createMutable`, `createComputed`, `on(`
+  at top level of an effect body.
 - `onCleanup` inside `onSettled` / `createEffect` (return the cleanup).
-- `data-state` based styles outside `ui-solid/src/lib/components/ui`.
-- Importing Svelte-only packages (`svelte-sonner`, `mode-watcher`, `vaul-svelte`,
-  `@lucide/svelte`, `bits-ui`).
+- `data-state` based styles outside `src/lib/components/ui`.
 - Reading a URL more than once for an entry-point screen; keep the existing
   "URL is an entry point, not a reactive input" rule with `untrack`.
 
 ## Commands
 
 ```sh
-pnpm --dir ui-solid install
-pnpm --dir ui-solid run check   # tsc --noEmit
-pnpm --dir ui-solid run build
-pnpm --dir ui-solid dev         # http://localhost:5174
+pnpm --dir ui install
+pnpm --dir ui run check   # generates Paraglide, then tsc --noEmit
+pnpm --dir ui run test    # generates Paraglide, then Vitest
+pnpm --dir ui run build
+pnpm --dir ui dev         # http://localhost:5173
 ```
 
-Gates for every porting PR: `check` clean, `build` clean, no console errors in
-the dev server, and a screenshot of the screen at 1100px in light and dark.
+Gates for every UI PR: `check` clean, `build` clean, no console errors in the
+dev server, and a screenshot of the screen at 1100px in light and dark.

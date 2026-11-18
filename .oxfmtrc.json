@@ -3,7 +3,6 @@
   "printWidth": 100,
   "endOfLine": "lf",
   "proseWrap": "preserve",
-  "svelte": true,
   "overrides": [
     {
       "files": ["**/*.md"],
@@ -19,7 +18,6 @@
     "workspace/**",
     "**/node_modules/**",
     "ui/build/**",
-    "ui/.svelte-kit/**",
     "ui/.vite/**",
     "ui/src/lib/generated/**",
     "ui/src/lib/paraglide/**",

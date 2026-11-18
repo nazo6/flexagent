@@ -9,7 +9,7 @@ import { isValidVapidKey, urlBase64ToUint8Array } from "./push-keys";
  * Subscribes with the hub's VAPID public key
  * (`GET /api/v1/system/info`) and registers via
  * `POST /api/v1/push/subscribe`. The Approve / Reject actions on the notification
- * banner call the API directly from the Service Worker (`src/service-worker.ts`).
+ * banner call the API directly from the Service Worker (`src/service-worker.js`).
  */
 
 export interface PushCapability {

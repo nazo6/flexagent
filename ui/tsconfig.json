@@ -15,7 +15,6 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "paths": {
-      "#lib/generated/bindings.ts": ["../ui/src/lib/generated/bindings.ts"],
       "#lib/*": ["./src/lib/*"]
     },
     "allowImportingTsExtensions": true

@@ -5,7 +5,6 @@ import NotFound from "../routes/NotFound";
 import ProjectsPage from "../routes/ProjectsPage";
 import SearchPage from "../routes/SearchPage";
 import SessionPage from "../routes/SessionPage";
-import Styleguide from "../routes/Styleguide";
 import BrowserSettings from "../routes/settings/BrowserSettings";
 import HubSettings from "../routes/settings/HubSettings";
 import NodeSettings from "../routes/settings/NodeSettings";
@@ -26,7 +25,6 @@ const routes = defineRoutes([
       { path: "/sessions/:id", component: SessionPage },
       { path: "/projects", component: ProjectsPage },
       { path: "/search", component: SearchPage },
-      { path: "/styleguide", component: Styleguide },
       {
         path: "/settings",
         component: SettingsShell,
