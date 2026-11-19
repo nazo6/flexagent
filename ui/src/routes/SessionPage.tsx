@@ -633,11 +633,11 @@ export default function SessionPage() {
                   forkFrom={session()?.parent_session_id ?? null}
                   forkFromTitle={forkFromTitle()}
                   forkAfterSeq={forkAfterSeq()}
-                  onfork={handleForkItem}
+                  onFork={handleForkItem}
                   canRevert={canRevert()}
-                  onrevert={(item) => void handleRevertItem(item)}
-                  onstopterminal={handleStopTerminal}
-                  onsubagent={(childSessionId) => setSelectedSubagentId(childSessionId)}
+                  onRevert={(item) => void handleRevertItem(item)}
+                  onStopTerminal={handleStopTerminal}
+                  onSubagent={(childSessionId) => setSelectedSubagentId(childSessionId)}
                 />
               </div>
             </div>
@@ -649,8 +649,8 @@ export default function SessionPage() {
                   subagent={subagent().subagent}
                   items={subagent().items}
                   status={currentStatus()}
-                  onclose={() => setSelectedSubagentId(null)}
-                  onstopterminal={handleStopTerminal}
+                  onClose={() => setSelectedSubagentId(null)}
+                  onStopTerminal={handleStopTerminal}
                 />
               )}
             </Show>
@@ -724,7 +724,7 @@ export default function SessionPage() {
                 class="hidden h-full shrink-0 flex-col overflow-hidden lg:flex"
                 style={{ width: `clamp(22rem, ${dock.width}%, 75%)` }}
               >
-                <DockHost ctx={context()} items={items()} oncollapse={() => dock.collapse()} />
+                <DockHost ctx={context()} items={items()} onCollapse={() => dock.collapse()} />
               </div>
             </>
           )}
@@ -735,8 +735,8 @@ export default function SessionPage() {
           <div class="hidden h-full lg:flex">
             <DockRail
               active={visibleLauncher()}
-              onselect={(id) => dock.toggleTool(id)}
-              oncollapse={() => layoutState.setRightRailCollapsed(true)}
+              onSelect={(id) => dock.toggleTool(id)}
+              onCollapse={() => layoutState.setRightRailCollapsed(true)}
             />
           </div>
         </Show>
@@ -758,7 +758,7 @@ export default function SessionPage() {
                   ctx={context()}
                   items={items()}
                   mobile
-                  oncollapse={() => dock.collapse()}
+                  onCollapse={() => dock.collapse()}
                 />
               </div>
             </div>

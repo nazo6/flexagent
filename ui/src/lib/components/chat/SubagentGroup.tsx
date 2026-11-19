@@ -11,7 +11,7 @@ import IconLoaderCircle from "~icons/lucide/loader-circle";
 
 export interface SubagentGroupProps {
   subagent: SubagentItem;
-  onopen?: (childSessionId: string) => void;
+  onOpen?: (childSessionId: string) => void;
   children?: JSX.Element;
 }
 
@@ -75,12 +75,12 @@ export default function SubagentGroup(props: SubagentGroupProps) {
           </Show>
           <Badge variant={running() ? "secondary" : "outline"}>{statusLabel()}</Badge>
         </button>
-        <Show when={props.onopen}>
-          {(onopen) => (
+        <Show when={props.onOpen}>
+          {(onOpen) => (
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => onopen()(props.subagent.childSessionId)}
+              onClick={() => onOpen()(props.subagent.childSessionId)}
               aria-label={m.chat_subagent_open()}
             >
               {m.chat_subagent_open()}

@@ -7,8 +7,8 @@ import IconPanelRightClose from "~icons/lucide/panel-right-close";
 
 export interface DockRailProps {
   active: DockLauncherId | null;
-  onselect: (id: DockLauncherId) => void;
-  oncollapse: () => void;
+  onSelect: (id: DockLauncherId) => void;
+  onCollapse: () => void;
 }
 
 /** Tool rail shown to the right of the session (desktop). */
@@ -32,7 +32,7 @@ export default function DockRail(props: DockRailProps) {
               title={tool.label()}
               aria-label={tool.label()}
               aria-pressed={props.active === tool.id ? "true" : "false"}
-              onClick={() => props.onselect(tool.id)}
+              onClick={() => props.onSelect(tool.id)}
             >
               <Dynamic component={tool.icon} class="size-4" />
             </button>
@@ -45,7 +45,7 @@ export default function DockRail(props: DockRailProps) {
         class="text-muted-foreground hover:bg-accent hover:text-foreground mt-auto flex size-8 items-center justify-center rounded-md transition-colors"
         title={m.session_tools_hide()}
         aria-label={m.session_tools_hide()}
-        onClick={() => props.oncollapse()}
+        onClick={() => props.onCollapse()}
       >
         <IconPanelRightClose class="size-4" />
       </button>

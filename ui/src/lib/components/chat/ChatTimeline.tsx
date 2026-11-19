@@ -38,7 +38,7 @@ export interface ChatTimelineProps {
   status?: SessionStatus | null;
   /** Nested rendering inside a subagent block (disables subagent grouping). */
   nested?: boolean;
-  onsubagent?: (childSessionId: string) => void;
+  onSubagent?: (childSessionId: string) => void;
   /** Title of the enclosing subagent (labels its approvals). */
   subagentTitle?: string | null;
   /** Fork capability reported by the session projection. */
@@ -50,16 +50,16 @@ export interface ChatTimelineProps {
   /** `node_seq` of the last event copied from the parent. */
   forkAfterSeq?: number | null;
   /** Called when the user chooses "Fork from here" on a message. */
-  onfork?: (item: TimelineItem) => void;
+  onFork?: (item: TimelineItem) => void;
   /** Whether the agent supports reverting the conversation. */
   canRevert?: boolean;
   /** Called when the user chooses "Revert to here" on a message. */
-  onrevert?: (item: TimelineItem) => void;
+  onRevert?: (item: TimelineItem) => void;
   /**
    * Called when the user stops a command that is still running. Must resolve
    * when the request finished so the card re-enables the button on failure.
    */
-  onstopterminal?: (terminalId: string) => Promise<void>;
+  onStopTerminal?: (terminalId: string) => Promise<void>;
 }
 
 /**
@@ -75,10 +75,10 @@ interface TimelineContext {
   sessionId: string;
   status: SessionStatus | null;
   subagentTitle: string | null;
-  onsubagent: ((childSessionId: string) => void) | undefined;
-  onfork: ((item: TimelineItem) => void) | undefined;
-  onrevert: ((item: TimelineItem) => void) | undefined;
-  onstopterminal: ((terminalId: string) => Promise<void>) | undefined;
+  onSubagent: ((childSessionId: string) => void) | undefined;
+  onFork: ((item: TimelineItem) => void) | undefined;
+  onRevert: ((item: TimelineItem) => void) | undefined;
+  onStopTerminal: ((terminalId: string) => Promise<void>) | undefined;
   stopTerminal: (terminalId: string) => void;
   isStoppingTerminal: (terminalId: string) => boolean;
   sessionStopped: boolean;
@@ -133,14 +133,14 @@ function GroupView(props: { group: TimelineGroup; ctx: TimelineContext }) {
     <Switch>
       <Match when={props.group.kind === "subagent" ? props.group : null}>
         {(group) => (
-          <SubagentGroup subagent={group().subagent} onopen={props.ctx.onsubagent}>
+          <SubagentGroup subagent={group().subagent} onOpen={props.ctx.onSubagent}>
             <ChatTimeline
               sessionId={props.ctx.sessionId}
               items={group().items}
               status={props.ctx.status}
               nested
-              onsubagent={props.ctx.onsubagent}
-              onstopterminal={props.ctx.onstopterminal}
+              onSubagent={props.ctx.onSubagent}
+              onStopTerminal={props.ctx.onStopTerminal}
               subagentTitle={group().subagent.title ?? group().subagent.description ?? null}
             />
           </SubagentGroup>
@@ -204,8 +204,8 @@ function SingleRow(props: { item: TimelineItem; ctx: TimelineContext }): JSX.Ele
               prominent={item().seq === ctx().lastForkableSeq}
               meta={`${item().clientSource} · ${formatClockTime(item().createdAt)}`}
               metaTitle={formatEpochMs(item().createdAt)}
-              onfork={() => ctx().onfork?.(item())}
-              onrevert={() => ctx().onrevert?.(item())}
+              onFork={() => ctx().onFork?.(item())}
+              onRevert={() => ctx().onRevert?.(item())}
             />
           </div>
         )}
@@ -233,7 +233,7 @@ function SingleRow(props: { item: TimelineItem; ctx: TimelineContext }): JSX.Ele
               canRevert={null}
               revertReason={null}
               prominent={item().seq === ctx().lastForkableSeq}
-              onfork={() => ctx().onfork?.(item())}
+              onFork={() => ctx().onFork?.(item())}
             />
           </div>
         )}
@@ -252,7 +252,7 @@ function SingleRow(props: { item: TimelineItem; ctx: TimelineContext }): JSX.Ele
                 {item().command === "" ? item().terminalId : item().command}
               </span>
               <Show
-                when={item().running && !ctx().sessionStopped && ctx().onstopterminal !== undefined}
+                when={item().running && !ctx().sessionStopped && ctx().onStopTerminal !== undefined}
                 fallback={
                   <Show when={item().exitCode !== null}>
                     <Badge variant={item().exitCode === 0 ? "secondary" : "destructive"}>
@@ -419,9 +419,9 @@ export default function ChatTimeline(props: ChatTimelineProps) {
   const [stoppingTerminals, setStoppingTerminals] = createSignal<ReadonlySet<string>>(new Set());
 
   function stopTerminal(terminalId: string): void {
-    if (stoppingTerminals().has(terminalId) || props.onstopterminal === undefined) return;
+    if (stoppingTerminals().has(terminalId) || props.onStopTerminal === undefined) return;
     setStoppingTerminals((current) => new Set(current).add(terminalId));
-    void props.onstopterminal(terminalId).finally(() => {
+    void props.onStopTerminal(terminalId).finally(() => {
       setStoppingTerminals((current) => {
         if (!current.has(terminalId)) return current;
         const next = new Set(current);
@@ -525,7 +525,7 @@ export default function ChatTimeline(props: ChatTimelineProps) {
   });
 
   const revertState = createMemo(() => {
-    if (nested() || props.onrevert === undefined || !canRevert()) {
+    if (nested() || props.onRevert === undefined || !canRevert()) {
       return { canRevert: null as boolean | null, reason: null as string | null };
     }
     if (sessionBusy()) {
@@ -535,7 +535,7 @@ export default function ChatTimeline(props: ChatTimelineProps) {
   });
 
   function forkState(item: TimelineItem): { canFork: boolean | null; reason: string | null } {
-    if (nested() || props.onfork === undefined || forkScope() === null || forkScope() === "none") {
+    if (nested() || props.onFork === undefined || forkScope() === null || forkScope() === "none") {
       return { canFork: null, reason: null };
     }
     if (sessionBusy() || (item.kind === "agent" && item.streaming)) {
@@ -556,10 +556,10 @@ export default function ChatTimeline(props: ChatTimelineProps) {
     sessionId: props.sessionId,
     status: status(),
     subagentTitle: props.subagentTitle ?? null,
-    onsubagent: props.onsubagent,
-    onfork: props.onfork,
-    onrevert: props.onrevert,
-    onstopterminal: props.onstopterminal,
+    onSubagent: props.onSubagent,
+    onFork: props.onFork,
+    onRevert: props.onRevert,
+    onStopTerminal: props.onStopTerminal,
     stopTerminal,
     isStoppingTerminal,
     sessionStopped: sessionStopped(),

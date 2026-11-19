@@ -14,9 +14,9 @@ export interface ComposerTextareaProps {
   /** Height cap in pixels; the textarea scrolls beyond it. */
   maxHeight?: number;
   class?: string;
-  onkeydown?: (event: KeyboardEvent) => void;
-  onpaste?: (event: ClipboardEvent) => void;
-  ondrop?: (event: DragEvent) => void;
+  onKeyDown?: (event: KeyboardEvent) => void;
+  onPaste?: (event: ClipboardEvent) => void;
+  onDrop?: (event: DragEvent) => void;
   /** Called with the edited text (`bind:value` in the Svelte app). */
   onValueChange?: (value: string) => void;
 }
@@ -67,10 +67,10 @@ export default function ComposerTextarea(props: ComposerTextareaProps) {
         props.onValueChange?.(event.currentTarget.value);
         resize(event.currentTarget, maxHeight());
       }}
-      onKeyDown={(event) => props.onkeydown?.(event)}
-      onPaste={(event) => props.onpaste?.(event)}
+      onKeyDown={(event) => props.onKeyDown?.(event)}
+      onPaste={(event) => props.onPaste?.(event)}
       onDragOver={onDragOver}
-      onDrop={(event) => props.ondrop?.(event)}
+      onDrop={(event) => props.onDrop?.(event)}
       class={cn(
         "placeholder:text-muted-foreground w-full resize-none overflow-y-auto bg-transparent px-2 py-2 text-sm leading-relaxed outline-none disabled:cursor-not-allowed disabled:opacity-50",
         props.class,

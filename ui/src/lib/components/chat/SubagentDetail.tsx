@@ -12,9 +12,9 @@ export interface SubagentDetailProps {
   subagent: SubagentItem;
   items: TimelineItem[];
   status?: SessionStatus | null;
-  onclose: () => void;
+  onClose: () => void;
   /** Called when the user stops a command still running in the subagent. */
-  onstopterminal?: (terminalId: string) => Promise<void>;
+  onStopTerminal?: (terminalId: string) => Promise<void>;
 }
 
 /** Slide-over panel that shows the conversation of one child session. */
@@ -28,7 +28,7 @@ export default function SubagentDetail(props: SubagentDetailProps) {
         type="button"
         class="fixed inset-0 z-40 cursor-default bg-black/30"
         aria-label={m.chat_subagent_close()}
-        onClick={() => props.onclose()}
+        onClick={() => props.onClose()}
       />
       <dialog
         open
@@ -46,7 +46,7 @@ export default function SubagentDetail(props: SubagentDetailProps) {
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => props.onclose()}
+            onClick={() => props.onClose()}
             aria-label={m.chat_subagent_close()}
           >
             <IconX class="size-4" />
@@ -59,7 +59,7 @@ export default function SubagentDetail(props: SubagentDetailProps) {
             status={props.status ?? null}
             nested
             subagentTitle={title()}
-            onstopterminal={props.onstopterminal}
+            onStopTerminal={props.onStopTerminal}
           />
         </div>
       </dialog>

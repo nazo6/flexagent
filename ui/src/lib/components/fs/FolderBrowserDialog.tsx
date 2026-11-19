@@ -73,9 +73,9 @@ export default function FolderBrowserDialog(props: FolderBrowserDialogProps) {
             quickPaths={props.quickPaths ?? []}
             files={props.files ?? false}
             class="h-full"
-            onpathchange={setPickerPath}
-            onselectionchange={setSelectedPath}
-            onloadingchange={setPickerLoading}
+            onPathChange={setPickerPath}
+            onSelectionChange={setSelectedPath}
+            onLoadingChange={setPickerLoading}
           />
         </div>
 

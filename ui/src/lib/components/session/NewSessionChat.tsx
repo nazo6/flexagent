@@ -1040,7 +1040,7 @@ export default function NewSessionChat() {
                         {(project) => (
                           <PickerItem
                             selected={project.project_id === selectedProject()?.project_id}
-                            onselect={() => selectProject(project.project_id)}
+                            onSelect={() => selectProject(project.project_id)}
                           >
                             <span class="block truncate">{project.name}</span>
                           </PickerItem>
@@ -1155,7 +1155,7 @@ export default function NewSessionChat() {
                         {(candidate) => (
                           <PickerItem
                             selected={candidate.path === localPath()}
-                            onselect={() => selectPath(candidate.path)}
+                            onSelect={() => selectPath(candidate.path)}
                           >
                             <span class="block truncate">{pathBasename(candidate.path)}</span>
                             <span
@@ -1263,7 +1263,7 @@ export default function NewSessionChat() {
                               <PickerItem
                                 selected={!isProvisionerMode() && node.node_id === nodeId()}
                                 disabled={!availability().isAvailable}
-                                onselect={() => selectNode(node.node_id)}
+                                onSelect={() => selectNode(node.node_id)}
                               >
                                 <span class="flex items-center gap-1.5">
                                   <span
@@ -1328,7 +1328,7 @@ export default function NewSessionChat() {
                               selected={
                                 isProvisionerMode() && provisioner.name === provisionerName()
                               }
-                              onselect={() => selectProvisioner(provisioner.name)}
+                              onSelect={() => selectProvisioner(provisioner.name)}
                             >
                               <span class="block truncate">
                                 {provisioner.description ?? provisioner.name}
@@ -1435,7 +1435,7 @@ export default function NewSessionChat() {
                                       {(agent) => (
                                         <PickerItem
                                           selected={agent.id === effectiveAgent()}
-                                          onselect={() => selectAgent(agent.id)}
+                                          onSelect={() => selectAgent(agent.id)}
                                         >
                                           <span class="flex min-w-0 items-center gap-2">
                                             <AgentIcon icon={agent.icon} class="size-4" />
@@ -1520,7 +1520,7 @@ export default function NewSessionChat() {
                       (capabilitiesLoading() || capabilitiesKey() !== probeKey())
                     }
                   >
-                    <ModePicker modes={[]} loading={true} class="shrink-0" onchange={() => {}} />
+                    <ModePicker modes={[]} loading={true} class="shrink-0" onChange={() => {}} />
                   </Show>
                   <Show
                     when={
@@ -1537,7 +1537,7 @@ export default function NewSessionChat() {
                       value={sessionMode() === "default" ? null : sessionMode()}
                       allowDefault={true}
                       class="shrink-0"
-                      onchange={(modeId) => {
+                      onChange={(modeId) => {
                         const mode = modeId ?? "default";
                         setChosenMode(mode);
                         persistPrefs({ agent: effectiveAgent(), mode });
@@ -1588,9 +1588,9 @@ export default function NewSessionChat() {
                         value={selectedConfigValues()[option().key]}
                         class="shrink-0"
                         favoriteScope={effectiveAgent()}
-                        onchange={(value) => changeConfigOption(option().key, value)}
+                        onChange={(value) => changeConfigOption(option().key, value)}
                         showRefresh={isModelOption(option())}
-                        onrefresh={() => void loadAgentCapabilities(true)}
+                        onRefresh={() => void loadAgentCapabilities(true)}
                       />
                     )}
                   </For>
@@ -1736,7 +1736,7 @@ export default function NewSessionChat() {
                   disabled={!canSubmit() || busy()}
                   title={startTitle()}
                   label={m.new_session_start()}
-                  onclick={() => void handleStartSession()}
+                  onClick={() => void handleStartSession()}
                 />
               </>
             }
@@ -1744,9 +1744,9 @@ export default function NewSessionChat() {
             <ComposerTextarea
               value={promptText()}
               onValueChange={updatePromptText}
-              onkeydown={onKeydown}
-              onpaste={composer.onPaste}
-              ondrop={composer.onDrop}
+              onKeyDown={onKeydown}
+              onPaste={composer.onPaste}
+              onDrop={composer.onDrop}
               rows={3}
               placeholder={m.new_session_prompt_placeholder()}
               ariaLabel={m.new_session_prompt_label()}

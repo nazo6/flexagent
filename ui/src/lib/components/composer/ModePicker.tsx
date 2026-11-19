@@ -14,7 +14,7 @@ export interface ModePickerProps {
   allowDefault?: boolean;
   loading?: boolean;
   disabled?: boolean;
-  onchange: (modeId: string | null) => void;
+  onChange: (modeId: string | null) => void;
   class?: string;
 }
 
@@ -57,8 +57,8 @@ export default function ModePicker(props: ModePickerProps) {
         <Show when={props.allowDefault ?? false}>
           <PickerItem
             selected={(props.value ?? null) === null}
-            onselect={() => {
-              props.onchange(null);
+            onSelect={() => {
+              props.onChange(null);
               setOpen(false);
             }}
           >
@@ -69,8 +69,8 @@ export default function ModePicker(props: ModePickerProps) {
           {(item) => (
             <PickerItem
               selected={item.value === props.value}
-              onselect={() => {
-                props.onchange(item.value);
+              onSelect={() => {
+                props.onChange(item.value);
                 setOpen(false);
               }}
             >

@@ -11,7 +11,7 @@ export interface ComposerSendButtonProps {
   title: string;
   /** Accessible name; defaults to the tooltip. */
   label?: string;
-  onclick: () => void;
+  onClick: () => void;
 }
 
 /** Round send button shared by the session and new-session composers. */
@@ -23,7 +23,7 @@ export default function ComposerSendButton(props: ComposerSendButtonProps) {
       disabled={props.disabled ?? false}
       title={props.title}
       aria-label={props.label ?? props.title}
-      onClick={() => props.onclick()}
+      onClick={() => props.onClick()}
     >
       <Show when={props.busy ?? false} fallback={<IconArrowUp class="size-4" />}>
         <IconLoaderCircle class="size-4 animate-spin" />

@@ -17,14 +17,14 @@ export interface MessageActionsProps {
   canRevert?: boolean | null;
   /** Why Revert is disabled (shown as a tooltip). */
   revertReason?: string | null;
-  onrevert?: () => void;
+  onRevert?: () => void;
   /** Keep the actions visible even on pointer devices (used for the latest message). */
   prominent?: boolean;
   /** Metadata shown at the right end of the boundary row. */
   meta?: string | null;
   /** Full value shown when hovering the metadata (for example a full date). */
   metaTitle?: string | null;
-  onfork?: () => void;
+  onFork?: () => void;
 }
 
 /**
@@ -103,7 +103,7 @@ export default function MessageActions(props: MessageActionsProps) {
             title={revertTitle()}
             aria-label={revertTitle()}
             disabled={!props.canRevert}
-            onClick={() => props.onrevert?.()}
+            onClick={() => props.onRevert?.()}
           >
             <IconUndo2 class="size-3" />
             {m.chat_action_revert()}
@@ -117,7 +117,7 @@ export default function MessageActions(props: MessageActionsProps) {
             title={forkTitle()}
             aria-label={forkTitle()}
             disabled={!props.canFork}
-            onClick={() => props.onfork?.()}
+            onClick={() => props.onFork?.()}
           >
             <IconGitFork class="size-3" />
             {m.chat_action_fork_short()}

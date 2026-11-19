@@ -166,7 +166,7 @@ export default function TerminalTool(props: TerminalToolProps) {
                   terminalId={tab().id}
                   fill
                   active={props.active && tab().id === activeTerminal()}
-                  onregister={(kill) => killers.set(tab().id, kill)}
+                  onRegister={(kill) => killers.set(tab().id, kill)}
                 />
               </div>
             )}

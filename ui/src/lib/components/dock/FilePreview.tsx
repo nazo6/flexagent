@@ -37,7 +37,7 @@ export interface FilePreviewProps {
   tab: DockFileTab;
   mobile?: boolean;
   /** Mobile: show the tree again. */
-  onback: () => void;
+  onBack: () => void;
 }
 
 /** One file tab: source view, markdown preview or a diff. */
@@ -200,7 +200,7 @@ export default function FilePreview(props: FilePreviewProps) {
             class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md transition-colors"
             title={m.dock_files_title()}
             aria-label={m.dock_files_title()}
-            onClick={() => props.onback()}
+            onClick={() => props.onBack()}
           >
             <IconChevronLeft class="size-4" />
           </button>
