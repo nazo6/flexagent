@@ -39,8 +39,9 @@ CLI のコマンド・引数の正は `fxg --help` / `fxg <noun> --help` と
 - `fxg internal ...`: システム連携用の隠しコマンド。
 
 `fxg session ...` などのローカル API を使うコマンドは、ノードが起動していない
-場合に `fxg node start --detach` 相当で自動起動します。自動起動を無効化するには
-`FXG_NO_AUTO_NODE=1` を設定します。
+場合に自動起動せず、`fxg node start --detach` を案内するエラーで終了します。
+暗黙にバックグラウンドプロセスを増やさないため、`fxg node start` または
+`fxg service install node` で明示的に起動してください。
 
 ## 2. 設定の所有者とディレクトリ構造
 
@@ -98,8 +99,7 @@ Linux では XDG にログ用のクラスがないため、`<logs>` は `<state>
 
 <state>/
 ├── node/
-│   ├── node.addr                   # 稼働中ノードの待受アドレス (実行時のみ)
-│   └── start.lock                  # CLI の自動起動ロック
+│   └── node.addr                   # 稼働中ノードの待受アドレス (実行時のみ)
 └── hub/
     └── hub.addr                    # 稼働中ハブの待受アドレス (実行時のみ)
 

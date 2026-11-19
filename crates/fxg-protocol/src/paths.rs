@@ -15,7 +15,7 @@
 //! ```text
 //! <config>/node.toml
 //! <data>/node/{node.db,auth_token,node_token,secrets/,worktrees/}
-//! <state>/node/{node.addr,start.lock}
+//! <state>/node/node.addr
 //! <logs>/node/node.log
 //! ```
 
@@ -277,11 +277,6 @@ impl Paths {
             .join(format!("{}.addr", self.role.as_str()))
     }
 
-    /// Auto-start lock file (`<state>/<role>/start.lock`).
-    pub fn start_lock_path(&self) -> PathBuf {
-        self.state_dir().join("start.lock")
-    }
-
     /// Cache directory (`<cache>/<role>`).
     pub fn cache_dir(&self) -> PathBuf {
         self.roots.cache.join(self.role.as_str())
@@ -369,10 +364,6 @@ mod tests {
         assert_eq!(
             node.addr_path(),
             PathBuf::from("/tmp/fxg-home/state/node/node.addr")
-        );
-        assert_eq!(
-            node.start_lock_path(),
-            PathBuf::from("/tmp/fxg-home/state/node/start.lock")
         );
         assert_eq!(
             node.log_path(),

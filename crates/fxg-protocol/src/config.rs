@@ -32,8 +32,6 @@ pub mod env_keys {
     pub const NODE_ALLOWED_HOSTS: &str = "FXG_NODE_ALLOWED_HOSTS";
     /// `node.toml` `allowed_origins` (comma separated)
     pub const NODE_ALLOWED_ORIGINS: &str = "FXG_NODE_ALLOWED_ORIGINS";
-    /// Disable automatic `fxg node start` startup from CLI commands (`1` / `true`)
-    pub const NO_AUTO_NODE: &str = "FXG_NO_AUTO_NODE";
     /// Idle seconds before a warm ACP agent process is disposed (0 = keep until shutdown)
     pub const AGENT_WARM_IDLE_SECS: &str = "FXG_AGENT_WARM_IDLE_SECS";
     /// `hub.toml` `listen_addr`

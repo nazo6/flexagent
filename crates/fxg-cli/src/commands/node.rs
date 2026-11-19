@@ -161,7 +161,7 @@ impl usage::RunAsync for NodeStartArgs {
         let config_file =
             fxg_protocol::config::NodeConfig::load(&env).context("failed to load node.toml")?;
 
-        if NodeClient::connect_existing().await.is_ok() {
+        if NodeClient::connect().await.is_ok() {
             println!("node is already running");
             return Ok(());
         }
@@ -266,7 +266,7 @@ impl usage::RunAsync for NodeStartArgs {
 async fn wait_for_node() -> Result<NodeClient> {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        match NodeClient::connect_existing().await {
+        match NodeClient::connect().await {
             Ok(client) => return Ok(client),
             Err(err) if Instant::now() < deadline => {
                 tracing::trace!("node not ready yet: {err}");
@@ -294,7 +294,7 @@ impl usage::RunAsync for NodeStopArgs {
             println!("node stopped (service)");
             return Ok(());
         }
-        match NodeClient::connect_existing().await {
+        match NodeClient::connect().await {
             Ok(mut client) => {
                 client.shutdown().await?;
                 println!("node stopped");
@@ -318,7 +318,7 @@ impl usage::RunAsync for NodeRestartArgs {
             println!("node restarted (service)");
             return Ok(());
         }
-        if let Ok(mut client) = NodeClient::connect_existing().await {
+        if let Ok(mut client) = NodeClient::connect().await {
             client.shutdown().await?;
         }
         crate::spawn::spawn_background(
@@ -356,7 +356,7 @@ impl usage::RunAsync for NodeStatusArgs {
 
     async fn run_async(self) -> Self::Output {
         let service_installed = crate::service::is_installed(ServiceTarget::Node);
-        let running = match NodeClient::connect_existing().await {
+        let running = match NodeClient::connect().await {
             Ok(mut client) => {
                 let address = client.base().to_owned();
                 Some((address, client.local_status().await?))

@@ -1,13 +1,12 @@
 //! Local node HTTP / WebSocket client and CLI output helpers.
 //!
-//! The `fxg` CLI drives the local daemon through its loopback HTTP API
+//! The `fxg` CLI drives the local node through its loopback HTTP API
 //! (`fxg node start`). The address is published in `<state>/node/node.addr`;
-//! a stale file is discarded by probing `GET /api/v1/meta` and auto-starting the
-//! node when allowed (`FXG_NO_AUTO_NODE=1` disables auto-start).
+//! when the node is not running the CLI fails with a hint instead of starting
+//! it implicitly.
 
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use fxg_protocol::CommandId;
@@ -21,16 +20,12 @@ use fxg_protocol::client_api::{
 use fxg_protocol::common::{
     ClientSource, CommandResult, PromptInput, SessionControlAction, SessionStatus, SessionSummary,
 };
-use fxg_protocol::config::{EnvLookup, NodeConfig, env_keys, process_env};
+use fxg_protocol::config::{EnvLookup, NodeConfig, process_env};
 use fxg_protocol::paths::{Paths, Role};
 use fxg_protocol::{NodeId, ProjectId};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-/// How long to wait for a freshly spawned daemon to accept HTTP connections.
-const NODE_START_TIMEOUT: Duration = Duration::from_secs(15);
-/// A startup lock older than this is considered stale (crashed starter).
-const NODE_START_LOCK_STALE: Duration = Duration::from_secs(30);
 /// Number of sessions fetched by list / status commands.
 const SESSION_LIST_LIMIT: u32 = 200;
 
@@ -53,16 +48,6 @@ pub struct NodeClient {
     token: String,
     http: reqwest::Client,
     node_id: String,
-}
-
-/// Whether automatic daemon startup is enabled (`FXG_NO_AUTO_NODE=1` disables it).
-fn auto_node_enabled() -> bool {
-    !matches!(
-        process_env(env_keys::NO_AUTO_NODE)
-            .map(|value| value.trim().to_ascii_lowercase())
-            .as_deref(),
-        Some("1" | "true" | "yes" | "on")
-    )
 }
 
 /// Base URL of the local node (`node.addr`, then `node.toml` `listen_addr`, then
@@ -89,151 +74,16 @@ fn token_path() -> PathBuf {
     Paths::resolve(&process_env, Role::Node).auth_token_path()
 }
 
-/// Starts `fxg node start` in the background once.
-///
-/// Returns the node log path so the caller can include it in an error message.
-fn ensure_node_started() -> Result<PathBuf> {
-    let paths = Paths::resolve(&process_env, Role::Node);
-    let log_path = paths.log_path();
-    if let Some(parent) = log_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-
-    let lock_path = paths.start_lock_path();
-    for attempt in 0..2 {
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock_path)
-        {
-            Ok(mut lock) => {
-                fxg_protocol::discard_with!(
-                    writeln!(lock, "{}", std::process::id()),
-                    "best-effort pid note in the node startup lock"
-                );
-                let spawn_result =
-                    crate::spawn::spawn_background(&["node", "start"], Role::Node, "node.log");
-                remove_start_lock(&lock_path);
-                spawn_result?;
-                return Ok(log_path);
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-                // Another CLI is already starting the node; wait for it.
-                if attempt == 0 && lock_is_stale(&lock_path) {
-                    remove_start_lock(&lock_path);
-                    continue;
-                }
-                return Ok(log_path);
-            }
-            Err(err) => {
-                return Err(err)
-                    .with_context(|| format!("failed to create {}", lock_path.display()));
-            }
-        }
-    }
-    Ok(log_path)
-}
-
-/// Whether a startup lock is old enough to be considered abandoned.
-fn lock_is_stale(path: &Path) -> bool {
-    let Ok(metadata) = std::fs::metadata(path) else {
-        return false;
-    };
-    let Ok(modified) = metadata.modified() else {
-        tracing::debug!(path = %path.display(), "startup lock has no modification time");
-        return false;
-    };
-    match modified.elapsed() {
-        Ok(age) => age > NODE_START_LOCK_STALE,
-        Err(err) => {
-            tracing::debug!(path = %path.display(), "startup lock mtime is in the future: {err}");
-            false
-        }
-    }
-}
-
-/// Removes the startup lock (best effort).
-fn remove_start_lock(path: &Path) {
-    fxg_protocol::discard_with!(std::fs::remove_file(path), "remove the node startup lock");
-}
-
-fn probe_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(Duration::from_millis(700))
-        .build()
-        .context("failed to build the node probe client")
-}
-
-/// Probes the authenticated system info to distinguish a live node for this
-/// FXG home from a stale `node.addr` or an unrelated service on the same port.
-async fn node_ready(base: &str) -> bool {
-    let Ok(client) = probe_client() else {
-        return false;
-    };
-    let Ok(token) = fxg_api::auth::load_or_create_token(&token_path()) else {
-        return false;
-    };
-    let Ok(response) = client
-        .get(format!("{base}/api/v1/system/info"))
-        .bearer_auth(token)
-        .send()
-        .await
-    else {
-        return false;
-    };
-    if !response.status().is_success() {
-        return false;
-    }
-    let Ok(info) = response.json::<SystemInfoResponse>().await else {
-        return false;
-    };
-    info.role == ConnectionRole::LocalNode
-}
-
-/// Waits for a node to answer `/api/v1/meta`, re-reading `node.addr` while the
-/// daemon binds its port.
-async fn wait_for_node_ready(timeout: Duration) -> Option<String> {
-    let deadline = Instant::now() + timeout;
-    loop {
-        if let Ok(base) = local_node_base(&process_env)
-            && node_ready(&base).await
-        {
-            return Some(base);
-        }
-        if Instant::now() >= deadline {
-            return None;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-}
-
 impl NodeClient {
-    /// Connect to the local node, starting `fxg node start` if needed.
+    /// Connect to a running local node.
+    ///
+    /// The CLI never starts the node implicitly: a missing node is reported so
+    /// that the user (or the init system) stays in control of the process.
     pub async fn connect() -> Result<Self> {
         let base = local_node_base(&process_env)?;
-        if let Ok(client) = Self::from_base(base.clone()).await {
-            return Ok(client);
-        }
-        if !auto_node_enabled() {
-            bail!("cannot connect to the node ({base}); start `fxg node start` first");
-        }
-        let log_path = ensure_node_started()?;
-        let Some(base) = wait_for_node_ready(NODE_START_TIMEOUT).await else {
-            bail!(
-                "cannot connect to the node after auto-start; see {} (set FXG_NO_AUTO_NODE=1 to disable auto-start)",
-                log_path.display()
-            );
-        };
-        Self::from_base(base).await
-    }
-
-    /// Connect to a running node without auto-starting it.
-    pub async fn connect_existing() -> Result<Self> {
-        let base = local_node_base(&process_env)?;
-        Self::from_base(base.clone())
-            .await
-            .with_context(|| format!("node is not running ({base}); start `fxg node start` first"))
+        Self::from_base(base.clone()).await.with_context(|| {
+            format!("node is not running ({base}); start it with `fxg node start --detach`")
+        })
     }
 
     /// Base URL of the connected node (`http://host:port`).

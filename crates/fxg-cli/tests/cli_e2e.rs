@@ -42,8 +42,6 @@ impl TestEnv {
     fn command(&self) -> Command {
         let mut command = Command::new(fxg_bin());
         command.env("FXG_HOME", &self.home);
-        // Never auto-start a competing node while waiting for the explicit one.
-        command.env("FXG_NO_AUTO_NODE", "1");
         command
     }
 
@@ -210,12 +208,10 @@ async fn cli_commands_work_through_node_http() {
 }
 
 #[tokio::test]
-async fn cli_reports_missing_node_when_auto_start_is_disabled() {
+async fn cli_reports_missing_node() {
     let env = TestEnv::new();
-    // Auto-start is on by default; disable it to keep testing the error path.
     let output = env
         .command()
-        .env(fxg_protocol::config::env_keys::NO_AUTO_NODE, "1")
         .arg("session")
         .arg("list")
         .stdin(Stdio::null())

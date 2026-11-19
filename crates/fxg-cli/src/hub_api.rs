@@ -158,8 +158,8 @@ pub async fn resolve_hub_base(env: EnvLookup<'_>, hub: Option<&str>) -> Result<S
         }
     }
     // The node owns the pairing, so ask it instead of re-reading files.
-    // `connect_existing` never auto-starts a node from a hub command.
-    if let Ok(mut node) = crate::client::NodeClient::connect_existing().await
+    // Hub commands never start a node; a missing node falls through to `hub.toml`.
+    if let Ok(mut node) = crate::client::NodeClient::connect().await
         && let Ok(snapshot) = node.node_settings().await
         && let Some(url) = snapshot.pairing.hub_url
     {

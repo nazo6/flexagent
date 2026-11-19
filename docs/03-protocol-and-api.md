@@ -431,8 +431,9 @@ CLI (`fxg`) はローカルノードのループバック HTTP / WS API を使�
   `hub.toml` の `listen_addr` の順で解決する。
 - 認証: `<data>/node/auth_token`（ハブへ接続する場合は
   `<data>/hub/auth_token`）を読み、`Authorization: Bearer` を付与する。
-- `node.addr` が stale な場合は `system/info` で疎通を確認し、必要なら
-  `fxg node start --detach` 相当で自動起動する。`FXG_NO_AUTO_NODE=1` で無効化する。
+- ノードへ接続できない場合、CLI は自動起動せずに `fxg node start --detach`
+  を案内するエラーを返す。`node.addr` が stale な場合も `system/info` で
+  疎通を確認し、接続失敗として扱う。
 
 CLI のコマンド・引数の正は `fxg --help` / `fxg <noun> --help` と
 `__usage_spec__` です。このドキュメントでは個別のコマンド一覧を複製しません。
