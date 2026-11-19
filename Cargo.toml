@@ -84,3 +84,14 @@ all = { level = "warn", priority = -1 }
 # `disallowed_methods` is part of `clippy::all` in recent toolchains, so it must
 # stay `allow` here and be enabled explicitly by `lint:errors`.
 disallowed_methods = "allow"
+
+# Debug builds used to embed full DWARF for every dependency: the `fxg` binary
+# reached ~577 MB (`target/debug` ~8.8 GB). Keep line tables for the workspace so
+# backtraces still carry file/line, but do not keep full debuginfo.
+[profile.dev]
+debug = "line-tables-only"
+
+# Dependencies keep symbols (readable backtraces) but no debuginfo at all; this
+# is the bulk of the size and nobody steps through `reqwest` in this repo.
+[profile.dev.package."*"]
+debug = false

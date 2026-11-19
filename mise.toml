@@ -10,6 +10,19 @@ pnpm = "12.8.1"
 watchexec = "2.8.0"
 tombi = "1.5.8"
 
+[env]
+# Development runs use an isolated portable home and non-default loopback ports
+# so that `mise run dev`, the `fxg` shell alias and any `cargo run` in this
+# repository never touch the production node's database, tokens, secrets,
+# worktrees or ports. The OS-level directories and 7860 / 8080 stay reserved for
+# the installed node / hub (`fxg service install`).
+# See `docs/development.md` §5.
+FXG_HOME = "{{env.HOME | default(value=env.USERPROFILE)}}/.local/share/flexagent-dev"
+FXG_NODE_LISTEN_ADDR = "127.0.0.1:7861"
+FXG_HUB_LISTEN_ADDR = "127.0.0.1:8081"
+# Vite dev server API proxy target (`ui/vite.config.ts`).
+FXG_DEV_PROXY = "http://127.0.0.1:7861"
+
 [shell_alias]
 fxg = "cargo run -p fxg-cli --"
 
@@ -133,22 +146,47 @@ cargo sqlx prepare --workspace --check -- --all-targets
 """
 
 [tasks."dev:ui"]
-description = "Start the UI (Vite) dev server (http://localhost:5173)"
+description = "Start the UI (Vite) dev server, proxying to the isolated dev node (http://localhost:5173)"
 run = "pnpm --dir ui run dev"
 
 [tasks."dev:node"]
-description = "Start the debug local node, rebuilding and restarting on Rust changes (http://127.0.0.1:7860)"
+description = "Start the debug local node in the isolated dev home, rebuilding and restarting on Rust changes (http://127.0.0.1:7861)"
 # Only crates/ and Cargo files: the UI is covered by Vite HMR. SIGINT gives the
 # node a graceful shutdown (on Windows watchexec maps it to CTRL+C).
+# `FXG_HOME` and the listen address come from `[env]`.
+# When using fxg to develop fxg, do not host the editing session on a node that
+# restarts on every save (see `docs/development.md` §5.4).
 run = "watchexec -r -w crates -w Cargo.toml -w Cargo.lock --stop-signal SIGINT -- cargo run -p fxg-cli -- node start"
 
 [tasks."dev:hub"]
-description = "Start the debug hub, rebuilding and restarting on Rust changes (http://0.0.0.0:8080)"
+description = "Start the debug hub in the isolated dev home, bound to loopback (http://127.0.0.1:8081)"
 run = "watchexec -r -w crates -w Cargo.toml -w Cargo.lock --stop-signal SIGINT -- cargo run -p fxg-cli -- hub start"
 
 [tasks.dev]
 description = "Start the Vite dev server and the debug binary (`fxg node start`) in parallel (UI via HMR, Rust restarts on change)"
 run = [{ tasks = ["dev:ui", "dev:node"] }]
+
+[tasks."dev:home"]
+description = "Print the isolated development home (FXG_HOME) and its member paths"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+echo "FXG_HOME=$FXG_HOME"
+echo "node db:   $FXG_HOME/data/node/node.db"
+echo "node addr: $FXG_HOME/state/node/node.addr"
+echo "logs:      $FXG_HOME/logs/node/node.log"
+"""
+
+[tasks."install:prod"]
+description = "Build the UI, then compile and install the production `fxg` (cargo install --locked)"
+# `ui/build` is embedded by `rust-embed`, so it must exist before the release
+# build; otherwise the binary ships the "UI not built" placeholder.
+# `cargo install` copies the binary to ~/.cargo/bin, so later dev rebuilds never
+# touch the installed production binary (see `docs/development.md` §5.6).
+run = [
+  { task = "build:ui" },
+  "cargo install --path crates/fxg-cli --locked --force",
+]
 
 [tasks.build]
 description = "Build the `fxg` binary in release mode"
