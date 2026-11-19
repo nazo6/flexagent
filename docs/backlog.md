@@ -79,7 +79,7 @@ Phase 0（ACP v1 端末のライフサイクル・単体停止・スナップシ
 
 ## 8. Solid UI 移行のフォローアップ
 
-出典: [`docs/proposals/2026-11-18-solid2-ui-migration.md`](./proposals/2026-11-18-solid2-ui-migration.md) §12
+出典: [`docs/proposals/2026-11-18-solid2-ui-migration.md`](./proposals/2026-11-18-solid2-ui-migration.md) §12 / [`docs/proposals/2026-11-19-solid2-ui-fixes-and-hardening.md`](./proposals/2026-11-19-solid2-ui-fixes-and-hardening.md)
 
 - [x] Files / Terminal の実データ動作を確認する（現行バイナリでツリー・Markdown プレビュー・PTY 接続を確認）
 - [ ] 変更のあるファイルで diff の実データ動作を確認する
@@ -91,3 +91,4 @@ Phase 0（ACP v1 端末のライフサイクル・単体停止・スナップシ
 - [x] oxlint の `consistent-function-scoping` 警告を整理した（Solid のコンポーネント本体はインスタンスごとに 1 回しか走らないため、ルールを無効化し理由を `ui/CONVENTIONS.md` に記録した）
 - [ ] Service Worker の型検査と、precache（約 16 MB / 423 ファイル）の見直し
 - [ ] 非同期ロードを async `createMemo` + `<Loading>` / `<Errored>` へ寄せるか、画面単位で判断する。現状は失敗時に直前のスナップショットを残して toast を出す画面があり、`<Errored>` は内容を置換するため挙動が変わる（`ui/CONVENTIONS.md` の Reactivity rules を参照）
+- [x] Solid 2 不具合修正のフォローアップ（`NewSessionChat.tsx` 分割、service worker の base64url デコード共有化、コールバック prop の camelCase 統一）
