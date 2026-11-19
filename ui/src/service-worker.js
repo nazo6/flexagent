@@ -11,6 +11,8 @@
 
 /* eslint-disable no-undef */
 
+import { base64UrlToBytes, toNotificationBody } from "./service-worker/format.ts";
+
 const VERSION = __FXG_VERSION__;
 const APP_SHELL = __FXG_PRECACHE__;
 
@@ -93,7 +95,7 @@ self.addEventListener("push", (event) => {
 
   event.waitUntil(
     self.registration.showNotification(payload.title, {
-      body: payload.body,
+      body: toNotificationBody(payload.body ?? ""),
       tag: payload.tag,
       icon: "/icon-192.png",
       badge: "/icon-192.png",
@@ -144,7 +146,7 @@ async function respondToPermission(payload, optionId) {
     if (response.ok || response.status === 409) {
       // 409 = ALREADY_RESOLVED is idempotent success.
       await self.registration.showNotification("Approval sent", {
-        body: payload.body,
+        body: toNotificationBody(payload.body ?? ""),
         tag: payload.tag,
         icon: "/icon-192.png",
         silent: true,
@@ -159,7 +161,7 @@ async function respondToPermission(payload, optionId) {
 
 async function showFailure(payload, message) {
   await self.registration.showNotification("Failed to send approval", {
-    body: message,
+    body: toNotificationBody(message),
     tag: payload.tag,
     icon: "/icon-192.png",
     data: payload,
@@ -208,7 +210,7 @@ self.addEventListener("pushsubscriptionchange", (event) => {
           console.error("[fxg] VAPID public key is not available");
           return;
         }
-        const applicationServerKey = urlBase64ToUint8Array(body.vapid_public_key);
+        const applicationServerKey = base64UrlToBytes(body.vapid_public_key);
         const oldSubscription = event.oldSubscription;
         if (oldSubscription !== undefined) {
           try {
@@ -249,15 +251,3 @@ self.addEventListener("pushsubscriptionchange", (event) => {
     })(),
   );
 });
-
-/** VAPID public keys are base64url; PushManager wants a Uint8Array. */
-function urlBase64ToUint8Array(base64String) {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const rawData = atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
-}
