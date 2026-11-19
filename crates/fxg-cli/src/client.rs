@@ -652,40 +652,6 @@ fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-/// Print a simple table made of a header and rows to stdout.
-pub fn print_table(headers: &[&str], rows: &[Vec<String>]) {
-    let mut widths: Vec<usize> = headers
-        .iter()
-        .map(|header| header.chars().count())
-        .collect();
-    for row in rows {
-        for (index, cell) in row.iter().enumerate() {
-            if index < widths.len() {
-                widths[index] = widths[index].max(cell.chars().count());
-            }
-        }
-    }
-
-    let print_row = |cells: Vec<String>| {
-        let line = cells
-            .iter()
-            .enumerate()
-            .map(|(index, cell)| {
-                let width = widths.get(index).copied().unwrap_or(0);
-                let padding = width.saturating_sub(cell.chars().count());
-                format!("{cell}{}", " ".repeat(padding))
-            })
-            .collect::<Vec<_>>()
-            .join("  ");
-        println!("{}", line.trim_end());
-    };
-
-    print_row(headers.iter().map(|header| (*header).to_owned()).collect());
-    for row in rows {
-        print_row(row.clone());
-    }
-}
-
 /// Format Unix epoch milliseconds as `YYYY-MM-DD HH:MM:SSZ` (UTC).
 ///
 /// Minimal implementation for CLI listings (avoids adding a date-time crate

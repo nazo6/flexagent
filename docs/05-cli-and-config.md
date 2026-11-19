@@ -45,6 +45,29 @@ CLI のコマンド・引数の正は `fxg --help` / `fxg <noun> --help` と
 暗黙にバックグラウンドプロセスを増やさないため、`fxg node start` または
 `fxg service install node` で明示的に起動してください。
 
+### 1.3 出力の規約
+
+- **チャネル**: コマンドの結果（一覧・詳細・JSON）は stdout、起動バナー・
+  進捗・診断は stderr。パイプやリダイレクトで人間向けの装飾が混ざらないことを
+  優先する。
+- **意味と描画の分離**: コマンドは色名ではなく役割（`Heading` / `Key` /
+  `Muted` / `Accent` / `AccentAlt` / `Success` / `Warning` / `Error`）を指定し、
+  実際のスタイルは `crates/fxg-cli/src/output/theme.rs` が決める。配色を変える
+  ときはこのファイルだけを触る。`Theme::plain` は全役割を空スタイルに解決する
+  ため、色なし出力はエスケープを後から剥がすのではなく最初から生成しない。
+- **配色**: 端末のパレットに追従する 16 色の名前付き色を使う。truecolor を
+  固定すると light / dark のどちらかで読みにくくなるため、UI の Desk トークン
+  とは**語彙**（signal / ok / warn / danger / muted）を揃え、値は共有しない。
+- **色の有効化**: `--no-color`、`node.toml` / `hub.toml` の `log.no_color`、
+  `NO_COLOR` を起動時に 1 回だけ解決する。それ以外の TTY 判定、パイプ時の
+  ANSI 除去、色深度の降格は `anstream` に任せ、個々の出力関数は bool を
+  受け取らない。
+- **表**: `comfy-table` に Unicode 幅と端末幅への折り返しを任せ、呼び出し側は
+  `Cell` と `Role` だけを渡す。
+- **JSON**: `--json` は `OutputFormat` で表し、機械可読出力には装飾を付けない。
+- **ヘルプ**: `--help` は usage-rs の生成物（プレーンテキスト）で、このテーマ
+  層の対象外。
+
 ## 2. 設定の所有者とディレクトリ構造
 
 設定は「その設定を直接使うプロセス」が唯一の所有者です。実行時に変更する設定は

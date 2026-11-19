@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use usage::{Args, Subcommands};
 
 use crate::hub_api::HubClient;
-use crate::output::KvList;
+use crate::output::{KvList, print_block, theme};
 use crate::service::ServiceTarget;
 
 use super::HubWebArgs;
@@ -170,13 +170,12 @@ impl usage::RunAsync for HubStartArgs {
             )?;
             let address = wait_for_hub(&listen_addr).await?;
             println!("hub started (detached)");
-            println!(
-                "{}",
-                KvList::new()
+            print_block(
+                &KvList::new()
                     .indent(2)
                     .field("Address:", format!("http://{address}"))
                     .field("Log:", log.display().to_string())
-                    .render(false)
+                    .render(theme()),
             );
             return Ok(());
         }
@@ -199,7 +198,6 @@ impl usage::RunAsync for HubStartArgs {
             &config_file.log,
             &paths,
         );
-        let use_color = crate::logging::should_use_color(self.no_color, config_file.log.no_color);
         let auth_token = if cfg!(debug_assertions) {
             Some(hub.state().auth_token())
         } else {
@@ -210,7 +208,6 @@ impl usage::RunAsync for HubStartArgs {
             &paths,
             log_file.as_deref(),
             auth_token.as_deref(),
-            use_color,
         );
 
         hub.wait().await;
@@ -313,12 +310,11 @@ impl usage::RunAsync for HubRestartArgs {
         )?;
         let address = wait_for_hub(&listen_addr).await?;
         println!("hub restarted");
-        println!(
-            "{}",
-            KvList::new()
+        print_block(
+            &KvList::new()
                 .indent(2)
                 .field("Address:", format!("http://{address}"))
-                .render(false)
+                .render(theme()),
         );
         Ok(())
     }
@@ -390,7 +386,7 @@ impl usage::RunAsync for HubStatusArgs {
                     .to_string(),
             );
         }
-        println!("{}", list.render(false));
+        print_block(&list.render(theme()));
         Ok(())
     }
 }

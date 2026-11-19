@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail};
 use usage::{Args, Subcommands};
 
 use crate::client::NodeClient;
-use crate::output::{KvList, KvRow};
+use crate::output::{KvList, KvRow, print_block, theme};
 use crate::service::ServiceTarget;
 use fxg_protocol::client_api::HubLinkState;
 
@@ -206,13 +206,12 @@ impl usage::RunAsync for NodeStartArgs {
             )?;
             let client = wait_for_node().await?;
             println!("node started (detached)");
-            println!(
-                "{}",
-                KvList::new()
+            print_block(
+                &KvList::new()
                     .indent(2)
                     .field("Address:", client.base())
                     .field("Log:", log.display().to_string())
-                    .render(false)
+                    .render(theme()),
             );
             return Ok(());
         }
@@ -229,7 +228,6 @@ impl usage::RunAsync for NodeStartArgs {
             &config_file.log,
             node.state().paths(),
         );
-        let use_color = crate::logging::should_use_color(self.no_color, config_file.log.no_color);
         let auth_token = if cfg!(debug_assertions) {
             Some(node.state().auth_token())
         } else {
@@ -241,7 +239,6 @@ impl usage::RunAsync for NodeStartArgs {
             log_file.as_deref(),
             node.state().hub_link().hub_url.as_deref(),
             auth_token.as_deref(),
-            use_color,
         );
 
         // Tray residency (on macOS it is handled on the main thread by the early
@@ -330,12 +327,11 @@ impl usage::RunAsync for NodeRestartArgs {
         )?;
         let client = wait_for_node().await?;
         println!("node restarted");
-        println!(
-            "{}",
-            KvList::new()
+        print_block(
+            &KvList::new()
                 .indent(2)
                 .field("Address:", client.base())
-                .render(false)
+                .render(theme()),
         );
         Ok(())
     }
@@ -422,7 +418,7 @@ impl usage::RunAsync for NodeStatusArgs {
                 list = list.field("synced:", crate::client::format_unix_ms_utc(last));
             }
         }
-        println!("{}", list.render(false));
+        print_block(&list.render(theme()));
         Ok(())
     }
 }

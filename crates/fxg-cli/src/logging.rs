@@ -12,12 +12,11 @@ use std::path::{Path, PathBuf};
 
 use fxg_protocol::config::LogConfig;
 use fxg_protocol::paths::Paths;
-use nu_ansi_term::{Color, Style};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 
-use crate::output::{Banner, KvList};
+use crate::output::{Banner, KvList, Role, Theme, eprint_block, theme};
 
 /// Logging kind for the subcommand being run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -258,12 +257,15 @@ pub fn print_node_banner(
     log_file: Option<&Path>,
     hub_url: Option<&str>,
     auth_token: Option<&str>,
-    use_color: bool,
 ) {
-    eprintln!(
-        "{}",
-        render_node_banner(node_id, http_addr, log_file, hub_url, auth_token, use_color)
-    );
+    eprint_block(&render_node_banner(
+        node_id,
+        http_addr,
+        log_file,
+        hub_url,
+        auth_token,
+        theme(),
+    ));
 }
 
 fn render_node_banner(
@@ -272,7 +274,7 @@ fn render_node_banner(
     log_file: Option<&Path>,
     hub_url: Option<&str>,
     auth_token: Option<&str>,
-    use_color: bool,
+    theme: Theme,
 ) -> String {
     let log_str = log_file
         .map(|p| p.display().to_string())
@@ -283,13 +285,12 @@ fn render_node_banner(
 
     let mut fields = KvList::new()
         .indent(2)
-        .label_style(Style::new().bold())
         .field("Node ID:", node_id)
         .field("HTTP/WS API:", format!("http://{http_addr}"));
     if let Some(token) = auth_token {
         fields = fields
             .field("Web UI:", format!("http://{http_addr}/?token={token}"))
-            .styled_field("Auth Token:", token, Color::Yellow.normal());
+            .field_with("Auth Token:", token, Role::Warning);
     } else {
         fields = fields.field("Web UI:", format!("http://{http_addr}/"));
     }
@@ -297,12 +298,12 @@ fn render_node_banner(
 
     Banner::new(
         format!("FlexAgent node v{}", env!("CARGO_PKG_VERSION")),
-        Color::Cyan.bold(),
+        Role::Accent,
         " started",
         fields,
     )
     .footer("Press Ctrl+C to stop.")
-    .render(use_color)
+    .render(theme)
 }
 
 /// Print the hub startup banner to stderr.
@@ -311,12 +312,14 @@ pub fn print_hub_banner(
     paths: &Paths,
     log_file: Option<&Path>,
     auth_token: Option<&str>,
-    use_color: bool,
 ) {
-    eprintln!(
-        "{}",
-        render_hub_banner(http_addr, paths, log_file, auth_token, use_color)
-    );
+    eprint_block(&render_hub_banner(
+        http_addr,
+        paths,
+        log_file,
+        auth_token,
+        theme(),
+    ));
 }
 
 fn render_hub_banner(
@@ -324,7 +327,7 @@ fn render_hub_banner(
     paths: &Paths,
     log_file: Option<&Path>,
     auth_token: Option<&str>,
-    use_color: bool,
+    theme: Theme,
 ) -> String {
     let log_str = log_file
         .map(|p| p.display().to_string())
@@ -332,12 +335,11 @@ fn render_hub_banner(
 
     let mut fields = KvList::new()
         .indent(2)
-        .label_style(Style::new().bold())
         .field("HTTP/WS API:", format!("http://{http_addr}"));
     if let Some(token) = auth_token {
         fields = fields
             .field("Web UI:", format!("http://{http_addr}/?token={token}"))
-            .styled_field("Auth Token:", token, Color::Yellow.normal());
+            .field_with("Auth Token:", token, Role::Warning);
     } else {
         fields = fields.field("Web UI:", format!("http://{http_addr}/"));
     }
@@ -347,18 +349,18 @@ fn render_hub_banner(
 
     Banner::new(
         format!("FlexAgent hub v{}", env!("CARGO_PKG_VERSION")),
-        Color::Purple.bold(),
+        Role::AccentAlt,
         " started",
         fields,
     )
     .footer("Press Ctrl+C to stop.")
-    .render(use_color)
+    .render(theme)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fxg_protocol::paths::{Paths, Role};
+    use fxg_protocol::paths::Paths;
 
     #[test]
     fn resolve_filter_respects_quiet_and_verbose() {
@@ -378,7 +380,7 @@ mod tests {
     #[test]
     fn resolve_log_file_path_handles_dash() {
         let dir = tempfile::tempdir().unwrap();
-        let paths = Paths::portable(dir.path(), Role::Node);
+        let paths = Paths::portable(dir.path(), fxg_protocol::paths::Role::Node);
         let mut opts = LoggingOptions::default();
         let config = LogConfig::default();
 
@@ -395,7 +397,7 @@ mod tests {
     #[test]
     fn print_banners_do_not_panic_and_align_columns() {
         let dir = tempfile::tempdir().unwrap();
-        let paths = Paths::portable(dir.path(), Role::Hub);
+        let paths = Paths::portable(dir.path(), fxg_protocol::paths::Role::Hub);
 
         let colored_node = render_node_banner(
             "node_test",
@@ -403,7 +405,7 @@ mod tests {
             Some(dir.path()),
             None,
             Some("test_token_123"),
-            true,
+            Theme::styled(),
         );
         let plain_node = render_node_banner(
             "node_test",
@@ -411,7 +413,7 @@ mod tests {
             Some(dir.path()),
             None,
             Some("test_token_123"),
-            false,
+            Theme::plain(),
         );
         assert!(!plain_node.contains("\x1b["));
         assert!(colored_node.contains("\x1b["));
@@ -420,8 +422,8 @@ mod tests {
         assert!(plain_node.contains("\n  Hub:          standalone (local only)\n"));
         assert!(colored_node.contains("\n  \x1b[1mHub:\x1b[0m          standalone (local only)\n"));
 
-        print_node_banner("node_test", "127.0.0.1:7860", None, None, None, false);
-        print_hub_banner("0.0.0.0:8080", &paths, None, Some("test_token_123"), true);
-        print_hub_banner("0.0.0.0:8080", &paths, None, None, false);
+        print_node_banner("node_test", "127.0.0.1:7860", None, None, None);
+        print_hub_banner("0.0.0.0:8080", &paths, None, Some("test_token_123"));
+        print_hub_banner("0.0.0.0:8080", &paths, None, None);
     }
 }

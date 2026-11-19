@@ -1,11 +1,10 @@
 //! `fxg node web` / `fxg hub web`: open the Web UI in the default browser.
 
 use anyhow::Result;
-use nu_ansi_term::Color;
 use usage::Args;
 
 use crate::client::NodeClient;
-use crate::output::{Banner, KvList};
+use crate::output::{Banner, KvList, Role, print_block, theme};
 
 /// `fxg node web`
 #[derive(Debug, Args)]
@@ -52,15 +51,15 @@ impl usage::RunAsync for HubWebArgs {
 
 /// Print the URL, then open it in the default browser.
 fn open_web_ui(target_label: &str, url: &str) {
-    println!(
-        "{}",
+    print_block(
         Banner::new(
             "FlexAgent Web UI",
-            Color::Cyan.bold(),
+            Role::Accent,
             format!(" ({target_label})"),
             KvList::new().indent(2).field("URL:", url),
         )
-        .render(false)
+        .render(theme())
+        .trim_end(),
     );
     match opener::open_browser(url) {
         Ok(()) => println!("  Opened it in your default browser."),

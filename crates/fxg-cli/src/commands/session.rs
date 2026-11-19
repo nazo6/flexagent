@@ -11,8 +11,8 @@ use fxg_protocol::common::{ClientSource, SessionControlAction, SessionStatus};
 use fxg_protocol::events::UnifiedEventPayload;
 use usage::Args;
 
-use crate::client::{NodeClient, format_unix_ms_utc, print_table, short_id, truncate};
-use crate::output::KvList;
+use crate::client::{NodeClient, format_unix_ms_utc, short_id, truncate};
+use crate::output::{Cell, KvList, OutputFormat, Role, Table, paint, print_block, theme};
 
 use super::*;
 
@@ -61,33 +61,31 @@ impl usage::RunAsync for SessionListArgs {
             })
             .collect();
 
-        if self.json {
+        if OutputFormat::from_json(self.json).is_json() {
             println!("{}", serde_json::to_string_pretty(&sessions)?);
             return Ok(());
         }
 
         if sessions.is_empty() {
-            println!("(no sessions)");
+            print_block(&paint(theme().style(Role::Muted), "(no sessions)"));
             return Ok(());
         }
 
-        let rows: Vec<Vec<String>> = sessions
-            .iter()
-            .map(|session| {
-                vec![
-                    short_id(session.session_id.as_str()),
-                    truncate(session.node_id.as_str(), 16),
-                    truncate(&session.agent_id, 16),
-                    session.status.to_string(),
-                    format_unix_ms_utc(session.updated_at),
-                    truncate(&session.title, 32),
-                ]
-            })
-            .collect();
-        print_table(
+        let mut table = Table::new(
+            theme(),
             &["SESSION", "NODE", "AGENT", "STATUS", "UPDATED", "TITLE"],
-            &rows,
         );
+        for session in &sessions {
+            table = table.push_row([
+                Cell::new(short_id(session.session_id.as_str())),
+                Cell::new(truncate(session.node_id.as_str(), 16)),
+                Cell::new(truncate(&session.agent_id, 16)),
+                Cell::role(session.status.to_string(), status_role(session.status)),
+                Cell::new(format_unix_ms_utc(session.updated_at)),
+                Cell::new(truncate(&session.title, 32)),
+            ]);
+        }
+        print_block(&table.render());
         Ok(())
     }
 }
@@ -157,7 +155,7 @@ impl usage::RunAsync for SessionShowArgs {
     async fn run_async(self) -> Self::Output {
         let mut client = NodeClient::connect().await?;
         let detail = client.session_show(&self.session_id, self.events).await?;
-        if self.json {
+        if OutputFormat::from_json(self.json).is_json() {
             let value = serde_json::json!({
                 "session": detail.session,
                 "event_count": detail.event_count,
@@ -221,28 +219,35 @@ impl usage::RunAsync for SessionShowArgs {
         ];
         let mut list = KvList::new().gap(1);
         for (label, value) in fields {
-            list = list.field(label, value);
+            let role = match label {
+                "STATUS" => status_role(session.status),
+                _ => Role::Plain,
+            };
+            list = list.field_with(label, value, role);
         }
-        println!("{}", list.render(false));
+        print_block(&list.render(theme()));
 
         if !detail.pending_permissions.is_empty() {
-            println!("\nPending approvals:");
-            let rows: Vec<Vec<String>> = detail
-                .pending_permissions
-                .iter()
-                .map(|entry| {
-                    vec![
-                        truncate(&entry.request_id, 24),
-                        truncate(&entry.tool_name, 20),
-                        truncate(&entry.summary, 48),
-                    ]
-                })
-                .collect();
-            print_table(&["REQUEST", "TOOL", "SUMMARY"], &rows);
+            print_block(&format!(
+                "\n{}",
+                paint(theme().style(Role::Heading), "Pending approvals:")
+            ));
+            let mut table = Table::new(theme(), &["REQUEST", "TOOL", "SUMMARY"]);
+            for entry in &detail.pending_permissions {
+                table = table.push_row([
+                    Cell::new(truncate(&entry.request_id, 24)),
+                    Cell::new(truncate(&entry.tool_name, 20)),
+                    Cell::role(truncate(&entry.summary, 48), Role::Warning),
+                ]);
+            }
+            print_block(&table.render());
         }
 
         if !detail.recent_events.is_empty() {
-            println!("\nRecent events:");
+            print_block(&format!(
+                "\n{}",
+                paint(theme().style(Role::Heading), "Recent events:")
+            ));
             for event in &detail.recent_events {
                 println!(
                     "  {:>5}  {}  {}",
@@ -253,6 +258,16 @@ impl usage::RunAsync for SessionShowArgs {
             }
         }
         Ok(())
+    }
+}
+
+/// Role used to paint a session status in lists.
+fn status_role(status: SessionStatus) -> Role {
+    match status {
+        SessionStatus::Idle | SessionStatus::Stopped => Role::Muted,
+        SessionStatus::Provisioning | SessionStatus::Running => Role::Accent,
+        SessionStatus::WaitingPermission | SessionStatus::WaitingInput => Role::Warning,
+        SessionStatus::Error => Role::Error,
     }
 }
 
@@ -648,12 +663,15 @@ impl usage::RunAsync for SessionExternalArgs {
         let response = client
             .list_external_sessions(self.agent.as_deref(), self.force)
             .await?;
-        if self.json {
+        if OutputFormat::from_json(self.json).is_json() {
             println!("{}", serde_json::to_string_pretty(&response)?);
             return Ok(());
         }
         if response.sessions.is_empty() {
-            println!("no external sessions found");
+            print_block(&paint(
+                theme().style(Role::Muted),
+                "no external sessions found",
+            ));
         }
         for session in &response.sessions {
             let title = session.title.as_deref().unwrap_or("(untitled)");

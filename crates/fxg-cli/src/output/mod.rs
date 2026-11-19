@@ -1,15 +1,69 @@
-//! Structured CLI output helpers (ANSI styling, key-value lists, startup banners).
+//! Shared presentation layer for the `fxg` CLI.
+//!
+//! Commands describe *what* a line is — a key/value pair, a table, a banner —
+//! and *which [`Role`]* it plays; this module decides how that looks. Styles
+//! come from [`Theme`], so a command never names an ANSI color and plain output
+//! is produced by rendering with [`Theme::plain`] rather than by stripping
+//! escapes.
 
-use nu_ansi_term::Style;
+pub mod table;
+pub mod theme;
 
-/// Conditionally apply an ANSI style to `text`.
+pub use table::{Cell, Table};
+pub use theme::{Role, Theme};
+
+use anstyle::Style;
+
+/// Apply `style` to `text`.
 ///
-/// Returns `text` unmodified when `use_color` is false.
-pub fn paint(use_color: bool, style: Style, text: &str) -> String {
-    if use_color {
-        style.paint(text).to_string()
-    } else {
-        text.to_owned()
+/// A plain theme resolves every role to an empty [`Style`], so this returns
+/// `text` untouched and no escape ever reaches a pipe or a test.
+pub fn paint(style: Style, text: &str) -> String {
+    format!("{}{text}{}", style.render(), style.render_reset())
+}
+
+/// Record the process-wide color decision (`--no-color`, `NO_COLOR`).
+pub fn init(no_color: bool) {
+    theme::init(no_color);
+}
+
+/// The theme for the current process.
+pub fn theme() -> Theme {
+    theme::current()
+}
+
+/// Write a rendered block to stdout.
+///
+/// `anstream` strips escapes when stdout is not a terminal and degrades colors
+/// the terminal cannot show, so callers never decide about TTYs themselves.
+pub fn print_block(text: &str) {
+    anstream::println!("{text}");
+}
+
+/// Write a rendered block to stderr (banners, progress, diagnostics).
+pub fn eprint_block(text: &str) {
+    anstream::eprintln!("{text}");
+}
+
+/// How a command reports its result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OutputFormat {
+    /// Human-readable text on stdout.
+    #[default]
+    Human,
+    /// Machine-readable JSON on stdout.
+    Json,
+}
+
+impl OutputFormat {
+    /// Derive the format from a `--json` flag.
+    pub const fn from_json(json: bool) -> Self {
+        if json { Self::Json } else { Self::Human }
+    }
+
+    /// Whether JSON output was requested.
+    pub const fn is_json(self) -> bool {
+        matches!(self, Self::Json)
     }
 }
 
@@ -18,7 +72,7 @@ pub fn paint(use_color: bool, style: Style, text: &str) -> String {
 pub struct KvRow {
     label: Option<String>,
     value: String,
-    value_style: Option<Style>,
+    role: Role,
 }
 
 impl KvRow {
@@ -27,16 +81,16 @@ impl KvRow {
         Self {
             label: Some(label.into()),
             value: value.into(),
-            value_style: None,
+            role: Role::Plain,
         }
     }
 
-    /// A labeled row whose value uses `style` when color output is enabled.
-    pub fn styled(label: impl Into<String>, value: impl Into<String>, style: Style) -> Self {
+    /// A labeled row whose value plays `role`.
+    pub fn role(label: impl Into<String>, value: impl Into<String>, role: Role) -> Self {
         Self {
             label: Some(label.into()),
             value: value.into(),
-            value_style: Some(style),
+            role,
         }
     }
 
@@ -45,20 +99,20 @@ impl KvRow {
         Self {
             label: None,
             value: value.into(),
-            value_style: None,
+            role: Role::Plain,
         }
     }
 }
 
 /// Aligned key-value list renderer.
 ///
-/// Computes the value column offset from the unstyled label widths so colored
-/// and plain output share a single layout path and cannot drift out of sync.
+/// The value column is computed from the unstyled label widths, so colored and
+/// plain output share a single layout path and cannot drift out of sync.
 #[derive(Debug, Clone)]
 pub struct KvList {
     indent: usize,
     gap: usize,
-    label_style: Option<Style>,
+    label_role: Role,
     rows: Vec<KvRow>,
 }
 
@@ -67,7 +121,7 @@ impl Default for KvList {
         Self {
             indent: 0,
             gap: 2,
-            label_style: None,
+            label_role: Role::Key,
             rows: Vec::new(),
         }
     }
@@ -91,12 +145,6 @@ impl KvList {
         self
     }
 
-    /// Apply `style` to every label when color output is enabled.
-    pub fn label_style(mut self, style: Style) -> Self {
-        self.label_style = Some(style);
-        self
-    }
-
     /// Append a [`KvRow`].
     pub fn push(mut self, row: KvRow) -> Self {
         self.rows.push(row);
@@ -108,18 +156,18 @@ impl KvList {
         self.push(KvRow::new(label, value))
     }
 
-    /// Append a key-value row with a styled value.
-    pub fn styled_field(
+    /// Append a key-value row whose value plays `role`.
+    pub fn field_with(
         self,
         label: impl Into<String>,
         value: impl Into<String>,
-        style: Style,
+        role: Role,
     ) -> Self {
-        self.push(KvRow::styled(label, value, style))
+        self.push(KvRow::role(label, value, role))
     }
 
     /// Render the key-value lines (without a trailing newline).
-    pub fn render(&self, use_color: bool) -> String {
+    pub fn render(&self, theme: Theme) -> String {
         let max_label = self
             .rows
             .iter()
@@ -129,25 +177,20 @@ impl KvList {
             .unwrap_or(0);
         let value_col = max_label + self.gap;
         let indent_pad = " ".repeat(self.indent);
+        let label_style = theme.style(self.label_role);
 
         let mut out = String::new();
         for (idx, row) in self.rows.iter().enumerate() {
             if idx > 0 {
                 out.push('\n');
             }
-            let value = match row.value_style {
-                Some(style) => paint(use_color, style, &row.value),
-                None => row.value.clone(),
-            };
+            let value = paint(theme.style(row.role), &row.value);
             match row.label.as_deref() {
                 Some(label) => {
                     let padding = value_col.saturating_sub(label.chars().count());
-                    let styled_label = match self.label_style {
-                        Some(style) => paint(use_color, style, label),
-                        None => label.to_owned(),
-                    };
                     out.push_str(&format!(
-                        "{indent_pad}{styled_label}{}{value}",
+                        "{indent_pad}{}{}{value}",
+                        paint(label_style, label),
                         " ".repeat(padding)
                     ));
                 }
@@ -164,23 +207,24 @@ impl KvList {
 #[derive(Debug, Clone)]
 pub struct Banner {
     title_highlight: String,
-    title_style: Style,
+    title_role: Role,
     title_suffix: String,
     fields: KvList,
     footer: Option<String>,
 }
 
 impl Banner {
-    /// Construct a banner from a highlighted title prefix, suffix, and aligned fields.
+    /// Construct a banner from a highlighted title prefix, its role, a suffix,
+    /// and aligned fields.
     pub fn new(
         title_highlight: impl Into<String>,
-        title_style: Style,
+        title_role: Role,
         title_suffix: impl Into<String>,
         fields: KvList,
     ) -> Self {
         Self {
             title_highlight: title_highlight.into(),
-            title_style,
+            title_role,
             title_suffix: title_suffix.into(),
             fields,
             footer: None,
@@ -194,17 +238,17 @@ impl Banner {
     }
 
     /// Render the full banner (ending with a newline after the last line).
-    pub fn render(&self, use_color: bool) -> String {
+    pub fn render(&self, theme: Theme) -> String {
         let mut out = String::new();
-        let highlight = paint(use_color, self.title_style, &self.title_highlight);
+        let highlight = paint(theme.style(self.title_role), &self.title_highlight);
         out.push_str(&format!("{highlight}{}\n", self.title_suffix));
-        let body = self.fields.render(use_color);
+        let body = self.fields.render(theme);
         if !body.is_empty() {
             out.push_str(&body);
             out.push('\n');
         }
         if let Some(footer) = self.footer.as_deref() {
-            let styled_footer = paint(use_color, Style::new().dimmed(), footer);
+            let styled_footer = paint(theme.style(Role::Muted), footer);
             out.push_str(&format!(
                 "{}{styled_footer}\n",
                 " ".repeat(self.fields.indent)
@@ -216,8 +260,6 @@ impl Banner {
 
 #[cfg(test)]
 mod tests {
-    use nu_ansi_term::Color;
-
     use super::*;
 
     fn strip_ansi(input: &str) -> String {
@@ -242,14 +284,13 @@ mod tests {
     fn kv_list_aligns_values_consistently_with_and_without_color() {
         let list = KvList::new()
             .indent(2)
-            .label_style(Style::new().bold())
             .field("HTTP/WS API:", "http://127.0.0.1:7860")
-            .styled_field("Auth Token:", "secret", Color::Yellow.normal())
+            .field_with("Auth Token:", "secret", Role::Warning)
             .field("Hub:", "standalone (local only)")
             .push(KvRow::continuation("extra line"));
 
-        let plain = list.render(false);
-        let colored = list.render(true);
+        let plain = list.render(Theme::plain());
+        let colored = list.render(Theme::styled());
 
         assert!(!plain.contains("\x1b["));
         assert!(colored.contains("\x1b["));
@@ -265,5 +306,48 @@ mod tests {
                 "                extra line",
             ]
         );
+    }
+
+    #[test]
+    fn banner_styles_only_the_heading_and_footer() {
+        let banner = Banner::new(
+            "FlexAgent node",
+            Role::Accent,
+            " started",
+            KvList::new().indent(2).field("Hub:", "standalone"),
+        )
+        .footer("Press Ctrl+C to stop.");
+
+        let plain = banner.render(Theme::plain());
+        let colored = banner.render(Theme::styled());
+        assert!(!plain.contains("\x1b["));
+        assert!(colored.contains("\x1b["));
+        assert_eq!(strip_ansi(&colored), plain);
+        assert_eq!(
+            plain,
+            "FlexAgent node started\n  Hub:  standalone\n  Press Ctrl+C to stop.\n"
+        );
+    }
+
+    #[test]
+    fn table_aligns_cells_and_keeps_color_out_of_width() {
+        let plain = Table::new(Theme::plain(), &["ID", "TITLE"])
+            .push_row([Cell::new("a1"), Cell::from("first")])
+            .push_row([Cell::new("b2"), Cell::role("second", Role::Success)])
+            .render();
+        let colored = Table::new(Theme::styled(), &["ID", "TITLE"])
+            .push_row([Cell::new("a1"), Cell::from("first")])
+            .push_row([Cell::new("b2"), Cell::role("second", Role::Success)])
+            .render();
+
+        assert!(!plain.contains("\x1b["));
+        assert!(colored.contains("\x1b["));
+        // Painted cells must not widen the column: stripping color restores the
+        // exact same layout.
+        assert_eq!(strip_ansi(&colored), plain);
+        assert!(plain.contains("first"));
+        assert!(plain.contains("second"));
+        // Padding must never leave trailing whitespace on a copied line.
+        assert!(plain.lines().all(|line| line == line.trim_end()));
     }
 }

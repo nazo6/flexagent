@@ -1,10 +1,10 @@
 //! `fxg doctor` command.
 
 use anyhow::{Result, bail};
-use fxg_protocol::paths::{Paths, Role};
+use fxg_protocol::paths::{Paths, Role as PathRole};
 use usage::Args;
 
-use crate::output::{KvList, KvRow};
+use crate::output::{KvList, KvRow, OutputFormat, Role, paint, print_block, theme};
 
 /// `fxg doctor`
 #[derive(Debug, Args)]
@@ -56,7 +56,7 @@ fn role_paths(paths: &Paths) -> Vec<PathEntry> {
             path: paths.vapid_path(),
         },
     ];
-    if paths.role() == Role::Node {
+    if paths.role() == PathRole::Node {
         entries.push(PathEntry {
             name: "node_token",
             path: paths.node_token_path(),
@@ -74,8 +74,8 @@ impl usage::RunAsync for DoctorArgs {
 
     async fn run_async(self) -> Self::Output {
         let env = fxg_protocol::config::process_env;
-        let node = Paths::resolve(&env, Role::Node);
-        let hub = Paths::resolve(&env, Role::Hub);
+        let node = Paths::resolve(&env, PathRole::Node);
+        let hub = Paths::resolve(&env, PathRole::Hub);
         let mut checks: Vec<(String, bool, String)> = Vec::new();
 
         let node_config = fxg_protocol::config::NodeConfig::load(&env);
@@ -111,7 +111,7 @@ impl usage::RunAsync for DoctorArgs {
 
         let db_path = node.db_path();
         let db_ok = if db_path.is_file() {
-            match fxg_db::Db::open(&db_path, Role::Node).await {
+            match fxg_db::Db::open(&db_path, PathRole::Node).await {
                 Ok(_) => (true, "node.db opened".to_owned()),
                 Err(err) => (false, format!("node.db: {err}")),
             }
@@ -145,8 +145,8 @@ impl usage::RunAsync for DoctorArgs {
             },
         ));
 
-        let roles = [(Role::Node, &node), (Role::Hub, &hub)];
-        if self.json {
+        let roles = [(PathRole::Node, &node), (PathRole::Hub, &hub)];
+        if OutputFormat::from_json(self.json).is_json() {
             let checks: Vec<_> = checks
                 .iter()
                 .map(|(name, ok, detail)| {
@@ -185,14 +185,25 @@ impl usage::RunAsync for DoctorArgs {
             });
             println!("{}", serde_json::to_string_pretty(&value)?);
         } else {
+            let theme = theme();
             for (name, ok, detail) in &checks {
-                println!("{} {name}: {detail}", if *ok { "OK  " } else { "FAIL" });
+                let (role, label) = if *ok {
+                    (Role::Success, "OK")
+                } else {
+                    (Role::Error, "FAIL")
+                };
+                print_block(&format!(
+                    "{} {name}: {detail}",
+                    paint(theme.style(role), label)
+                ));
             }
             for (role, paths) in roles {
-                println!("\n{} paths:", role);
-                println!(
-                    "{}",
-                    KvList::new()
+                print_block(&format!(
+                    "\n{}",
+                    paint(theme.style(Role::Heading), &format!("{role} paths:"))
+                ));
+                print_block(
+                    &KvList::new()
                         .indent(2)
                         .gap(1)
                         .field(
@@ -215,7 +226,7 @@ impl usage::RunAsync for DoctorArgs {
                             "cache={}",
                             paths.roots().cache().display()
                         )))
-                        .render(false)
+                        .render(theme),
                 );
                 let mut path_list = KvList::new().indent(2);
                 for entry in role_paths(paths) {
@@ -227,7 +238,7 @@ impl usage::RunAsync for DoctorArgs {
                     path_list =
                         path_list.field(entry.name, format!("{}{}", entry.path.display(), state));
                 }
-                println!("{}", path_list.render(false));
+                print_block(&path_list.render(theme));
             }
         }
         if checks.iter().any(|(_, ok, _)| !ok) {

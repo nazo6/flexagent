@@ -119,6 +119,7 @@ async fn main() -> ExitCode {
         _ => cli_logging(),
     };
     logging::init_logging(&logging_options, &log_config, &paths);
+    output::init(cli_no_color(&cli.command) || log_config.no_color);
 
     // On macOS the tray (NSStatusItem) must be created and driven on the main
     // thread's event loop, so `fxg node start --tray` hands the main thread over
@@ -141,5 +142,24 @@ fn cli_logging() -> logging::LoggingOptions {
     logging::LoggingOptions {
         kind: logging::CommandLogKind::Cli,
         ..Default::default()
+    }
+}
+
+/// The explicit `--no-color` switch of the command being run, if it has one.
+fn cli_no_color(command: &Commands) -> bool {
+    match command {
+        Commands::Node(args) => match &args.command {
+            NodeCommands::Start(start) => start.logging_options().no_color,
+            _ => false,
+        },
+        Commands::Hub(args) => match &args.command {
+            HubCommands::Start(start) => start.logging_options().no_color,
+            _ => false,
+        },
+        Commands::Internal(args) => match &args.command {
+            InternalCommands::Stdio(stdio) => stdio.logging_options().no_color,
+            _ => false,
+        },
+        _ => false,
     }
 }
