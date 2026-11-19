@@ -426,7 +426,7 @@ CLI (`fxg`) はローカルノードのループバック HTTP / WS API を使�
 - 接続先: `<state>/node/node.addr`（既定 `127.0.0.1:7860`）。7860 が
   使用中で明示指定がない場合は ephemeral port にフォールバックし、実際の
   アドレスを同じファイルに書き出す。
-- ハブへ直接接続する場合（`--provisioner` / `fxg web hub` 等）は
+- ハブへ直接接続する場合（`fxg session new --provisioner` 等）は
   `--hub` → `<state>/hub/hub.addr` → ノードのペアリング →
   `hub.toml` の `listen_addr` の順で解決する。
 - 認証: `<data>/node/auth_token`（ハブへ接続する場合は

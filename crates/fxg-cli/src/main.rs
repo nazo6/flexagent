@@ -56,8 +56,6 @@ struct Fxg {
 #[derive(Debug, Subcommands)]
 #[usage(run_async)]
 enum Commands {
-    /// Open a tokenized URL in the default browser
-    Web(commands::WebArgs),
     /// Session management (new / list / show / prompt / cancel / stop / kill / ...)
     Session(commands::SessionArgs),
     /// Agent authentication (login / logout)

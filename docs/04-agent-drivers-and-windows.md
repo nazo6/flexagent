@@ -608,7 +608,7 @@ Linux / macOS は登録時に起動し、Windows は次回ログオン時に起�
     未同期 Outbox 件数、稼働中セッション数（3秒間隔で更新）
   - 「ログイン時に自動起動」: `fxg service install` / `uninstall` と同一実装の
     チェック項目（登録後は実状態を再確認して表示を同期）
-  - 「Web UI を開く」: `fxg web` と同じトークン付き URL を既定ブラウザで開く
+  - 「Web UI を開く」: `fxg node web` と同じトークン付き URL を既定ブラウザで開く
   - 「終了」: ノードの graceful shutdown（エージェント/PTY 停止 →
     `nodes.is_online = 0` 記録）を実行して終了
 - **アイコン**: `ui/static/icon-192.png` を 32×32 へ縮小し、右下に接続状態ドット

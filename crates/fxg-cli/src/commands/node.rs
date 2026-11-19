@@ -32,6 +32,8 @@ pub enum NodeCommands {
     Restart(NodeRestartArgs),
     /// Show the local node status
     Status(NodeStatusArgs),
+    /// Open this node's Web UI in the default browser
+    Web(NodeWebArgs),
     /// Pair this node with a hub (stored in node.db and the token file)
     Pair(NodePairArgs),
     /// Remove the hub pairing (keeps the outbox)
@@ -583,7 +585,7 @@ fn start_tray(daemon: &fxg_node::daemon::NodeDaemon) -> Option<crate::tray::Tray
 // Web UI URL helpers
 // ----------------------------------------------------------------------
 
-/// Build the tokenized URL of the local Web UI (shared by `fxg web` and the
+/// Build the tokenized URL of the local Web UI (shared by `fxg node web` and the
 /// tray). A wildcard bind address is replaced with loopback so the browser opens
 /// the local process rather than `0.0.0.0`.
 pub(crate) fn local_web_url(listen_addr: &str, token: &str) -> String {

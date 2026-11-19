@@ -9,6 +9,8 @@ use crate::hub_api::HubClient;
 use crate::output::KvList;
 use crate::service::ServiceTarget;
 
+use super::HubWebArgs;
+
 /// `fxg hub <command>`
 #[derive(Debug, Args)]
 #[usage(run_async, arg_required_else_help)]
@@ -29,6 +31,8 @@ pub enum HubCommands {
     Restart(HubRestartArgs),
     /// Show the hub status
     Status(HubStatusArgs),
+    /// Open the hub's Web UI in the default browser
+    Web(HubWebArgs),
     /// Node pairing tokens (one per node)
     PairingToken(HubPairingTokenArgs),
 }

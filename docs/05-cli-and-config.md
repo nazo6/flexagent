@@ -19,7 +19,7 @@ CLI のコマンド・引数の正は `fxg --help` / `fxg <noun> --help` と
 - **常駐**: `fxg service install [node|hub]` は OS ログイン時の登録のみ。
   unit が登録済みなら `node` / `hub` の `start` / `stop` / `restart` が
   systemd / launchd / Task Scheduler に委譲する。
-- **対象の指定**: フラグではなく位置引数（`fxg web hub`、`fxg logs hub`、
+- **対象の指定**: フラグではなく位置引数（`fxg logs hub`、
   `fxg service install hub`）。
 - **緊急停止**: 全ノード一斉の kill switch はハブの Web UI /
   `POST /api/v1/system/kill-switch` に置く。ローカルのノードは
@@ -28,7 +28,8 @@ CLI のコマンド・引数の正は `fxg --help` / `fxg <noun> --help` と
 ### 1.2 コマンド群
 
 - `fxg`: サブコマンドを指定せずに実行するとヘルプを表示する（プロセスは起動しない）。
-- `fxg web [node|hub]`: トークン付き URL を表示し、既定ブラウザで Web UI を開く。
+- `fxg node web` / `fxg hub web`: トークン付き URL を表示し、既定ブラウザで
+  それぞれの Web UI を開く。
 - `fxg session ...`: セッションの作成・一覧・表示・プロンプト・停止・再開・
   Fork・Import・Archive・Delete。
 - `fxg node ...`: ローカルノードの起動・停止・状態・ペアリング・Web
@@ -194,9 +195,9 @@ WebSocket の `Origin` 検証（CSWSH 対策）の許可リストです（ハブ
 
 `node.toml` の `listen_addr` の既定は `127.0.0.1:7860` です。7860 が使用中で
 明示指定がない場合は ephemeral port にフォールバックし、実際のアドレスは
-`<state>/node/node.addr` に記録されます。CLI・`fxg web`・
+`<state>/node/node.addr` に記録されます。CLI・`fxg node web`・
 ブラウザのローカル直結はこのファイルを優先します。ワイルドカード
-（`0.0.0.0` / `[::]`）で bind した場合、CLI と `fxg web` は `127.0.0.1` に
+（`0.0.0.0` / `[::]`）で bind した場合、CLI と `fxg node web` は `127.0.0.1` に
 読み替えて接続します。
 
 ### 2.3 Worktree と 一時VM環境

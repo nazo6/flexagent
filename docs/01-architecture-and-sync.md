@@ -57,7 +57,7 @@ flowchart TB
 > `--listen` / `node.toml` の `listen_addr` が明示されていない場合のみ、`127.0.0.1:0`
 > （ephemeral port）へフォールバックし、実際のアドレスを
 > `<state>/node/node.addr` に書き出す。
-> CLI・`fxg web`・ブラウザのローカル直結はこのファイルを優先する。
+> CLI・`fxg node web`・ブラウザのローカル直結はこのファイルを優先する。
 
 ### 各モードの起動方法（単一バイナリ `fxg`）
 
@@ -554,7 +554,7 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
      `fxg node access-token rotate`）、安全な64文字のランダム文字列（`auth_token`）を生成し、ノードは `<data>/node/auth_token`、ハブは `<data>/hub/auth_token`
      にパーミッション `0600` で保存します。
 2. **Web UI 初回アクセスとCookieの安全な設定**:
-   - ローカルCLIから `fxg web` を実行すると、`node.addr` のアドレスを使った
+   - ローカルCLIから `fxg node web` を実行すると、`node.addr` のアドレスを使った
      トークン付きURL `http://<node.addr のアドレス>/?token=<AUTH_TOKEN>`
      （既定は `http://localhost:7860/?token=<AUTH_TOKEN>`）がブラウザで開かれます。
    - Web UI は URL のトークンで `POST /api/v1/auth/login` を呼び、サーバーは

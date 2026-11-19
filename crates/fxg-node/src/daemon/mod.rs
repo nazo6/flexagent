@@ -916,7 +916,7 @@ impl NodeDaemon {
             .local_addr()
             .map_err(|err| NodeError::Hub(err.to_string()))?;
 
-        // Publish the bound address so `fxg web` / `session new` can open the
+        // Publish the bound address so `fxg node web` / `session new` can open the
         // Web UI even when the node was started with a `--listen` override.
         let addr_file = state.paths().addr_path();
         if let Err(err) = std::fs::write(&addr_file, http_addr.to_string()) {
