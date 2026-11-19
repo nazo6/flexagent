@@ -20,7 +20,7 @@ export interface TerminalViewProps {
   /** Whether the terminal is the visible dock tab. Hidden terminals stay attached. */
   active?: boolean;
   /** Receives a hook that kills the shell before the tab is removed. */
-  onregister?: (kill: () => void) => void;
+  onRegister?: (kill: () => void) => void;
 }
 
 type Status = "disconnected" | "connecting" | "connected" | "exited" | "blocked" | "failed";
@@ -204,7 +204,7 @@ export default function TerminalView(props: TerminalViewProps) {
         send({ op: "resize", cols, rows });
       });
       adapter = next;
-      props.onregister?.(() => {
+      props.onRegister?.(() => {
         send({ op: "kill" });
         socket?.close();
       });

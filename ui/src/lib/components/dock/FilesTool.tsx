@@ -608,9 +608,9 @@ export default function FilesTool(props: FilesToolProps) {
             <FileTabs
               tabs={dock.files}
               activePath={dock.activeFile}
-              onactivate={(path) => dock.activateFile(path)}
-              onclose={(path) => dock.closeFile(path)}
-              onpin={(path) => dock.pinFile(path)}
+              onActivate={(path) => dock.activateFile(path)}
+              onClose={(path) => dock.closeFile(path)}
+              onPin={(path) => dock.pinFile(path)}
             />
             <Show
               when={activePreview()}
@@ -625,7 +625,7 @@ export default function FilesTool(props: FilesToolProps) {
                   ctx={props.ctx}
                   tab={tab()}
                   mobile={isMobile()}
-                  onback={() => dock.setTreeVisible(true)}
+                  onBack={() => dock.setTreeVisible(true)}
                 />
               )}
             </Show>

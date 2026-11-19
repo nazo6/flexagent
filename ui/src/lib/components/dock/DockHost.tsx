@@ -15,7 +15,7 @@ export interface DockHostProps {
   ctx: DockContext;
   items: TimelineItem[];
   mobile?: boolean;
-  oncollapse: () => void;
+  onCollapse: () => void;
   class?: string;
 }
 
@@ -46,7 +46,7 @@ export default function DockHost(props: DockHostProps) {
               class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 items-center justify-center rounded-md transition-colors"
               title={m.session_close_panel()}
               aria-label={m.session_close_panel()}
-              onClick={() => props.oncollapse()}
+              onClick={() => props.onCollapse()}
             >
               <Show when={props.mobile === true} fallback={<IconPanelRightClose class="size-4" />}>
                 <IconX class="size-4" />

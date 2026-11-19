@@ -82,6 +82,12 @@ if the code here disagrees with this file, fix one of them in the same change.
 - **Props are values.** Pass `value={count()}`, never `value={count}`. A
   getter prop is reserved for render props and lazy slots, and needs a
   comment.
+- **Callback props are camelCase.** A component's own callbacks are named
+  `onSelect`, `onChange`, `onOpenChange`, ... A lowercase name such as
+  `onselect` reads like a native DOM handler in JSX and hides that the prop is
+  ours; native handlers (`onClick`, `onKeyDown`, ...) keep their platform name.
+  The props object of a component is the only place these names appear: callers
+  pass them as written, and `omit` / `merge` lists use the same spelling.
 - `unicorn/consistent-function-scoping` is off: a Solid component body runs
   once per instance, so helper functions are not re-created per call, and
   hoisting them would take `props` out of scope.

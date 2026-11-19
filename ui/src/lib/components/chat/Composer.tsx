@@ -445,7 +445,7 @@ export default function Composer(props: ComposerProps) {
                 modes={props.capabilities?.availableModes ?? []}
                 value={props.capabilities?.currentMode ?? null}
                 class="shrink-0"
-                onchange={(modeId) => {
+                onChange={(modeId) => {
                   if (modeId !== null) void runControl({ action: "set_mode", mode_id: modeId });
                 }}
               />
@@ -457,7 +457,7 @@ export default function Composer(props: ComposerProps) {
                   option={option()}
                   class="shrink-0"
                   favoriteScope={props.agentId ?? ""}
-                  onchange={(value) =>
+                  onChange={(value) =>
                     void runControl({
                       action: "set_config",
                       key: option().key,
@@ -557,7 +557,7 @@ export default function Composer(props: ComposerProps) {
               busy={sending()}
               disabled={sending() || (text().trim() === "" && attachments().length === 0)}
               title={sending() ? m.chat_sending() : isRunning() ? m.chat_queue() : m.chat_send()}
-              onclick={() => void send()}
+              onClick={() => void send()}
             />
           </>
         }
@@ -565,9 +565,9 @@ export default function Composer(props: ComposerProps) {
         <ComposerTextarea
           value={text()}
           onValueChange={updateText}
-          onkeydown={onKeydown}
-          onpaste={composer.onPaste}
-          ondrop={composer.onDrop}
+          onKeyDown={onKeydown}
+          onPaste={composer.onPaste}
+          onDrop={composer.onDrop}
           rows={2}
           minHeight={52}
           maxHeight={160}

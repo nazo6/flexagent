@@ -1,7 +1,7 @@
 # 2026-11-19 Solid 2 Web UI の不具合修正・リアクティビティ健全化計画
 
 - **日付**: 2026-11-19
-- **ステータス**: `Partially Implemented`
+- **ステータス**: `Implemented`
 - **対象パッケージ**: `ui`（補助的にルート設定・`docs/`）
 - **対象スクリプト / 設定**: `mise run check:ui` / `mise run test:ui` / `mise run lint:ui` / `mise run build:ui` / `mise run fmt`
 - **関連ドキュメント**:
@@ -239,3 +239,9 @@
   - ファイル行リンクから `CodeView` の対象行へスクロールすること。
   - `ElicitationCard` でカンマ区切り配列と負数/小数がそのまま入力できること。
 - **テーマ / モーダル**: ダークモードで初回ロード時に白いフラッシュ（FOUC）が起きないこと。モバイル `Sheet` 上から削除 `AlertDialog` 等を開閉しても背景スクロールが復帰すること。
+
+---
+
+## 4. 実装状況
+
+Phase A〜D とフォローアップ 3 項目（`service-worker.js` の base64url デコード共有化、コールバック prop の PascalCase 統一、`NewSessionChat.tsx` の分割）まで完了した。経緯は [`docs/changelog/2026-11/2026-11-19-solid2-ui-fixes-and-hardening.md`](../changelog/2026-11/2026-11-19-solid2-ui-fixes-and-hardening.md) を参照。

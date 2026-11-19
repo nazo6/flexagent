@@ -9,9 +9,9 @@ import IconX from "~icons/lucide/x";
 export interface FileTabsProps {
   tabs: DockFileTab[];
   activePath: string | null;
-  onactivate: (path: string) => void;
-  onclose: (path: string) => void;
-  onpin: (path: string) => void;
+  onActivate: (path: string) => void;
+  onClose: (path: string) => void;
+  onPin: (path: string) => void;
 }
 
 /** File tab strip of the Files tool (Arrow keys move, double-click pins). */
@@ -23,7 +23,7 @@ export default function FileTabs(props: FileTabsProps) {
     const nextIndex = (index + offset + props.tabs.length) % props.tabs.length;
     const next = props.tabs[nextIndex];
     if (next === undefined) return;
-    props.onactivate(next.path);
+    props.onActivate(next.path);
     requestAnimationFrame(() => {
       document.getElementById(`dock-file-tab-${nextIndex}`)?.focus();
     });
@@ -59,8 +59,8 @@ export default function FileTabs(props: FileTabsProps) {
                   title={
                     tab().preview ? `${tab().path}\n${m.dock_file_preview_hint()}` : tab().path
                   }
-                  onClick={() => props.onactivate(tab().path)}
-                  onDblClick={() => props.onpin(tab().path)}
+                  onClick={() => props.onActivate(tab().path)}
+                  onDblClick={() => props.onPin(tab().path)}
                   onKeyDown={(event) => handleKeydown(event, index())}
                   onMouseDown={(event) => {
                     if (event.button === 1) event.preventDefault();
@@ -69,7 +69,7 @@ export default function FileTabs(props: FileTabsProps) {
                     if (event.button !== 1) return;
                     event.preventDefault();
                     event.stopPropagation();
-                    props.onclose(tab().path);
+                    props.onClose(tab().path);
                   }}
                 >
                   <IconFile class="size-3 shrink-0" />
@@ -89,7 +89,7 @@ export default function FileTabs(props: FileTabsProps) {
                   aria-label={m.dock_close_tab()}
                   onClick={(event) => {
                     event.stopPropagation();
-                    props.onclose(tab().path);
+                    props.onClose(tab().path);
                   }}
                 >
                   <IconX class="size-3" />

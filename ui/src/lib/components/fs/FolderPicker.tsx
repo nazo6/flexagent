@@ -32,10 +32,10 @@ export interface FolderPickerProps {
   class?: string;
   /** Fixed height for the scrollable entry list (keeps the dialog from resizing). */
   listClass?: string;
-  onpathchange?: (path: string) => void;
-  onselectionchange?: (path: string) => void;
-  onloadingchange?: (loading: boolean) => void;
-  onerror?: (error: string) => void;
+  onPathChange?: (path: string) => void;
+  onSelectionChange?: (path: string) => void;
+  onLoadingChange?: (loading: boolean) => void;
+  onError?: (error: string) => void;
   /** Optional content rendered above the folder list. */
   children?: JSX.Element;
 }
@@ -76,7 +76,7 @@ export default function FolderPicker(props: FolderPickerProps) {
     const token = ++loadGeneration;
     setLoading(true);
     setError(null);
-    props.onloadingchange?.(true);
+    props.onLoadingChange?.(true);
     try {
       const res = await sync.connection.client.browseFs(node, path);
       if (token !== loadGeneration) return;
@@ -88,20 +88,20 @@ export default function FolderPicker(props: FolderPickerProps) {
       setFilter("");
       const selection = pickerMode() === "select" ? res.current_path : "";
       setSelectedPath(selection);
-      props.onselectionchange?.(selection);
-      props.onpathchange?.(res.current_path);
+      props.onSelectionChange?.(selection);
+      props.onPathChange?.(res.current_path);
     } catch (cause) {
       if (token !== loadGeneration) return;
       const message = errorMessage(cause);
       setError(message);
       setTruncated(false);
       setSelectedPath("");
-      props.onselectionchange?.("");
-      props.onerror?.(message);
+      props.onSelectionChange?.("");
+      props.onError?.(message);
     } finally {
       if (token === loadGeneration) {
         setLoading(false);
-        props.onloadingchange?.(false);
+        props.onLoadingChange?.(false);
       }
     }
   }
@@ -122,7 +122,7 @@ export default function FolderPicker(props: FolderPickerProps) {
       return;
     }
     setSelectedPath(entry.path);
-    props.onselectionchange?.(entry.path);
+    props.onSelectionChange?.(entry.path);
   }
 
   function handleOpenEntry(entry: FsEntry): void {

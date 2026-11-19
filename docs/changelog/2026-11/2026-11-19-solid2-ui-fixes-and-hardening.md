@@ -50,8 +50,12 @@ Solid 2 の「書き込みは次のフラッシュまで見えない」「`creat
 - `ui/.oxlintrc.json` の `ignorePatterns` を `build/**` に直し、`vitest` プラグインを有効化した。`Dockerfile` は `ui/pnpm-workspace.yaml` をコピーする。
 - UI プリミティブ（`controllable` / `position` / `input` / `tabs` / `select` / `dropdown-menu` / `dialog`）の単体テストを追加した。
 
-## 未対応・フォローアップ
+## フォローアップ（同日対応）
 
-- `NewSessionChat.tsx`（約 1,870 行）の機能単位分割。
-- `service-worker.js` はビルド時にそのままコピーされる standalone スクリプトのため、`push-keys.ts` の base64url デコードと小さな実装が重複している（モジュール SW 化と共有化は別タスク）。
-- コールバック prop 名（`onselect` などの Svelte 由来の小文字名）の全面統一は段階的に継続する。
+- `NewSessionChat.tsx`（約 1,900 行）を機能単位に分割した。プロジェクト / ノード / パス / エージェント解決と capability probe は `use-new-session-target.ts`、ピッカーは `AgentPicker` / `DirectoryPicker` / `EnvironmentPicker` / `ModelSelectors` / `ProjectPicker`、ヘッダーと通知は `NewSessionHeader.tsx`、モード解決・作成リクエスト生成・provisioner テスト・パスラベルは純関数モジュールへ移した。画面本体（フォーム状態とハンドラ）は約 850 行。
+- `src/service-worker.js` の base64url デコードは app と同じ実装（`src/service-worker/format.ts`）に統合した。SW は classic script として出力するため、ビルド時に import した関数本体を `sw.js` へインライン展開し、未定義の export があればビルドを失敗させる。通知本文は同じモジュールの `toNotificationBody()` で整形する。
+- コンポーネント独自のコールバック prop を camelCase に統一した（`onselect` → `onSelect` など 22 個）。命名規則は [`ui/CONVENTIONS.md`](../../../ui/CONVENTIONS.md) に追記した。
+
+## 残タスク
+
+- 上記フォローアップ内の主要画面のライト / ダーク / テーマ別スクリーンショット巡回（[`docs/backlog.md`](../../backlog.md) §8）は引き続き手動確認項目。

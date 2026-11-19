@@ -22,9 +22,9 @@ export interface ConfigOptionPickerProps {
   option: ConfigOptionInfo;
   /** Controlled value; when omitted, the option's current value is used. */
   value?: ConfigOptionValue | null;
-  onchange: (value: ConfigOptionValue) => void;
+  onChange: (value: ConfigOptionValue) => void;
   showRefresh?: boolean;
-  onrefresh?: () => void;
+  onRefresh?: () => void;
   disabled?: boolean;
   /** Agent ID used to scope favorite models (empty disables favorites). */
   favoriteScope?: string;
@@ -122,10 +122,10 @@ export default function ConfigOptionPicker(props: ConfigOptionPickerProps) {
               }
             : null
         }
-        onselect={() => {
+        onSelect={() => {
           const picked = choice();
           setOptimistic({ base: base(), value: picked.raw });
-          props.onchange(resolveConfigChoice(choices(), picked.value));
+          props.onChange(resolveConfigChoice(choices(), picked.value));
           closePicker();
         }}
       >
@@ -213,7 +213,7 @@ export default function ConfigOptionPicker(props: ConfigOptionPickerProps) {
             class="text-muted-foreground hover:bg-accent hover:text-accent-foreground flex items-center gap-1.5 border-t px-3 py-2 text-[13px] transition-colors"
             onClick={() => {
               closePicker();
-              props.onrefresh?.();
+              props.onRefresh?.();
             }}
           >
             <IconRefreshCw class="size-3.5" />

@@ -343,8 +343,8 @@ export function createAddProjectDialog(
                   mode="navigate"
                   quickPaths={quickPaths()}
                   class="h-full"
-                  onpathchange={(path) => setTargetPath(path)}
-                  onerror={(message) => {
+                  onPathChange={(path) => setTargetPath(path)}
+                  onError={(message) => {
                     // Keep `targetPath` so the preview effect does not erase the
                     // error it just showed; the load failure is specific to the
                     // folder browser and lives in its own state.

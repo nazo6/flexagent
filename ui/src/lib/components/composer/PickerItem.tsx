@@ -7,7 +7,7 @@ import IconStar from "~icons/lucide/star";
 export interface PickerItemProps {
   selected?: boolean;
   disabled?: boolean;
-  onselect?: () => void;
+  onSelect?: () => void;
   /**
    * Optional trailing favorite toggle rendered next to (not inside) the row
    * button, so the two controls are never nested.
@@ -31,7 +31,7 @@ export default function PickerItem(props: PickerItemProps) {
           "hover:bg-accent focus:bg-accent focus-visible:bg-accent flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors outline-none disabled:pointer-events-none disabled:opacity-50",
           props.class,
         )}
-        onClick={() => props.onselect?.()}
+        onClick={() => props.onSelect?.()}
       >
         <span class="min-w-0 flex-1">{props.children}</span>
         <Show when={props.selected ?? false}>
