@@ -205,6 +205,23 @@ WebSocket の `Origin` 検証（CSWSH 対策）の許可リストです（ハブ
   / `fxg session fork <id> -w <branch>` から行います。
 - 一時VMの環境構築・ツールセットアップは、コンテナイメージやVMテンプレート、またはプロビジョナーのコマンド定義で外部管理されます。`fxg` 自身はスクリプト合成やツール自動検出を行わず、`fxg internal stdio` は与えられたワークスペース上でプロトコル通信に専念します。
 
+### 2.4 環境変数を使ってよい範囲
+
+環境変数はプロセス起動時の入力であり、実行時に変更する設定の保存先にはしません。
+`FXG_*` を追加してよいのは次の 3 種類だけです。
+
+- **起動前 bootstrap**: DB を開く前に確定する値。`FXG_HOME`、`FXG_NODE_*`、
+  `FXG_HUB_*`、`FXG_LOG_*` が該当し、`node.toml` / `hub.toml` と同じ設定を
+  上書きします（優先順位は CLI フラグ > 環境変数 > toml > 既定値）。
+- **エコシステム標準**: `RUST_LOG` / `NO_COLOR` / `CLICOLOR_FORCE`。fxg 固有の
+  設定ではなく、他のツールと同じ意味で扱います。
+- **テスト専用フック**: `cfg(test)` などで本番ビルドから隔離されているもの。
+
+エージェントのチューニングや外部サービスへの接続先など、実行中に変わり得る値は
+所有者の DB（`node.db` / `hub.db`）に置き、Client API から変更します。新しい
+`FXG_*` を追加するときは `crates/fxg-protocol/src/config.rs` の `env_keys` に
+定義し、settings API の `source` 表示に載せてください。
+
 ---
 
 Web UI / Android PWA の設計は [`07-web-ui-and-pwa.md`](./07-web-ui-and-pwa.md) を参照してください。

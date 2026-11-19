@@ -111,9 +111,6 @@ impl OpenCodeNativeDriver {
     ///
     /// Used by the node management API. Does not start a server.
     pub async fn connect_management() -> anyhow::Result<OpenCodeClient> {
-        if let Some(client) = env_client() {
-            return Ok(client);
-        }
         if let Some(client) = discover_service().await? {
             return Ok(client);
         }
@@ -179,7 +176,7 @@ impl DriverInner {
             }
         }
 
-        let server = if let Some(client) = self.injected.clone().or_else(env_client) {
+        let server = if let Some(client) = self.injected.clone() {
             Server {
                 client,
                 owned: None,
@@ -328,15 +325,6 @@ impl DriverInner {
             lines.drain(0..drain);
         }
     }
-}
-
-pub(super) fn env_client() -> Option<OpenCodeClient> {
-    let url = env_var("FXG_OPENCODE_URL")?;
-    let password = env_var("FXG_OPENCODE_PASSWORD").unwrap_or_default();
-    if url.trim().is_empty() {
-        return None;
-    }
-    Some(OpenCodeClient::new(url, password))
 }
 
 pub(super) async fn discover_service() -> anyhow::Result<Option<OpenCodeClient>> {

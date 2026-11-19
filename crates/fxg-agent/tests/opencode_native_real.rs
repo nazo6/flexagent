@@ -8,9 +8,8 @@
 //! Run with:
 //! `cargo test -p fxg-agent --test opencode_native_real -- --ignored`
 //!
-//! It uses the running `opencode serve` service (or the
-//! `FXG_OPENCODE_URL` / `FXG_OPENCODE_PASSWORD` override) and creates a
-//! session in a temporary directory. It does not touch fxg's DB.
+//! It uses the running `opencode serve` service and creates a session in a
+//! temporary directory. It does not touch fxg's DB.
 
 use std::path::PathBuf;
 use std::time::Duration;

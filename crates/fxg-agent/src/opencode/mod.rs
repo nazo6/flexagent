@@ -96,18 +96,6 @@ fn optional<T, E: std::fmt::Display>(result: Result<T, E>) -> Option<T> {
     }
 }
 
-/// Reads an environment variable without treating a non-Unicode value as an error.
-#[allow(
-    clippy::manual_ok_err,
-    reason = "Result::ok is disallowed by the workspace lint"
-)]
-fn env_var(name: &str) -> Option<String> {
-    match std::env::var(name) {
-        Ok(value) => Some(value),
-        Err(_) => None,
-    }
-}
-
 // ---------------------------------------------------------------------------
 // HTTP client
 // ---------------------------------------------------------------------------
