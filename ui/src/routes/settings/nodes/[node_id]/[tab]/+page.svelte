@@ -1,5 +1,6 @@
 <script lang="ts">
   import AgentManager from "#lib/components/settings/AgentManager.svelte";
+  import AgentRuntimeSettings from "#lib/components/settings/AgentRuntimeSettings.svelte";
   import AuditLog from "#lib/components/settings/AuditLog.svelte";
   import ClientTokenCard from "#lib/components/settings/ClientTokenCard.svelte";
   import PairingPanel from "#lib/components/settings/PairingPanel.svelte";
@@ -39,6 +40,7 @@
 {:else if data.tab === "pairing"}
   <PairingPanel nodeId={data.nodeId} />
 {:else if data.tab === "agents"}
+  <AgentRuntimeSettings nodeId={data.nodeId} />
   <AgentManager nodeId={data.nodeId} />
 {:else if data.tab === "audit"}
   <AuditLog nodeId={data.nodeId} />

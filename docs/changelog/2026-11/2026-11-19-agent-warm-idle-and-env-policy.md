@@ -32,6 +32,9 @@
 - `0` のときは期限タイマーを張らない。従来は `Duration::ZERO` で即時破棄されて
   おり、「ノード終了まで保持」という説明と一致していなかった。
 - `FXG_AGENT_WARM_IDLE_SECS` と `env_keys::AGENT_WARM_IDLE_SECS` を削除した。
+- agents タブに `Agent runtime` パネルを追加し、ACP registry URL・registry
+  cache TTL・warm idle TTL を編集できるようにした。aliases は今回も API のみで、
+  保存時は読み込んだ値をそのまま送って保持する。
 
 ### OpenCode の接続先オーバーライドを削除
 
@@ -50,7 +53,8 @@
 
 ## 影響
 
-- Client API から `warm_idle_secs` を設定できる（省略時は既定 600 秒）。
+- Client API と Web UI（agents タブの `Agent runtime`）から `warm_idle_secs` を
+  設定できる（省略時は既定 600 秒）。
 - `FXG_AGENT_WARM_IDLE_SECS` / `FXG_OPENCODE_URL` / `FXG_OPENCODE_PASSWORD` は
   読まれなくなる。
 - `warm_idle_secs = 0` が意図どおり「ノード終了まで保持」として機能する。
@@ -62,3 +66,5 @@
 - `cargo test -p fxg-db --test settings`
 - `cargo test -p fxg-agent --lib acp::warm`
 - `pnpm --dir ui run check`
+- `pnpm --dir ui run lint`
+- `pnpm --dir ui run test`
