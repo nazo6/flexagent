@@ -44,6 +44,7 @@ use fxg_protocol::paths::{Paths, Role};
     bin = "fxg",
     version = env!("CARGO_PKG_VERSION"),
     about = "FlexAgent: a local-first agent manager",
+    subcommand_help_heading = "Other commands",
     arg_required_else_help
 )]
 struct Fxg {
@@ -65,9 +66,11 @@ enum Commands {
     Logs(commands::LogsArgs),
     /// Check the local configuration, database, logs and toolchain
     Doctor(commands::DoctorArgs),
-    /// Local node process and Web access tokens
+    /// Start and manage the local node (sessions, agents and the Web UI)
+    #[usage(help_heading = "Main commands", display_order = 0)]
     Node(commands::NodeArgs),
-    /// Hub process and node pairing tokens
+    /// Start and manage the hub (node sync and remote access)
+    #[usage(help_heading = "Main commands", display_order = 1)]
     Hub(commands::HubArgs),
     /// Manage the OS login autostart service
     Service(commands::ServiceArgs),
