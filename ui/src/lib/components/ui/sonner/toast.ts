@@ -13,38 +13,76 @@ import { ToasterStore, useToaster } from "terracotta/toast";
 
 export type ToastKind = "default" | "success" | "error" | "info" | "warning" | "loading";
 
+/** One optional button under the message (for example a retry). */
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 export interface ToastItem {
   kind: ToastKind;
   message: string;
   description: string | undefined;
+  action: ToastAction | undefined;
 }
 
 export interface ToastOptions {
   description?: string;
   /** Milliseconds before the toast disappears; `0` keeps it until dismissed. */
   duration?: number;
+  /** Optional action button; clicking it dismisses the toast first. */
+  action?: ToastAction;
 }
 
 const DEFAULT_DURATION = 4000;
 
 const store = new ToasterStore<ToastItem>();
+/** Pending auto-dismiss timers, so `dismiss()` can cancel them. */
+const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /** The live queue, for the `Toaster` component. */
 export function useToastQueue() {
   return useToaster(store);
 }
 
+function clearTimer(id: string): void {
+  const timer = timers.get(id);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    timers.delete(id);
+  }
+}
+
 function push(kind: ToastKind, message: string, options?: ToastOptions): string {
   const duration = options?.duration ?? (kind === "loading" ? 0 : DEFAULT_DURATION);
-  const id = store.create({ kind, message, description: options?.description });
-  if (duration > 0) setTimeout(() => store.remove(id), duration);
+  const id = store.create({
+    kind,
+    message,
+    description: options?.description,
+    action: options?.action,
+  });
+  if (duration > 0) {
+    timers.set(
+      id,
+      setTimeout(() => {
+        timers.delete(id);
+        store.remove(id);
+      }, duration),
+    );
+  }
   return id;
 }
 
 /** Dismisses one toast by id, or every toast when called without one. */
 function dismiss(id?: string): void {
-  if (id === undefined) store.clear();
-  else store.remove(id);
+  if (id === undefined) {
+    for (const timer of timers.values()) clearTimeout(timer);
+    timers.clear();
+    store.clear();
+    return;
+  }
+  clearTimer(id);
+  store.remove(id);
 }
 
 type ToastFunction = {

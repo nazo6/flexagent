@@ -1,13 +1,4 @@
-import {
-  createEffect,
-  createMemo,
-  createSignal,
-  For,
-  Match,
-  Show,
-  Switch,
-  untrack,
-} from "solid-js";
+import { createEffect, createMemo, createSignal, For, Match, Show, Switch } from "solid-js";
 import AgentIcon from "#lib/components/agent/AgentIcon.tsx";
 import * as Popover from "#lib/components/ui/popover/index.ts";
 import type { AgentUsageLimits, UsageGroup, UsageWindow } from "#lib/generated/bindings.ts";
@@ -102,21 +93,35 @@ export default function AgentUsage(props: AgentUsageProps) {
     }
   }
 
-  createEffect(
-    () => ({ node: props.nodeId, agent: props.agentId, path: props.localPath }),
-    ({ node, agent, path }) => {
-      if (node === "" || agent === "") return;
-      untrack(() => void load(node, agent, path));
-      const timer = setInterval(() => void load(node, agent, path), REFRESH_MS);
-      return () => {
-        clearInterval(timer);
-        if (statusTimer !== null) {
-          clearTimeout(statusTimer);
-          statusTimer = null;
-        }
-      };
-    },
+  // Reset the meter and restart the poll only when the identity changes; a WS
+  // update that replaces the session object must not restart the timer.
+  const identityKey = createMemo(
+    () => `${props.nodeId}\u0000${props.agentId}\u0000${props.localPath}`,
   );
+
+  createEffect(identityKey, (key) => {
+    const [node, agent, path] = key.split("\u0000");
+    // Drop the previous identity's snapshot and invalidate its in-flight probe.
+    requestId += 1;
+    setUsage(null);
+    setHasLoaded(false);
+    setRefreshState("idle");
+    if (statusTimer !== null) {
+      clearTimeout(statusTimer);
+      statusTimer = null;
+    }
+    if (node === "" || agent === "") return;
+    void load(node, agent, path);
+    const timer = setInterval(() => void load(node, agent, path), REFRESH_MS);
+    return () => {
+      clearInterval(timer);
+      requestId += 1;
+      if (statusTimer !== null) {
+        clearTimeout(statusTimer);
+        statusTimer = null;
+      }
+    };
+  });
 
   const worst = createMemo((): WorstWindow | null => {
     const data = usage();

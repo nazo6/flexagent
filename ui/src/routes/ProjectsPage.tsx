@@ -1,4 +1,4 @@
-import { For, Match, Switch, createEffect } from "solid-js";
+import { For, Match, Switch } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { createAddProjectDialog } from "#lib/components/projects/AddProjectDialog.tsx";
 import { ProjectCard } from "#lib/components/projects/ProjectCard.tsx";
@@ -7,6 +7,7 @@ import { createWorktreeManagerDialog } from "#lib/components/projects/WorktreeMa
 import { Button } from "#lib/components/ui/button/index.ts";
 import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.ts";
 import { toast } from "#lib/components/ui/sonner/index.ts";
+import { useDocumentTitle } from "#lib/document-title.ts";
 import type { WorktreeInfo } from "#lib/generated/bindings.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { shortId } from "#lib/session-status.ts";
@@ -36,12 +37,7 @@ export default function ProjectsPage() {
   const addDialog = createAddProjectDialog();
   const scanDialog = createProjectScanDialog({ nodes: () => sync.nodes });
 
-  createEffect(
-    () => m.projects_page_title(),
-    (title) => {
-      document.title = title;
-    },
-  );
+  useDocumentTitle(() => m.projects_page_title());
 
   /** Removes this node's folder binding; the project disappears with its last binding. */
   async function unlinkBinding(_projectId: string, nodeId: string, path: string): Promise<void> {
@@ -129,11 +125,11 @@ export default function ProjectsPage() {
           </Match>
           <Match when={true}>
             <div class="border-border flex flex-col border-t">
-              <For each={sync.projects}>
+              <For each={sync.projects} keyed={(project) => project.project_id}>
                 {(project) => (
                   <ProjectCard
-                    project={project}
-                    worktreeState={worktrees.entry(project.project_id)}
+                    project={project()}
+                    worktreeState={worktrees.entry(project().project_id)}
                     nodeName={nodeName}
                     onRefreshWorktrees={(projectId) => void worktrees.load(projectId)}
                     onCreateWorktree={(projectId) => worktreeDialog.openCreate(projectId)}

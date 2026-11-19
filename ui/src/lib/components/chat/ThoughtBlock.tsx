@@ -25,7 +25,7 @@ export default function ThoughtBlock(props: ThoughtBlockProps) {
   const [userIsOpen, setUserIsOpen] = createSignal(false);
   // A derived boolean (rather than reading `item.streaming` in the effect)
   // keeps the ticker from restarting whenever a delta replaces the item object.
-  const streaming = () => props.item.streaming;
+  const streaming = createMemo(() => props.item.streaming);
   const isOpen = () => (userToggled() ? userIsOpen() : streaming());
 
   /** Ticks while streaming so the elapsed time in the summary stays current. */

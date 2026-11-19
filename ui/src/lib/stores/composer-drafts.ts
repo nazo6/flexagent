@@ -54,8 +54,8 @@ interface ComposerDraft {
 /**
  * Drafts keyed by session ID (plus the new-session screen).
  *
- * Components keep their own `$state` for editing and mirror changes here. The
- * store outlives route components, so a draft survives navigation.
+ * Components keep their own editing state and mirror changes here. The store
+ * outlives route components, so a draft survives navigation.
  */
 export class ComposerDraftStore {
   #drafts = new Map<string, ComposerDraft>();

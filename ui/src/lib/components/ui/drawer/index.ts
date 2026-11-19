@@ -53,4 +53,4 @@ export type {
   DescriptionProps,
   CloseProps,
   Side,
-} from "../sheet/sheet.tsx";
+} from "./drawer.tsx";

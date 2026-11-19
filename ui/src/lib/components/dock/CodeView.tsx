@@ -1,6 +1,6 @@
 import { Show, createEffect, createSignal } from "solid-js";
 import { languageForPath } from "#lib/code-languages.ts";
-import { FOCUS_LINE_CLASS, highlightCodeBlock, prefersDarkMode } from "#lib/highlight.ts";
+import { FOCUS_LINE_CLASS, highlightCodeBlock, isDarkMode } from "#lib/highlight.ts";
 
 export interface CodeViewProps {
   path: string;
@@ -12,10 +12,15 @@ export interface CodeViewProps {
 /** Read-only source view with shiki highlighting and an optional focused line. */
 export default function CodeView(props: CodeViewProps) {
   const [html, setHtml] = createSignal<string | null>(null);
-  let scroller: HTMLDivElement | undefined;
+  const [scroller, setScroller] = createSignal<HTMLDivElement | null>(null);
 
   createEffect(
-    () => ({ path: props.path, text: props.text, line: props.line ?? null }),
+    () => ({
+      path: props.path,
+      text: props.text,
+      line: props.line ?? null,
+      dark: isDarkMode(),
+    }),
     (source) => {
       let disposed = false;
       setHtml(null);
@@ -24,7 +29,7 @@ export default function CodeView(props: CodeViewProps) {
           const rendered = await highlightCodeBlock(
             source.text,
             languageForPath(source.path),
-            prefersDarkMode(),
+            source.dark,
             source.line,
           );
           if (!disposed) setHtml(rendered);
@@ -41,9 +46,9 @@ export default function CodeView(props: CodeViewProps) {
   // Center the requested line without scrolling the surrounding page. Shiki
   // marks it with `FOCUS_LINE_CLASS` while building the highlighted HTML.
   createEffect(
-    () => ({ node: scroller, html: html() }),
+    () => ({ node: scroller(), html: html() }),
     ({ node, html: current }) => {
-      if (node === undefined || current === null) return;
+      if (node === null || current === null) return;
       const frame = requestAnimationFrame(() => {
         const target = node.querySelector<HTMLElement>(`.${FOCUS_LINE_CLASS}`);
         if (target === null) return;
@@ -66,7 +71,7 @@ export default function CodeView(props: CodeViewProps) {
       }
     >
       <div
-        ref={(element) => (scroller = element)}
+        ref={setScroller}
         class="h-full overflow-auto rounded-md border text-[12px] [&_code]:block [&_code]:min-w-max [&_pre]:w-max [&_pre]:min-w-full [&_pre]:p-2 [&_pre]:font-mono [&_pre]:leading-relaxed [&_.fxg-line-focus]:inline-block [&_.fxg-line-focus]:w-full [&_.fxg-line-focus]:bg-signal-soft/60"
         innerHTML={html() ?? ""}
       />

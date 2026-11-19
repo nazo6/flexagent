@@ -90,11 +90,12 @@ export function createWorktreeManagerDialog(
   async function submitCreateWorktree(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     const projectId = createProjectId();
-    if (projectId === null || createBusy()) return;
+    const nodeId = createNodeId();
+    if (projectId === null || createBusy() || nodeId === "") return;
     setCreateBusy(true);
     try {
       const created = await sync.connection.client.createWorktree(projectId, {
-        node_id: createNodeId(),
+        node_id: nodeId,
         branch: createBranch().trim(),
         base_branch: createBase().trim() === "" ? null : createBase().trim(),
       });
@@ -218,7 +219,10 @@ export function createWorktreeManagerDialog(
                 <Button type="button" variant="outline" onClick={() => setCreateProjectId(null)}>
                   {m.common_cancel()}
                 </Button>
-                <Button type="submit" disabled={createBusy() || createBranch().trim() === ""}>
+                <Button
+                  type="submit"
+                  disabled={createBusy() || createNodeId() === "" || createBranch().trim() === ""}
+                >
                   {createBusy() ? m.projects_creating() : m.projects_create()}
                 </Button>
               </Dialog.Footer>

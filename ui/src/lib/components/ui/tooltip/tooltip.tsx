@@ -1,9 +1,10 @@
 import type { ComponentProps, JSX } from "@solidjs/web";
+import type { ClassValue } from "cn";
 import { Portal } from "@solidjs/web";
 import { createContext, createSignal, omit, Show, useContext } from "solid-js";
 import { Tooltip as TooltipPrimitive, TooltipPanel, TooltipTrigger } from "terracotta/tooltip";
 import { cn } from "#lib/utils.ts";
-import { createControllable, toBoolean } from "../controllable.ts";
+import { createControllable, toBoolean, type MouseHandler } from "../controllable.ts";
 import { composeRef, useAnchoredPanel, type ElementRef, type PanelAlign } from "../position.ts";
 import { TooltipConfigContext } from "./tooltip-context.ts";
 
@@ -57,8 +58,8 @@ export interface RootProps {
 export function Root(props: RootProps) {
   const [open, setOpen] = createControllable(
     () => props.open,
-    props.onOpenChange,
-    props.defaultOpen ?? false,
+    () => props.onOpenChange,
+    () => props.defaultOpen ?? false,
   );
   const [anchor, setAnchorElement] = createSignal<HTMLElement>();
   const delay = useContext(TooltipConfigContext);
@@ -80,26 +81,59 @@ export function Root(props: RootProps) {
   );
 }
 
-export interface TriggerProps extends Omit<ComponentProps<"button">, "ref" | "onClick"> {
+export interface TriggerProps extends Omit<
+  ComponentProps<"button">,
+  "ref" | "onClick" | "type" | "class"
+> {
   /** Render a link instead of a button (the sidebar wraps anchors). */
   as?: "button" | "a";
   ref?: ElementRef<HTMLElement>;
+  class?: ClassValue;
+  onClick?: MouseHandler<HTMLElement>;
+  type?: "button" | "submit" | "reset";
+  href?: string;
+  target?: string;
+  rel?: string;
 }
 
 export function Trigger(props: TriggerProps) {
   const state = useTooltip("Tooltip.Trigger");
-  const setRef = composeRef(props.ref, (element: HTMLElement) => state.setAnchor(element));
+  // Resolve both refs when the element mounts: reading `props.ref` at the top
+  // level makes a JSX lazily-built ref callback look like a reactive source.
+  const setRef = (element: HTMLElement) => {
+    props.ref?.(element);
+    state.setAnchor(element);
+  };
 
   return (
     <Show
       when={props.as === "a"}
       fallback={
         <TooltipTrigger
-          {...buttonRest(props)}
+          {...omit(
+            props as ComponentProps<"button"> & {
+              as?: "button" | "a";
+              href?: string;
+              target?: string;
+              rel?: string;
+            },
+            "class",
+            "children",
+            "ref",
+            "as",
+            "disabled",
+            "type",
+            "onClick",
+            "href",
+            "target",
+            "rel",
+          )}
           ref={setRef}
           data-slot="tooltip-trigger"
-          disabled={toBoolean(props.disabled)}
-          class={props.class}
+          type={props.type ?? "button"}
+          disabled={props.disabled === undefined ? undefined : toBoolean(props.disabled)}
+          class={cn(props.class)}
+          onClick={props.onClick}
         >
           {props.children}
         </TooltipTrigger>
@@ -107,37 +141,24 @@ export function Trigger(props: TriggerProps) {
     >
       <TooltipTrigger
         as="a"
-        {...anchorRest(props)}
+        {...omit(
+          props as ComponentProps<"a"> & { as?: "button" | "a"; disabled?: boolean },
+          "class",
+          "children",
+          "ref",
+          "as",
+          "disabled",
+          "type",
+          "onClick",
+        )}
         ref={setRef}
         data-slot="tooltip-trigger"
-        class={props.class}
+        class={cn(props.class)}
+        onClick={props.onClick}
       >
         {props.children}
       </TooltipTrigger>
     </Show>
-  );
-}
-
-/** Everything except the props this wrapper handles itself. */
-function buttonRest(props: TriggerProps) {
-  return omit(
-    props as ComponentProps<"button"> & { as?: "button" | "a" },
-    "class",
-    "children",
-    "ref",
-    "as",
-    "disabled",
-  );
-}
-
-function anchorRest(props: TriggerProps) {
-  return omit(
-    props as ComponentProps<"a"> & { as?: "button" | "a"; disabled?: boolean },
-    "class",
-    "children",
-    "ref",
-    "as",
-    "disabled",
   );
 }
 
@@ -183,25 +204,27 @@ export function Content(props: ContentProps) {
   });
 
   return (
-    <Portal>
-      <TooltipPanel
-        {...rest}
-        ref={composeRef(panel.ref, props.ref)}
-        data-slot="tooltip-content"
-        class={cn(
-          "animate-in fade-in-0 zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs has-data-[slot=kbd]:pr-1.5 **:data-[slot=kbd]:relative **:data-[slot=kbd]:isolate **:data-[slot=kbd]:z-50 **:data-[slot=kbd]:rounded-sm z-50 w-fit max-w-xs bg-foreground text-background",
-          props.class,
-        )}
-      >
-        {props.children}
-        <div
-          ref={setArrow}
+    <Show when={state.open()}>
+      <Portal>
+        <TooltipPanel
+          {...rest}
+          ref={composeRef(panel.ref, props.ref)}
+          data-slot="tooltip-content"
           class={cn(
-            "size-2.5 rotate-45 rounded-[2px] bg-foreground fill-foreground",
-            props.arrowClasses,
+            "animate-in fade-in-0 zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs has-data-[slot=kbd]:pr-1.5 **:data-[slot=kbd]:relative **:data-[slot=kbd]:isolate **:data-[slot=kbd]:z-50 **:data-[slot=kbd]:rounded-sm z-50 w-fit max-w-xs bg-foreground text-background",
+            props.class,
           )}
-        />
-      </TooltipPanel>
-    </Portal>
+        >
+          {props.children}
+          <div
+            ref={setArrow}
+            class={cn(
+              "size-2.5 rotate-45 rounded-[2px] bg-foreground fill-foreground",
+              props.arrowClasses,
+            )}
+          />
+        </TooltipPanel>
+      </Portal>
+    </Show>
   );
 }

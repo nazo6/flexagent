@@ -47,7 +47,7 @@ if the code here disagrees with this file, fix one of them in the same change.
 | :------------------------- | :--------------------------------------------------------------- |
 | `$state(x)`                | `createSignal(x)`; deep objects → `createStore`                  |
 | `$derived(expr)`           | `createMemo(() => expr)`                                         |
-| `$effect(fn)`              | `createEffect(compute, apply)`（Solid 2 は分割 API）             |
+| `$effect(fn)`              | `createEffect(compute, apply)` (Solid 2 split API)               |
 | `$props()`                 | function argument; `merge` / `omit` for splitting                |
 | `$bindable()`              | getter + setter props                                            |
 | `{#each list as x (key)}`  | `<For each={list}>` (reference keyed) / `<Index>`                |
@@ -55,9 +55,12 @@ if the code here disagrees with this file, fix one of them in the same change.
 | `{#snippet}` / `{@render}` | children props / JSX                                             |
 | `bind:value`               | `value` + `onInput` (wrapper owns the decision)                  |
 | `class:active`             | `class={{ active }}`                                             |
-| `use:action`               | `ref` callback returning a cleanup                               |
+| `use:action`               | `ref` callback; `onSettled` owns lifecycle cleanup               |
 | `onMount`                  | `onSettled`; **return** a cleanup, never call `onCleanup` inside |
 | class with runes           | factory function returning accessors                             |
+| `$app/state` `page.url`    | `useLocation()` / `useSearchParams()`                            |
+| `goto(...)`                | `useNavigate()` or a plain `<a href>`                            |
+| `+page.ts` `error(404)`    | `matchFilters` on the route                                      |
 
 ## Reactivity rules
 
@@ -82,9 +85,6 @@ if the code here disagrees with this file, fix one of them in the same change.
 - `unicorn/consistent-function-scoping` is off: a Solid component body runs
   once per instance, so helper functions are not re-created per call, and
   hoisting them would take `props` out of scope.
-  | `$app/state` `page.url` | `useLocation()` / `useSearchParams()` |
-  | `goto(...)` | `useNavigate()` or a plain `<a href>` |
-  | `+page.ts` `error(404)` | `matchFilters` on the route |
 
 ## Component mapping
 

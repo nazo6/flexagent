@@ -1,6 +1,6 @@
-import { createEffect, createMemo, createSignal, untrack } from "solid-js";
+import { createEffect, createMemo, createSignal, onSettled, untrack } from "solid-js";
 import { resolveFileHref } from "#lib/dock/file-links.ts";
-import { enhanceCodeBlocks } from "#lib/highlight.ts";
+import { enhanceCodeBlocks, isDarkMode } from "#lib/highlight.ts";
 import { renderMarkdown } from "#lib/markdown.ts";
 import { dock } from "#lib/stores/dock.ts";
 import { cn } from "#lib/utils.ts";
@@ -42,12 +42,15 @@ export default function MarkdownText(props: MarkdownTextProps) {
   let renderedValue = untrack(renderedText);
   let lastRenderAt = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  /** Newest text seen while a throttled render is pending. */
+  let pendingText: string | null = null;
 
   function render(next: string): void {
     if (timer !== null) {
       clearTimeout(timer);
       timer = null;
     }
+    pendingText = null;
     if (next === renderedValue) return;
     renderedValue = next;
     setRenderedText(next);
@@ -61,21 +64,30 @@ export default function MarkdownText(props: MarkdownTextProps) {
         render(source.next);
         return;
       }
+      // Keep the latest text: a throttled run must render the newest value, not
+      // the one captured when the timer was scheduled.
+      pendingText = source.next;
       if (timer !== null) return;
       // Leading edge stayed from the previous render, so only the remainder waits.
       const wait = Math.max(0, STREAM_RENDER_INTERVAL_MS - (Date.now() - lastRenderAt));
       timer = setTimeout(() => {
         timer = null;
-        render(source.next);
+        const next = pendingText;
+        pendingText = null;
+        if (next !== null) render(next);
       }, wait);
-      return () => {
-        if (timer !== null) {
-          clearTimeout(timer);
-          timer = null;
-        }
-      };
     },
   );
+
+  // The timer is throttling, not debouncing: do not cancel it on every text
+  // change. Cancel it only when the component unmounts.
+  onSettled(() => () => {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    pendingText = null;
+  });
 
   const html = createMemo(() => {
     const body = renderMarkdown(renderedText());
@@ -86,7 +98,7 @@ export default function MarkdownText(props: MarkdownTextProps) {
   // During streaming the DOM changes with each delta, so insert a short debounce
   // (unchanged code blocks are reused from the highlight.ts cache).
   createEffect(
-    () => ({ node: root(), html: html() }),
+    () => ({ node: root(), html: html(), dark: isDarkMode() }),
     ({ node, html: current }) => {
       if (node === undefined || !current.includes("language-")) return;
       const highlightTimer = setTimeout(() => {

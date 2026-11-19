@@ -5,7 +5,7 @@ FROM node:24-bookworm-slim AS ui
 # pnpm は mise.toml と同じバージョンへ固定する
 RUN npm install --global pnpm@12.8.1
 WORKDIR /app/ui
-COPY ui/package.json ui/pnpm-lock.yaml ./
+COPY ui/package.json ui/pnpm-lock.yaml ui/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY ui/ ./
 RUN pnpm run build

@@ -15,19 +15,30 @@ import { createSignal, untrack, type Accessor } from "solid-js";
  */
 
 export function createControllable<T>(
-  value: () => T | undefined,
-  onChange: ((next: T) => void) | undefined,
-  fallback: T,
+  value: Accessor<T | undefined>,
+  onChange: Accessor<((next: T) => void) | undefined>,
+  fallback: Accessor<T>,
 ): [get: Accessor<T>, set: (next: T) => void] {
-  const [internal, setInternal] = createSignal<T>();
-  // Presence decides the mode once; reading it at setup is not a dependency.
-  const controlled = untrack(() => value() !== undefined);
+  // The supported input is a value or an accessor. Initialise uncontrolled
+  // state with the fallback so it can be written back to `undefined`/`null`
+  // later without losing the default.
+  const [internal, setInternal] = createSignal<T>(untrack(fallback) as Exclude<T, Function>);
 
-  const read = (): T => (controlled ? (value() ?? fallback) : (internal() ?? fallback));
+  // Presence decides the mode on every read: switching a caller from controlled
+  // to uncontrolled (or back) works without remounting the primitive.
+  const read = (): T => {
+    const external = value();
+    return external !== undefined ? external : (internal() ?? fallback());
+  };
 
   const write = (next: T): void => {
-    if (!controlled) setInternal(() => next);
-    onChange?.(next);
+    // Duplicate close calls (the wrapper and Terracotta both react to the same
+    // click) must not reach the caller twice.
+    if (Object.is(read(), next)) return;
+    // Keep the last requested value so switching from controlled back to
+    // uncontrolled has a sensible value to show.
+    setInternal(() => next);
+    onChange()?.(next);
   };
 
   return [read, write];

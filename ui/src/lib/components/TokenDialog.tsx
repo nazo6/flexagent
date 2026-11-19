@@ -7,6 +7,7 @@ import { toast } from "#lib/components/ui/sonner/index.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { connection, loginAndStart } from "#lib/stores/app.ts";
 import IconKeyRound from "~icons/lucide/key-round";
+import { errorMessage } from "#lib/api/error-messages.ts";
 
 /**
  * Auth token dialog, ported from `ui/src/lib/components/TokenDialog.svelte`.
@@ -30,7 +31,7 @@ export default function TokenDialog() {
       setToken("");
       toast.success(m.token_connected_toast());
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -76,13 +77,13 @@ export default function TokenDialog() {
                   <>
                     {m.token_help_node_prefix()} <code>&lt;data&gt;/flexagent/node/auth_token</code>{" "}
                     {m.token_help_node_mid()} <code>fxg node access-token show</code>{" "}
-                    {m.token_help_node_docker()}
+                    {m.token_help_node_docker()}{" "}
                     <code>docker compose exec node fxg node access-token show</code>).
                   </>
                 }
               >
-                {m.token_help_hub_prefix()} <code>auth_token</code> {m.token_help_hub_mid()}
-                <code>&lt;data&gt;/flexagent/hub/auth_token</code> {m.token_help_hub_docker()}
+                {m.token_help_hub_prefix()} <code>auth_token</code> {m.token_help_hub_mid()}{" "}
+                <code>&lt;data&gt;/flexagent/hub/auth_token</code> {m.token_help_hub_docker()}{" "}
                 <code>docker compose exec hub cat /var/lib/flexagent/data/hub/auth_token</code>.
               </Show>
             </p>

@@ -1,7 +1,7 @@
 # FlexAgent (`fxg`) CI — formatting
 #
 # Runs on every change: rustfmt (Rust), tombi (TOML) and oxfmt (Markdown / JSON /
-# YAML / HTML / TypeScript / Svelte). Markdown under `docs/` is formatted too, so
+# YAML / HTML / TypeScript / TSX). Markdown under `docs/` is formatted too, so
 # this workflow is intentionally not path-filtered.
 #
 # Draft pull requests are skipped; `ready_for_review` starts a full run.

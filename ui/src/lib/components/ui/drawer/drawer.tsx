@@ -35,6 +35,7 @@ export function Content(props: ContentProps) {
     <Sheet.Content
       handle
       {...props}
+      side={props.side ?? "bottom"}
       dataSlot="drawer-content"
       overlayDataSlot="drawer-overlay"
       class={cn(
@@ -68,13 +69,13 @@ export function Footer(props: FooterProps) {
   return <Sheet.Footer {...props} dataSlot="drawer-footer" />;
 }
 
-export type TitleProps = ComponentProps<"h2">;
+export type TitleProps = Omit<Sheet.TitleProps, "dataSlot">;
 
 export function Title(props: TitleProps) {
   return <Sheet.Title {...props} dataSlot="drawer-title" />;
 }
 
-export type DescriptionProps = ComponentProps<"p">;
+export type DescriptionProps = Omit<Sheet.DescriptionProps, "dataSlot">;
 
 export function Description(props: DescriptionProps) {
   return <Sheet.Description {...props} dataSlot="drawer-description" />;

@@ -66,6 +66,8 @@ export interface AppSidebarProps {
 }
 
 interface ProjectSessionGroup {
+  /** Stable key for `<For keyed>` (the project ID). */
+  key: string;
   projectId: string;
   projectName: string;
   sessions: SessionSummary[];
@@ -152,6 +154,7 @@ export default function AppSidebar(props: AppSidebarProps) {
       const runningCount = projSessions.filter((s) => s.status === "running").length;
 
       groups.push({
+        key: pId,
         projectId: pId,
         projectName: projectMap.get(pId) ?? pId,
         sessions: projSessions,
@@ -306,10 +309,10 @@ export default function AppSidebar(props: AppSidebarProps) {
 
               <Show when={showAttentionSection()}>
                 <ul class="flex list-none flex-col gap-0.5 p-0 mt-1">
-                  <For each={needsAttentionSessions()}>
+                  <For each={needsAttentionSessions()} keyed={(session) => session.session_id}>
                     {(session) => (
                       <SessionRow
-                        session={session}
+                        session={session()}
                         activeSessionId={activeSessionId()}
                         onNavigate={handleLinkClick}
                       />
@@ -330,107 +333,16 @@ export default function AppSidebar(props: AppSidebarProps) {
             }
           >
             <div class="flex flex-col gap-2.5">
-              <For each={projectGroups()}>
-                {(group) => {
-                  const isCollapsed = () => isProjectCollapsed(group.projectId);
-                  return (
-                    <div class="flex flex-col">
-                      {/* Project header */}
-                      <div class="group/proj flex items-center justify-between rounded-md px-1.5 py-1 text-[13px] hover:bg-muted/40 transition-colors">
-                        <button
-                          type="button"
-                          class="flex min-w-0 flex-1 items-center gap-1.5 text-left font-semibold text-foreground/90 select-none"
-                          onClick={() => toggleProject(group.projectId)}
-                        >
-                          <span class="text-muted-foreground shrink-0">
-                            <Show
-                              when={isCollapsed()}
-                              fallback={<IconChevronDown class="size-4" />}
-                            >
-                              <IconChevronRight class="size-4" />
-                            </Show>
-                          </span>
-                          <IconFolderGit2 class="size-4 text-muted-foreground shrink-0" />
-                          <span class="truncate">{group.projectName}</span>
-                          <Show when={group.pendingCount > 0}>
-                            <Badge
-                              variant="destructive"
-                              class="px-1 py-0 text-[11px] leading-tight shrink-0"
-                            >
-                              {group.pendingCount}
-                            </Badge>
-                          </Show>
-                          <Show when={group.runningCount > 0}>
-                            <span
-                              class="size-1.5 rounded-full bg-ok shrink-0"
-                              title={m.shell_has_running_sessions()}
-                            />
-                          </Show>
-                        </button>
-
-                        <div class="flex items-center gap-1 shrink-0 ml-1">
-                          <span class="text-muted-foreground text-[11px]">
-                            {group.sessions.length}
-                          </span>
-                          <a
-                            href={`/?project=${encodeURIComponent(group.projectId)}`}
-                            onClick={handleLinkClick}
-                            class="hover:bg-accent text-muted-foreground/60 hover:text-foreground rounded p-0.5 transition-colors"
-                            title={m.shell_start_new_session_in_project({
-                              project: group.projectName,
-                            })}
-                          >
-                            <IconPlus class="size-3" />
-                          </a>
-                        </div>
-                      </div>
-
-                      {/* Sessions in the project */}
-                      <Show when={!isCollapsed()}>
-                        <ul class="ml-2.5 border-l border-border/60 pl-2 flex list-none flex-col gap-0.5 p-0 mt-0.5">
-                          <For each={group.sessions}>
-                            {(session) => (
-                              <SessionRow
-                                session={session}
-                                activeSessionId={activeSessionId()}
-                                onNavigate={handleLinkClick}
-                              />
-                            )}
-                          </For>
-                          <Switch>
-                            <Match
-                              when={
-                                group.sessions.length === 0 &&
-                                !sync.hasLoadedProjectSessions(group.projectId)
-                              }
-                            >
-                              <li class="py-1 px-1.5">
-                                <LoadSessionsButton projectId={group.projectId} />
-                              </li>
-                            </Match>
-                            <Match when={sync.hasMoreSessions(group.projectId)}>
-                              <li class="py-1 px-1.5">
-                                <LoadSessionsButton projectId={group.projectId} older />
-                              </li>
-                            </Match>
-                            <Match when={group.sessions.length === 0}>
-                              <li class="py-1 px-1.5 text-[11px] text-muted-foreground">
-                                <a
-                                  href={`/?project=${encodeURIComponent(group.projectId)}`}
-                                  onClick={handleLinkClick}
-                                  class="hover:underline flex items-center gap-1 text-primary/80"
-                                >
-                                  <IconPlus class="size-3" />
-                                  <span>{m.shell_start_session()}</span>
-                                </a>
-                              </li>
-                            </Match>
-                          </Switch>
-                        </ul>
-                      </Show>
-                    </div>
-                  );
-                }}
+              <For each={projectGroups()} keyed={(group) => group.key}>
+                {(group) => (
+                  <ProjectGroup
+                    group={group()}
+                    activeSessionId={activeSessionId()}
+                    onNavigate={handleLinkClick}
+                    collapsed={isProjectCollapsed(group().projectId)}
+                    onToggle={() => toggleProject(group().projectId)}
+                  />
+                )}
               </For>
             </div>
           </Show>
@@ -457,10 +369,10 @@ export default function AppSidebar(props: AppSidebarProps) {
 
               <Show when={showArchivedSection()}>
                 <ul class="mt-1 flex list-none flex-col gap-0.5 p-0">
-                  <For each={archivedSessions()}>
+                  <For each={archivedSessions()} keyed={(session) => session.session_id}>
                     {(session) => (
                       <SessionRow
-                        session={session}
+                        session={session()}
                         activeSessionId={activeSessionId()}
                         onNavigate={handleLinkClick}
                       />
@@ -481,6 +393,108 @@ export default function AppSidebar(props: AppSidebarProps) {
 
       <ExternalSessionsDialog open={externalOpen()} onOpenChange={setExternalOpen} />
     </>
+  );
+}
+
+/**
+ * One project section of the sidebar: a collapsible header and its sessions.
+ *
+ * Rendered from a keyed list, so a WS update that replaces the session objects
+ * does not rebuild the section (and the row-owned menus keep their state).
+ */
+function ProjectGroup(props: {
+  group: ProjectSessionGroup;
+  activeSessionId: string | null;
+  onNavigate: () => void;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div class="flex flex-col">
+      {/* Project header */}
+      <div class="group/proj flex items-center justify-between rounded-md px-1.5 py-1 text-[13px] hover:bg-muted/40 transition-colors">
+        <button
+          type="button"
+          class="flex min-w-0 flex-1 items-center gap-1.5 text-left font-semibold text-foreground/90 select-none"
+          onClick={() => props.onToggle()}
+        >
+          <span class="text-muted-foreground shrink-0">
+            <Show when={props.collapsed} fallback={<IconChevronDown class="size-4" />}>
+              <IconChevronRight class="size-4" />
+            </Show>
+          </span>
+          <IconFolderGit2 class="size-4 text-muted-foreground shrink-0" />
+          <span class="truncate">{props.group.projectName}</span>
+          <Show when={props.group.pendingCount > 0}>
+            <Badge variant="destructive" class="px-1 py-0 text-[11px] leading-tight shrink-0">
+              {props.group.pendingCount}
+            </Badge>
+          </Show>
+          <Show when={props.group.runningCount > 0}>
+            <span
+              class="size-1.5 rounded-full bg-ok shrink-0"
+              title={m.shell_has_running_sessions()}
+            />
+          </Show>
+        </button>
+
+        <div class="flex items-center gap-1 shrink-0 ml-1">
+          <span class="text-muted-foreground text-[11px]">{props.group.sessions.length}</span>
+          <a
+            href={`/?project=${encodeURIComponent(props.group.projectId)}`}
+            onClick={() => props.onNavigate()}
+            class="hover:bg-accent text-muted-foreground/60 hover:text-foreground rounded p-0.5 transition-colors"
+            title={m.shell_start_new_session_in_project({ project: props.group.projectName })}
+          >
+            <IconPlus class="size-3" />
+          </a>
+        </div>
+      </div>
+
+      {/* Sessions in the project */}
+      <Show when={!props.collapsed}>
+        <ul class="ml-2.5 border-l border-border/60 pl-2 flex list-none flex-col gap-0.5 p-0 mt-0.5">
+          <For each={props.group.sessions} keyed={(session) => session.session_id}>
+            {(session) => (
+              <SessionRow
+                session={session()}
+                activeSessionId={props.activeSessionId}
+                onNavigate={props.onNavigate}
+              />
+            )}
+          </For>
+          <Switch>
+            <Match
+              when={
+                props.group.sessions.length === 0 &&
+                !sync.hasLoadedProjectSessions(props.group.projectId)
+              }
+            >
+              <li class="py-1 px-1.5">
+                <LoadSessionsButton projectId={props.group.projectId} />
+              </li>
+            </Match>
+            <Match when={sync.hasMoreSessions(props.group.projectId)}>
+              <li class="py-1 px-1.5">
+                <LoadSessionsButton projectId={props.group.projectId} older />
+              </li>
+            </Match>
+            <Match when={props.group.sessions.length === 0}>
+              <li class="py-1 px-1.5 text-[11px] text-muted-foreground">
+                <a
+                  href={`/?project=${encodeURIComponent(props.group.projectId)}`}
+                  onClick={() => props.onNavigate()}
+                  class="hover:underline flex items-center gap-1 text-primary/80"
+                >
+                  <IconPlus class="size-3" />
+                  <span>{m.shell_start_session()}</span>
+                </a>
+              </li>
+            </Match>
+          </Switch>
+        </ul>
+      </Show>
+    </div>
   );
 }
 

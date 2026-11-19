@@ -1,11 +1,6 @@
 import { createRoot } from "solid-js";
-import { DOCK_TOOLS, type DockLauncherId, type DockToolId } from "#lib/dock/registry.ts";
+import { isDockToolId, type DockLauncherId, type DockToolId } from "#lib/dock/registry.ts";
 import { ReactiveCell } from "#lib/stores/reactive.ts";
-
-/** Whether a persisted value is a known fixed tool (`registry.ts` validation). */
-function isDockToolId(value: unknown): value is DockToolId {
-  return typeof value === "string" && DOCK_TOOLS.some((tool) => tool.id === value);
-}
 
 /** Session context handed to the dock. The workspace, not the session, owns the tools. */
 export interface DockContext {

@@ -62,6 +62,7 @@ import IconServer from "~icons/lucide/server";
 import IconSparkles from "~icons/lucide/sparkles";
 import IconX from "~icons/lucide/x";
 import IconXCircle from "~icons/lucide/x-circle";
+import { errorMessage } from "#lib/api/error-messages.ts";
 
 type PathMode = "existing" | "new_worktree";
 type RunTarget = "node" | "provisioner";
@@ -288,7 +289,7 @@ export default function NewSessionChat() {
     } catch (error) {
       // A local node has no provisioners, so treat this as a warning rather than
       // a hard failure; the user can still start resident-node sessions.
-      setProvisionerLoadError(error instanceof Error ? error.message : String(error));
+      setProvisionerLoadError(errorMessage(error));
       problems.report("load provisioners", error, "warning");
     }
   }
@@ -315,7 +316,7 @@ export default function NewSessionChat() {
       if (generation !== catalogGeneration) return;
       setCatalog([]);
       setCatalogNodeId(target);
-      setCatalogError(error instanceof Error ? error.message : String(error));
+      setCatalogError(errorMessage(error));
       problems.report("load agents", error);
     } finally {
       if (generation === catalogGeneration) setCatalogLoading(false);
@@ -402,19 +403,30 @@ export default function NewSessionChat() {
    * conventional `model` remembered for this project and agent. It is scoped by
    * agent because model values are agent-specific (OpenCode expects
    * `provider/model`, Gemini CLI uses bare IDs).
+   *
+   * Takes the preview and selection as arguments: Solid 2 commits signal writes
+   * on the next flush, so a caller that has just written them must pass the new
+   * values explicitly instead of reading the signals back.
    */
-  function currentModelConfig(): InitialConfig[] {
-    const preview = capabilities();
+  function currentModelConfig(
+    preview: AgentCapabilitiesPreview | null,
+    selectedValues: Record<string, ConfigOptionValue>,
+  ): InitialConfig[] {
     if (preview !== null) {
       const option = (preview.config_options ?? []).find((candidate) => isModelOption(candidate));
       if (option === undefined) return [];
-      const value = selectedConfigValues()[option.key];
+      const value = selectedValues[option.key];
       return value === undefined ? [] : [{ key: option.key, value }];
     }
     const projectId = selectedProject()?.project_id ?? "";
     if (projectId === "" || effectiveAgent() === "") return [];
     const saved = loadSessionConfig(projectId, effectiveAgent())["model"];
     return saved === undefined ? [] : [{ key: "model", value: saved }];
+  }
+
+  /** Remembered model config for the current project / agent (no preview yet). */
+  function savedModelConfig(): InitialConfig[] {
+    return currentModelConfig(null, {});
   }
 
   /** UI cache key for one probe request (agent / path / initial config). */
@@ -513,8 +525,9 @@ export default function NewSessionChat() {
 
     // The probe may have used no model (first visit) or a remembered model that
     // is no longer available. Probe once more with the model actually selected
-    // so dependent options such as effort are included.
-    const selectedModelConfig = currentModelConfig();
+    // so dependent options such as effort are included. Read the freshly
+    // resolved selection: the signal write above is not visible yet.
+    const selectedModelConfig = currentModelConfig(preview, resolved);
     if (selectedModelConfig.length > 0 && !sameConfig(selectedModelConfig, probedConfig)) {
       void loadAgentCapabilities(false, selectedModelConfig);
     }
@@ -522,8 +535,9 @@ export default function NewSessionChat() {
 
   async function loadAgentCapabilities(
     force = false,
-    config: InitialConfig[] = currentModelConfig(),
+    config: InitialConfig[] | undefined = undefined,
   ): Promise<void> {
+    const initialConfigs = config ?? currentModelConfig(capabilities(), selectedConfigValues());
     const key = probeKey();
     if (key === "") {
       capabilitiesGeneration += 1;
@@ -534,11 +548,11 @@ export default function NewSessionChat() {
       setSelectedConfigValues({});
       return;
     }
-    const cacheKey = probeCacheKey(key, config);
+    const cacheKey = probeCacheKey(key, initialConfigs);
     if (!force) {
       const cached = capabilitiesCache.get(cacheKey);
       if (cached) {
-        applyCapabilities(key, cached, config);
+        applyCapabilities(key, cached, initialConfigs);
         return;
       }
     }
@@ -551,17 +565,17 @@ export default function NewSessionChat() {
         effectiveAgent(),
         probePath(),
         force,
-        config,
+        initialConfigs,
       );
       if (generation !== capabilitiesGeneration) return;
       capabilitiesCache.set(cacheKey, preview);
-      applyCapabilities(key, preview, config);
+      applyCapabilities(key, preview, initialConfigs);
     } catch (error) {
       if (generation !== capabilitiesGeneration) return;
       setCapabilities(null);
       setCapabilitiesKey(key);
       setSelectedConfigValues({});
-      setCapabilitiesError(error instanceof Error ? error.message : String(error));
+      setCapabilitiesError(errorMessage(error));
       problems.report("probe agent", error, "warning");
     } finally {
       if (generation === capabilitiesGeneration) setCapabilitiesLoading(false);
@@ -591,9 +605,10 @@ export default function NewSessionChat() {
       // Apply a cached probe inside `untrack`: the cache-hit path runs
       // synchronously and writes `capabilities` / `selectedConfigValues`. If the
       // effect subscribed to those writes it would re-run, take the same cache
-      // hit again and loop.
+      // hit again and loop. The config comes from the target agent's saved
+      // preference, not from the previous agent's signals.
       untrack(() => {
-        void loadAgentCapabilities(false, currentModelConfig());
+        void loadAgentCapabilities(false, savedModelConfig());
       });
     },
   );
@@ -710,13 +725,13 @@ export default function NewSessionChat() {
         );
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
       setTestResult({
         name,
         ok: false,
         node_id: null,
         log_lines: [],
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       });
     } finally {
       setTestBusy(false);
@@ -731,7 +746,7 @@ export default function NewSessionChat() {
     const useProvisioner = isProvisionerMode() && selectedProvisioner() !== null;
     const extraArgs = extraArgsText().trim() ? extraArgsText().trim().split(/\s+/) : null;
     // Remember on the local device for the next new session
-    persistPrefs();
+    persistPrefs({ agent: effectiveAgent(), mode: sessionMode() });
 
     try {
       const response = await sync.connection.client.createSession({
@@ -794,14 +809,11 @@ export default function NewSessionChat() {
   }
 
   /** Save the launch settings for this project (best effort, local device only). */
-  function persistPrefs(): void {
+  function persistPrefs(selection: { agent: string; mode: SessionModePreference }): void {
     const projectId = selectedProject()?.project_id ?? "";
     // Do not remember ephemeral VMs because agent availability differs per node
     if (projectId === "" || isProvisionerMode()) return;
-    saveNewSessionPrefs(projectId, {
-      agent: effectiveAgent(),
-      mode: sessionMode(),
-    });
+    saveNewSessionPrefs(projectId, selection);
   }
 
   /** Display label for a working directory candidate. */
@@ -854,25 +866,30 @@ export default function NewSessionChat() {
 
   function selectAgent(id: string): void {
     // Mode IDs are agent-specific: a selection for the previous agent no longer applies.
-    if (id !== effectiveAgent()) setChosenMode("default");
+    const previous = effectiveAgent();
+    const changed = id !== previous;
+    const nextMode = changed ? "default" : sessionMode();
+    if (changed) setChosenMode(nextMode);
     setChosenAgentId(id);
     setManualAgentChoice(false);
     setAgentOpen(false);
-    persistPrefs();
+    persistPrefs({ agent: id, mode: nextMode });
   }
 
-  function onManualAgentInput(): void {
+  function onManualAgentInput(event: InputEvent & { currentTarget: HTMLInputElement }): void {
+    const agent = event.currentTarget.value;
     setManualAgentChoice(true);
     // The ID being typed is a different agent until proven otherwise.
     setChosenMode("default");
-    persistPrefs();
+    persistPrefs({ agent, mode: "default" });
   }
 
   /** Switch between the catalog list and the free-form agent ID input. */
   function toggleManualAgent(): void {
-    setManualAgentChoice(!manualAgent());
+    const next = !manualAgent();
+    setManualAgentChoice(next);
     // Start from the agent currently in effect instead of an empty field.
-    if (!manualAgent() && chosenAgentId() === "") setChosenAgentId(effectiveAgent());
+    if (next && chosenAgentId() === "") setChosenAgentId(effectiveAgent());
   }
 
   function selectPath(path: string): void {
@@ -1002,7 +1019,7 @@ export default function NewSessionChat() {
                   value={projectLabel()}
                   icon={projectIcon()}
                   open={projectOpen()}
-                  onopenchange={setProjectOpen}
+                  onOpenChange={setProjectOpen}
                   disabled={projects().length === 0}
                 >
                   <Show
@@ -1047,7 +1064,7 @@ export default function NewSessionChat() {
                   icon={directoryIcon()}
                   contentClass="w-[min(24rem,calc(100vw-1.5rem))]"
                   open={directoryOpen()}
-                  onopenchange={setDirectoryOpen}
+                  onOpenChange={setDirectoryOpen}
                   disabled={isProvisionerMode() || selectedProject() === null}
                 >
                   <Show when={isProvisionerMode()}>
@@ -1229,7 +1246,7 @@ export default function NewSessionChat() {
                   icon={environmentIcon()}
                   contentClass="w-[min(20rem,calc(100vw-1.5rem))]"
                   open={environmentOpen()}
-                  onopenchange={setEnvironmentOpen}
+                  onOpenChange={setEnvironmentOpen}
                   disabled={nodes().length === 0 && provisioners().length === 0}
                 >
                   <div class="max-h-80 overflow-y-auto p-1">
@@ -1398,7 +1415,7 @@ export default function NewSessionChat() {
                   class="shrink-0"
                   contentClass="w-[min(20rem,calc(100vw-1.5rem))]"
                   open={agentOpen()}
-                  onopenchange={setAgentOpen}
+                  onOpenChange={setAgentOpen}
                   disabled={forkSessionId() !== ""}
                 >
                   <Show
@@ -1521,8 +1538,9 @@ export default function NewSessionChat() {
                       allowDefault={true}
                       class="shrink-0"
                       onchange={(modeId) => {
-                        setChosenMode(modeId ?? "default");
-                        persistPrefs();
+                        const mode = modeId ?? "default";
+                        setChosenMode(mode);
+                        persistPrefs({ agent: effectiveAgent(), mode });
                       }}
                     />
                   </Show>
@@ -1563,15 +1581,15 @@ export default function NewSessionChat() {
                     configOptions().length > 0
                   }
                 >
-                  <For each={configOptions()}>
+                  <For each={configOptions()} keyed={(option) => option.key}>
                     {(option) => (
                       <ConfigOptionPicker
-                        option={option}
-                        value={selectedConfigValues()[option.key]}
+                        option={option()}
+                        value={selectedConfigValues()[option().key]}
                         class="shrink-0"
                         favoriteScope={effectiveAgent()}
-                        onchange={(value) => changeConfigOption(option.key, value)}
-                        showRefresh={isModelOption(option)}
+                        onchange={(value) => changeConfigOption(option().key, value)}
+                        showRefresh={isModelOption(option())}
                         onrefresh={() => void loadAgentCapabilities(true)}
                       />
                     )}
@@ -1680,7 +1698,7 @@ export default function NewSessionChat() {
                   label={m.composer_more_options()}
                   active={extraArgsText().trim() !== ""}
                   open={moreOpen()}
-                  onopenchange={setMoreOpen}
+                  onOpenChange={setMoreOpen}
                   contentClass="w-[min(20rem,calc(100vw-2rem))]"
                 >
                   <div class="flex flex-col gap-2 p-2">

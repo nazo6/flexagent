@@ -1,4 +1,4 @@
-import { createContext, useContext } from "solid-js";
+import { createContext } from "solid-js";
 
 /** Delay shared by every tooltip below a `Tooltip.Provider`. */
 export interface TooltipConfig {
@@ -6,7 +6,3 @@ export interface TooltipConfig {
 }
 
 export const TooltipConfigContext = createContext<TooltipConfig | null>(null);
-
-export function useTooltipConfig(): number {
-  return useContext(TooltipConfigContext)?.delayDuration() ?? 0;
-}

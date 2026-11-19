@@ -1,17 +1,19 @@
 import type { ComponentProps, JSX } from "@solidjs/web";
 import { Portal } from "@solidjs/web";
-import { createSignal, omit } from "solid-js";
+import { createSignal, omit, Show } from "solid-js";
 import { Popover as PopoverPrimitive, PopoverButton, PopoverPanel } from "terracotta/popover";
 import { cn } from "#lib/utils.ts";
 import { createControllable, toBoolean, type MouseHandler } from "../controllable.ts";
-import { ANCHORED_PANEL_ATTRIBUTE, dismissOnOutsidePointer } from "../position.ts";
 import {
+  createPanelTree,
   composeRef,
-  restoreFocusOnClose,
+  PanelTreeContext,
+  registerPanelElement,
   useAnchoredPanel,
   type ElementRef,
   type PanelAlign,
 } from "../position.ts";
+import { ANCHORED_PANEL_ATTRIBUTE, dismissOnOutsidePointer } from "../position.ts";
 import { PopoverContext, usePopoverState } from "./popover-context.ts";
 
 /**
@@ -32,8 +34,8 @@ export interface RootProps {
 export function Root(props: RootProps) {
   const [open, setOpen] = createControllable(
     () => props.open,
-    props.onOpenChange,
-    props.defaultOpen ?? false,
+    () => props.onOpenChange,
+    () => props.defaultOpen ?? false,
   );
   const [anchor, setAnchorElement] = createSignal<HTMLElement>();
 
@@ -41,28 +43,34 @@ export function Root(props: RootProps) {
     <PopoverContext
       value={{ open, setOpen, anchor, setAnchor: (element) => setAnchorElement(() => element) }}
     >
-      <PopoverPrimitive isOpen={open()} onChange={setOpen} disabled={props.disabled}>
+      <PopoverPrimitive
+        isOpen={open()}
+        onChange={setOpen}
+        disabled={props.disabled === undefined ? undefined : toBoolean(props.disabled)}
+      >
         {props.children}
       </PopoverPrimitive>
     </PopoverContext>
   );
 }
 
-export interface TriggerProps extends Omit<ComponentProps<"button">, "ref" | "onClick"> {
+export interface TriggerProps extends Omit<ComponentProps<"button">, "ref" | "onClick" | "type"> {
   ref?: ElementRef<HTMLButtonElement>;
   onClick?: MouseHandler<HTMLButtonElement>;
+  type?: "button" | "submit" | "reset";
 }
 
 export function Trigger(props: TriggerProps) {
   const state = usePopoverState("Popover.Trigger");
-  const rest = omit(props, "class", "children", "ref", "onClick", "disabled");
+  const rest = omit(props, "class", "children", "ref", "onClick", "disabled", "type");
 
   return (
     <PopoverButton
       {...rest}
       ref={composeRef(props.ref, (element: HTMLButtonElement) => state.setAnchor(element))}
       data-slot="popover-trigger"
-      disabled={toBoolean(props.disabled)}
+      type={props.type ?? "button"}
+      disabled={props.disabled === undefined ? undefined : toBoolean(props.disabled)}
       class={props.class}
       onClick={props.onClick}
     >
@@ -91,6 +99,7 @@ export interface ContentProps extends Omit<ComponentProps<"div">, "ref"> {
 
 export function Content(props: ContentProps) {
   const state = usePopoverState("Popover.Content");
+  const tree = createPanelTree();
   const rest = omit(
     props,
     "class",
@@ -105,6 +114,7 @@ export function Content(props: ContentProps) {
   dismissOnOutsidePointer({
     open: state.open,
     anchor: state.anchor,
+    tree,
     onDismiss: () => state.setOpen(false),
   });
 
@@ -117,22 +127,25 @@ export function Content(props: ContentProps) {
     alignOffset: () => props.alignOffset ?? 0,
   });
 
-  restoreFocusOnClose({ open: state.open, anchor: state.anchor, panel: panel.element });
-
   return (
-    <Portal>
-      <PopoverPanel
-        {...rest}
-        ref={composeRef(panel.ref, props.ref)}
-        {...{ [ANCHORED_PANEL_ATTRIBUTE]: "" }}
-        data-slot="popover-content"
-        class={cn(
-          "bg-popover text-popover-foreground ring-foreground/10 animate-in fade-in-0 zoom-in-95 z-50 overflow-y-auto rounded-lg p-1 shadow-md ring-1 duration-100 outline-none",
-          props.class,
-        )}
-      >
-        {props.children}
-      </PopoverPanel>
-    </Portal>
+    <Show when={state.open()}>
+      <Portal>
+        <PopoverPanel
+          {...rest}
+          ref={composeRef(panel.ref, (element: HTMLElement) => {
+            registerPanelElement(tree, element);
+            props.ref?.(element);
+          })}
+          {...{ [ANCHORED_PANEL_ATTRIBUTE]: "" }}
+          data-slot="popover-content"
+          class={cn(
+            "bg-popover text-popover-foreground ring-foreground/10 animate-in fade-in-0 zoom-in-95 z-50 overflow-y-auto rounded-lg p-1 shadow-md ring-1 duration-100 outline-none",
+            props.class,
+          )}
+        >
+          <PanelTreeContext value={tree}>{props.children}</PanelTreeContext>
+        </PopoverPanel>
+      </Portal>
+    </Show>
   );
 }

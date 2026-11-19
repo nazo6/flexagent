@@ -1,4 +1,5 @@
 import type { ComponentProps, JSX } from "@solidjs/web";
+import type { ClassValue } from "cn";
 import { omit, Show } from "solid-js";
 import { cn } from "#lib/utils.ts";
 import type { ElementRef } from "../position.ts";
@@ -35,7 +36,7 @@ export function badgeVariants(options: BadgeVariantsOptions = {}): string {
 
 interface BadgeCommon {
   variant?: BadgeVariant;
-  class?: string;
+  class?: ClassValue;
   ref?: ElementRef;
   children?: JSX.Element;
 }
@@ -46,36 +47,43 @@ export type BadgeProps =
 
 export function Root(props: BadgeProps) {
   const className = () => cn(badgeVariants({ variant: props.variant }), props.class);
-  const spanRest = () =>
-    omit(
-      props as ComponentProps<"span"> & BadgeCommon & { href?: string },
-      "variant",
-      "class",
-      "children",
-      "href",
-      "ref",
-    );
-  const anchorRest = () =>
-    omit(
-      props as ComponentProps<"a"> & BadgeCommon & { href?: string },
-      "variant",
-      "class",
-      "children",
-      "href",
-      "ref",
-    );
   const setRef = (element: HTMLElement) => props.ref?.(element);
 
   return (
     <Show
-      when={props.href}
+      when={props.href !== undefined}
       fallback={
-        <span {...spanRest()} ref={setRef} data-slot="badge" class={className()}>
+        <span
+          {...omit(
+            props as ComponentProps<"span"> & BadgeCommon & { href?: string },
+            "variant",
+            "class",
+            "children",
+            "href",
+            "ref",
+          )}
+          ref={setRef}
+          data-slot="badge"
+          class={className()}
+        >
           {props.children}
         </span>
       }
     >
-      <a {...anchorRest()} ref={setRef} data-slot="badge" class={className()} href={props.href}>
+      <a
+        {...omit(
+          props as ComponentProps<"a"> & BadgeCommon & { href?: string },
+          "variant",
+          "class",
+          "children",
+          "href",
+          "ref",
+        )}
+        ref={setRef}
+        data-slot="badge"
+        class={className()}
+        href={props.href}
+      >
         {props.children}
       </a>
     </Show>

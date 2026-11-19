@@ -3,6 +3,7 @@ import { Badge } from "#lib/components/ui/badge/index.ts";
 import { Button } from "#lib/components/ui/button/index.ts";
 import { Input } from "#lib/components/ui/input/index.ts";
 import { Label } from "#lib/components/ui/label/index.ts";
+import { errorMessage } from "#lib/api/error-messages.ts";
 import type {
   ElicitationAction,
   ElicitationProperty,
@@ -51,6 +52,20 @@ function initialValues(schema: ElicitationSchema): Record<string, FormValue> {
   return next;
 }
 
+/** Seed the free-text drafts of the fields that need a string while editing. */
+function initialDrafts(schema: ElicitationSchema): Record<string, string> {
+  const drafts: Record<string, string> = {};
+  for (const [key, property] of Object.entries(schema.properties ?? {})) {
+    const value = property.default as FormValue | undefined;
+    if (property.type === "integer" || property.type === "number") {
+      drafts[key] = typeof value === "number" ? String(value) : "";
+    } else if (property.type === "array" && !property.items?.enum) {
+      drafts[key] = Array.isArray(value) ? value.join(", ") : "";
+    }
+  }
+  return drafts;
+}
+
 /**
  * Structured question card for an `elicitation/request`.
  *
@@ -58,6 +73,7 @@ function initialValues(schema: ElicitationSchema): Record<string, FormValue> {
  * when the card is created.
  */
 export default function ElicitationCard(props: ElicitationCardProps) {
+  const elicitationId = createMemo(() => props.elicitationId);
   const allProperties = createMemo(() => Object.entries(props.requestedSchema.properties ?? {}));
   // OpenCode form fields can be hidden while still carrying a value/default.
   const properties = createMemo(() =>
@@ -67,6 +83,15 @@ export default function ElicitationCard(props: ElicitationCardProps) {
 
   const [values, setValues] = createStore<Record<string, FormValue>>(
     untrack(() => initialValues(props.requestedSchema)),
+  );
+  /**
+   * Text shown by the numeric / comma-separated array inputs.
+   *
+   * The committed `values` only receive a parseable number or a finished list,
+   * so typing `-`, `1.` or a trailing comma stays possible.
+   */
+  const [drafts, setDrafts] = createStore<Record<string, string>>(
+    untrack(() => initialDrafts(props.requestedSchema)),
   );
   const [busyAction, setBusyAction] = createSignal<ElicitationAction | null>(null);
 
@@ -129,11 +154,38 @@ export default function ElicitationCard(props: ElicitationCardProps) {
     });
   }
 
-  function setNumber(key: string, raw: string): void {
-    setField(key, raw === "" ? "" : Number(raw));
+  function setDraft(key: string, raw: string): void {
+    setDrafts((current) => {
+      current[key] = raw;
+    });
   }
 
-  function setStringArray(key: string, raw: string): void {
+  /** Commits a number only once the text parses; keeps intermediate input. */
+  function onNumberInput(key: string, raw: string): void {
+    setDraft(key, raw);
+    const trimmed = raw.trim();
+    if (trimmed === "") {
+      setField(key, "");
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) setField(key, parsed);
+  }
+
+  function commitNumber(key: string): void {
+    const raw = drafts[key] ?? "";
+    const trimmed = raw.trim();
+    if (trimmed === "") {
+      setField(key, "");
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) setField(key, parsed);
+  }
+
+  /** Parses the comma-separated array on every input, keeping the draft text. */
+  function onStringArrayInput(key: string, raw: string): void {
+    setDraft(key, raw);
     setField(
       key,
       raw
@@ -186,7 +238,7 @@ export default function ElicitationCard(props: ElicitationCardProps) {
         toast.success(m.chat_elicitation_sent());
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       setBusyAction(null);
     }
@@ -240,7 +292,7 @@ export default function ElicitationCard(props: ElicitationCardProps) {
         <div class="flex flex-col gap-3">
           <For each={properties()}>
             {([key, property]) => {
-              const inputId = `elicitation-${props.elicitationId}-${key}`;
+              const inputId = `elicitation-${elicitationId()}-${key}`;
               return (
                 <div class="flex flex-col gap-1.5">
                   <Label for={inputId}>
@@ -278,8 +330,9 @@ export default function ElicitationCard(props: ElicitationCardProps) {
                                 <Input
                                   id={inputId}
                                   type="number"
-                                  value={typeof values[key] === "number" ? String(values[key]) : ""}
-                                  onValueChange={(value) => setNumber(key, value)}
+                                  value={drafts[key] ?? ""}
+                                  onValueChange={(value) => onNumberInput(key, value)}
+                                  onBlur={() => commitNumber(key)}
                                 />
                               </Show>
                             }
@@ -290,12 +343,9 @@ export default function ElicitationCard(props: ElicitationCardProps) {
                                 <Input
                                   id={inputId}
                                   placeholder={m.chat_comma_separated()}
-                                  value={
-                                    Array.isArray(values[key])
-                                      ? (values[key] as string[]).join(", ")
-                                      : ""
-                                  }
-                                  onValueChange={(value) => setStringArray(key, value)}
+                                  value={drafts[key] ?? ""}
+                                  onValueChange={(value) => onStringArrayInput(key, value)}
+                                  onBlur={() => onStringArrayInput(key, drafts[key] ?? "")}
                                 />
                               }
                             >

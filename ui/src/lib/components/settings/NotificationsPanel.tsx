@@ -14,6 +14,7 @@ import {
   type PushCapability,
 } from "#lib/push.ts";
 import { connection } from "#lib/stores/app.ts";
+import { errorMessage } from "#lib/api/error-messages.ts";
 
 /** Web Push capability / subscription state for this browser. */
 export default function NotificationsPanel(props: { vapidSubjectHref?: string }) {
@@ -82,7 +83,7 @@ export default function NotificationsPanel(props: { vapidSubjectHref?: string })
       }
       await refreshPush();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       setPushBusy(false);
     }

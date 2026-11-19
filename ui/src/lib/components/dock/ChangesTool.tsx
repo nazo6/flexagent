@@ -93,30 +93,64 @@ export default function ChangesTool(props: ChangesToolProps) {
       ),
   );
 
-  createEffect(
-    () => refreshToken(),
-    () => {
-      void loadStatus();
+  /** Load target of the git status (workspace + manual refresh). */
+  const statusTarget = createMemo(
+    () => ({
+      nodeId: props.ctx.nodeId,
+      localPath: props.ctx.localPath,
+      token: refreshToken(),
+    }),
+    {
+      equals: (left, right) =>
+        left.nodeId === right.nodeId &&
+        left.localPath === right.localPath &&
+        left.token === right.token,
     },
   );
 
-  createEffect(
-    () => ({ scope: scope(), token: refreshToken() }),
-    (current) => {
-      if (current.scope !== "branch_base") return;
-      void loadBranchDiff();
+  /** Load target of the branch diff (workspace + scope + manual refresh). */
+  const branchTarget = createMemo(
+    () => ({
+      nodeId: props.ctx.nodeId,
+      localPath: props.ctx.localPath,
+      scope: scope(),
+      token: refreshToken(),
+    }),
+    {
+      equals: (left, right) =>
+        left.nodeId === right.nodeId &&
+        left.localPath === right.localPath &&
+        left.scope === right.scope &&
+        left.token === right.token,
     },
   );
 
-  async function loadStatus(): Promise<void> {
+  /** Workspace whose data is currently shown. */
+  let loadedWorkspace = "";
+
+  createEffect(statusTarget, (target) => {
+    const workspace = `${target.nodeId}\u0000${target.localPath}`;
+    if (workspace !== loadedWorkspace) {
+      loadedWorkspace = workspace;
+      setStatus(null);
+      setBranchDiff(null);
+      setStatusError(null);
+      setBranchError(null);
+    }
+    void loadStatus(target.nodeId, target.localPath);
+  });
+
+  createEffect(branchTarget, (target) => {
+    if (target.scope !== "branch_base") return;
+    void loadBranchDiff(target.nodeId, target.localPath);
+  });
+
+  async function loadStatus(nodeId: string, localPath: string): Promise<void> {
     const token = ++statusGeneration;
     setStatusLoading(true);
     setStatusError(null);
     try {
-      const next = await sync.connection.client.workspaceGitStatus(
-        props.ctx.nodeId,
-        props.ctx.localPath,
-      );
+      const next = await sync.connection.client.workspaceGitStatus(nodeId, localPath);
       if (token !== statusGeneration) return;
       setStatus(next);
     } catch (cause) {
@@ -128,18 +162,14 @@ export default function ChangesTool(props: ChangesToolProps) {
     }
   }
 
-  async function loadBranchDiff(): Promise<void> {
+  async function loadBranchDiff(nodeId: string, localPath: string): Promise<void> {
     const token = ++branchGeneration;
     setBranchLoading(true);
     setBranchError(null);
     try {
-      const next = await sync.connection.client.workspaceGitDiff(
-        props.ctx.nodeId,
-        props.ctx.localPath,
-        {
-          scope: "branch_base",
-        },
-      );
+      const next = await sync.connection.client.workspaceGitDiff(nodeId, localPath, {
+        scope: "branch_base",
+      });
       if (token !== branchGeneration) return;
       setBranchDiff(next);
     } catch (cause) {

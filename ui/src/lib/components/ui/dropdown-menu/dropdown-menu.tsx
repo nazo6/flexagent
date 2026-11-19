@@ -7,7 +7,9 @@ import { cn } from "#lib/utils.ts";
 import { createControllable, toBoolean, type MouseHandler } from "../controllable.ts";
 import {
   composeRef,
-  restoreFocusOnClose,
+  createPanelTree,
+  PanelTreeContext,
+  registerPanelElement,
   useAnchoredPanel,
   type ElementRef,
   type PanelAlign,
@@ -78,8 +80,8 @@ export interface RootProps {
 export function Root(props: RootProps) {
   const [open, setOpen] = createControllable(
     () => props.open,
-    props.onOpenChange,
-    props.defaultOpen ?? false,
+    () => props.onOpenChange,
+    () => props.defaultOpen ?? false,
   );
   const [anchor, setAnchorElement] = createSignal<HTMLElement>();
 
@@ -100,14 +102,15 @@ export function Root(props: RootProps) {
   );
 }
 
-export interface TriggerProps extends Omit<ComponentProps<"button">, "ref" | "onClick"> {
+export interface TriggerProps extends Omit<ComponentProps<"button">, "ref" | "onClick" | "type"> {
   ref?: ElementRef<HTMLButtonElement>;
   onClick?: MouseHandler<HTMLButtonElement>;
+  type?: "button" | "submit" | "reset";
 }
 
 export function Trigger(props: TriggerProps) {
   const state = useMenu("DropdownMenu.Trigger");
-  const rest = omit(props, "class", "children", "ref", "onClick", "disabled");
+  const rest = omit(props, "class", "children", "ref", "onClick", "disabled", "type");
 
   return (
     <PopoverButton
@@ -115,7 +118,8 @@ export function Trigger(props: TriggerProps) {
       ref={composeRef(props.ref, (element: HTMLButtonElement) => state.setAnchor(element))}
       data-slot="dropdown-menu-trigger"
       aria-haspopup="menu"
-      disabled={toBoolean(props.disabled)}
+      type={props.type ?? "button"}
+      disabled={props.disabled === undefined ? undefined : toBoolean(props.disabled)}
       class={props.class}
       onClick={props.onClick}
     >
@@ -147,6 +151,7 @@ export interface ContentProps extends Omit<ComponentProps<"div">, "ref"> {
 
 export function Content(props: ContentProps) {
   const state = useMenu("DropdownMenu.Content");
+  const tree = createPanelTree();
   const rest = omit(
     props,
     "class",
@@ -161,6 +166,7 @@ export function Content(props: ContentProps) {
   dismissOnOutsidePointer({
     open: state.open,
     anchor: state.anchor,
+    tree,
     onDismiss: () => state.closeMenu(),
   });
 
@@ -173,20 +179,25 @@ export function Content(props: ContentProps) {
     alignOffset: () => props.alignOffset ?? 0,
   });
 
-  restoreFocusOnClose({ open: state.open, anchor: state.anchor, panel: panel.element });
-
   return (
-    <Portal>
-      <PopoverPanel
-        {...rest}
-        ref={composeRef(panel.ref, props.ref)}
-        {...{ [ANCHORED_PANEL_ATTRIBUTE]: "" }}
-        data-slot="dropdown-menu-content"
-        class={cn(CONTENT_CLASSES, props.class)}
-      >
-        <Menu>{props.children}</Menu>
-      </PopoverPanel>
-    </Portal>
+    <Show when={state.open()}>
+      <Portal>
+        <PopoverPanel
+          {...rest}
+          ref={composeRef(panel.ref, (element: HTMLElement) => {
+            registerPanelElement(tree, element);
+            props.ref?.(element);
+          })}
+          {...{ [ANCHORED_PANEL_ATTRIBUTE]: "" }}
+          data-slot="dropdown-menu-content"
+          class={cn(CONTENT_CLASSES, props.class)}
+        >
+          <PanelTreeContext value={tree}>
+            <Menu>{props.children}</Menu>
+          </PanelTreeContext>
+        </PopoverPanel>
+      </Portal>
+    </Show>
   );
 }
 
@@ -204,7 +215,7 @@ const ITEM_CLASSES =
   "focus:bg-accent focus:text-accent-foreground hover:bg-accent hover:text-accent-foreground data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 dark:data-[variant=destructive]:focus:bg-destructive/20 data-[variant=destructive]:focus:text-destructive data-[variant=destructive]:*:[svg]:text-destructive not-data-[variant=destructive]:focus:**:text-accent-foreground gap-2 rounded-sm px-2 py-1.5 text-sm data-[inset]:pl-8 [&_svg:not([class*='size-'])]:size-4 group/dropdown-menu-item relative flex cursor-default items-center outline-hidden select-none [&[tc-disabled]]:pointer-events-none [&[tc-disabled]]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0";
 
 export function Item(props: ItemProps) {
-  const menu = useContext(SubContext) ?? useContext(RootContext);
+  const sub = useContext(SubContext);
   const rest = omit(
     props,
     "class",
@@ -221,19 +232,34 @@ export function Item(props: ItemProps) {
     props.onClick?.(event);
     if (props.disabled) return;
     props.onSelect?.(event);
-    menu?.closeMenu();
+    if (event.defaultPrevented) {
+      // The caller keeps the menu open: stop the click before the panel's own
+      // menu-item activation closes it.
+      event.stopPropagation();
+      return;
+    }
+    // The outer panel is not an ancestor of a submenu's portal, so a selection
+    // there must close the submenu and its parent explicitly. A root item's
+    // panel closes itself; calling it here would emit a second close.
+    sub?.closeMenu();
+  };
+
+  // A native listener runs at the item itself, before the panel's bubble-phase
+  // activation listener; a delegated `onClick` would run too late to stop it.
+  const setRef = (element: HTMLLIElement) => {
+    props.ref?.(element);
+    element.addEventListener("click", handleClick as (event: Event) => void);
   };
 
   return (
     <MenuItem
       {...rest}
-      ref={props.ref}
+      ref={setRef}
       data-slot="dropdown-menu-item"
       data-inset={props.inset}
       data-variant={props.variant ?? "default"}
       disabled={props.disabled}
       class={cn(ITEM_CLASSES, props.class)}
-      onClick={handleClick}
     >
       {props.children}
     </MenuItem>
@@ -247,16 +273,21 @@ export interface CheckboxGroupProps extends Omit<ComponentProps<"div">, "onChang
 
 export function CheckboxGroup(props: CheckboxGroupProps) {
   const rest = omit(props, "class", "children", "value", "onValueChange");
+  const [selected, setSelected] = createControllable<unknown[]>(
+    () => props.value,
+    () => props.onValueChange,
+    () => [],
+  );
   return (
     <CheckboxGroupContext
       value={{
-        value: () => props.value,
+        value: selected,
         toggle: (value, next) => {
-          const current = props.value ?? [];
+          const current = selected();
           const nextValue = next
             ? [...current.filter((entry) => entry !== value), value]
             : current.filter((entry) => entry !== value);
-          props.onValueChange?.(nextValue);
+          setSelected(nextValue);
         },
       }}
     >
@@ -313,7 +344,7 @@ export function CheckboxItem(props: CheckboxItemProps) {
       group.toggle(props.value, next);
     }
     props.onCheckedChange?.(next);
-    if (props.closeOnSelect) menu?.closeMenu();
+    if (props.closeOnSelect && !event.defaultPrevented) menu?.closeMenu();
   };
 
   return (
@@ -346,11 +377,16 @@ export interface RadioGroupProps extends Omit<ComponentProps<"div">, "onChange">
 
 export function RadioGroup(props: RadioGroupProps) {
   const rest = omit(props, "class", "children", "value", "onValueChange");
+  const [selected, setSelected] = createControllable<unknown>(
+    () => props.value,
+    () => props.onValueChange,
+    () => undefined,
+  );
   return (
     <RadioGroupContext
       value={{
-        value: () => props.value,
-        select: (next) => props.onValueChange?.(next),
+        value: selected,
+        select: (next) => setSelected(next),
       }}
     >
       <div {...rest} data-slot="dropdown-menu-radio-group" role="group" class={props.class}>
@@ -393,7 +429,7 @@ export function RadioItem(props: RadioItemProps) {
     if (props.disabled) return;
     group?.select(props.value);
     props.onCheckedChange?.(true);
-    if (props.closeOnSelect) menu?.closeMenu();
+    if (props.closeOnSelect && !event.defaultPrevented) menu?.closeMenu();
   };
 
   return (
@@ -509,8 +545,8 @@ export interface SubProps {
 export function Sub(props: SubProps) {
   const [open, setOpen] = createControllable(
     () => props.open,
-    props.onOpenChange,
-    props.defaultOpen ?? false,
+    () => props.onOpenChange,
+    () => props.defaultOpen ?? false,
   );
   const [anchor, setAnchorElement] = createSignal<HTMLElement>();
   const parent = useContext(SubContext) ?? useContext(RootContext);
@@ -550,17 +586,32 @@ export function SubTrigger(props: SubTriggerProps) {
 
   const handleClick: MouseHandler<HTMLLIElement> = (event) => {
     props.onClick?.(event);
-    if (!props.disabled) toggle();
+    if (event.defaultPrevented || props.disabled) return;
+    // The trigger owns this click; the outer panel must not treat it as an
+    // activation of its own menu item.
+    event.stopPropagation();
+    toggle();
   };
 
   const handleKeyDown = (event: KeyboardEvent) => {
     if (props.disabled) return;
     if (event.key === "ArrowRight" || event.key === "Enter" || event.key === " ") {
       event.preventDefault();
+      event.stopPropagation();
       sub.setOpen(true);
     } else if (event.key === "ArrowLeft") {
       event.preventDefault();
+      event.stopPropagation();
       sub.setOpen(false);
+    }
+  };
+
+  const handleKeyUp = (event: KeyboardEvent) => {
+    // Space would otherwise synthesize a click after keydown already opened the
+    // submenu, toggling it straight back closed.
+    if (event.key === " ") {
+      event.preventDefault();
+      event.stopPropagation();
     }
   };
 
@@ -574,11 +625,12 @@ export function SubTrigger(props: SubTriggerProps) {
       aria-expanded={sub.open() ? "true" : "false"}
       disabled={props.disabled}
       class={cn(
-        "focus:bg-accent focus:text-accent-foreground hover:bg-accent hover:text-accent-foreground [&[aria-expanded=true]]:bg-accent [&[aria-expanded=true]]:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground gap-2 rounded-sm px-2 py-1.5 text-sm data-[inset]:pl-8 [&_svg:not([class*='size-'])]:size-4 flex cursor-default items-center outline-hidden select-none [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        "focus:bg-accent focus:text-accent-foreground hover:bg-accent hover:text-accent-foreground [&[aria-expanded=true]]:bg-accent [&[aria-expanded=true]]:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground gap-2 rounded-sm px-2 py-1.5 text-sm data-[inset]:pl-8 [&_svg:not([class*='size-'])]:size-4 flex cursor-default items-center outline-hidden select-none [&[tc-disabled]]:pointer-events-none [&[tc-disabled]]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         props.class,
       )}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
+      onKeyUp={handleKeyUp}
     >
       {props.children}
       <IconChevronRight class="ml-auto size-4" />
@@ -596,6 +648,7 @@ export interface SubContentProps extends Omit<ComponentProps<"div">, "ref"> {
 
 export function SubContent(props: SubContentProps) {
   const sub = useSub("DropdownMenu.SubContent");
+  const tree = createPanelTree();
   const rest = omit(
     props,
     "class",
@@ -610,6 +663,7 @@ export function SubContent(props: SubContentProps) {
   dismissOnOutsidePointer({
     open: sub.open,
     anchor: sub.anchor,
+    tree,
     onDismiss: () => sub.closeMenu(),
   });
 
@@ -622,22 +676,32 @@ export function SubContent(props: SubContentProps) {
     alignOffset: () => props.alignOffset ?? -4,
   });
 
-  restoreFocusOnClose({ open: sub.open, anchor: sub.anchor, panel: panel.element });
-
   return (
     <Portal>
       <Show when={sub.open()}>
         <PopoverPanel
           {...rest}
-          ref={composeRef(panel.ref, props.ref)}
+          ref={composeRef(panel.ref, (element: HTMLElement) => {
+            registerPanelElement(tree, element);
+            props.ref?.(element);
+          })}
           {...{ [ANCHORED_PANEL_ATTRIBUTE]: "" }}
           data-slot="dropdown-menu-sub-content"
           class={cn(
             "animate-in fade-in-0 zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 ring-foreground/10 bg-popover text-popover-foreground min-w-[96px] rounded-md p-1 shadow-lg ring-1 duration-100 z-50 overflow-hidden",
             props.class,
           )}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowLeft" || event.defaultPrevented) return;
+            event.preventDefault();
+            event.stopPropagation();
+            sub.setOpen(false);
+            sub.anchor()?.focus();
+          }}
         >
-          <Menu>{props.children}</Menu>
+          <PanelTreeContext value={tree}>
+            <Menu>{props.children}</Menu>
+          </PanelTreeContext>
         </PopoverPanel>
       </Show>
     </Portal>

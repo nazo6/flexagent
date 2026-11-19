@@ -7,7 +7,8 @@ import IconInfo from "~icons/lucide/info";
 import IconLoader from "~icons/lucide/loader-2";
 import IconOctagonX from "~icons/lucide/octagon-x";
 import IconTriangleAlert from "~icons/lucide/triangle-alert";
-import { useToastQueue, type ToastItem, type ToastKind } from "./toast.ts";
+import { useToastQueue, toast, type ToastItem, type ToastKind } from "./toast.ts";
+import IconX from "~icons/lucide/x";
 
 /**
  * Toaster, replacing `svelte-sonner`'s component.
@@ -67,6 +68,9 @@ function ToastIcon(props: { kind: ToastKind }) {
       <Match when={props.kind === "loading"}>
         <IconLoader class="size-4 shrink-0 animate-spin" />
       </Match>
+      <Match when={props.kind === "default"}>
+        <IconInfo class="size-4 shrink-0 text-muted-foreground" />
+      </Match>
     </Switch>
   );
 }
@@ -93,13 +97,25 @@ export function Toaster(props: ToasterProps) {
       )}
     >
       <For each={queue()}>
-        {(item) => <ToastRow item={item.data} richColors={props.richColors} />}
+        {(entry) => (
+          <ToastRow
+            id={entry.id}
+            item={entry.data}
+            richColors={props.richColors}
+            onDismiss={() => toast.dismiss(entry.id)}
+          />
+        )}
       </For>
     </ToasterRegion>
   );
 }
 
-function ToastRow(props: { item: ToastItem; richColors?: boolean }) {
+function ToastRow(props: {
+  id: string;
+  item: ToastItem;
+  richColors?: boolean;
+  onDismiss: () => void;
+}) {
   return (
     <Toast
       data-slot="toast"
@@ -112,12 +128,35 @@ function ToastRow(props: { item: ToastItem; richColors?: boolean }) {
       <span class={cn("mt-px flex", ACCENT[props.item.kind])}>
         <ToastIcon kind={props.item.kind} />
       </span>
-      <div class="flex min-w-0 flex-col gap-0.5">
+      <div class="flex min-w-0 flex-1 flex-col gap-0.5">
         <span class="break-words">{props.item.message}</span>
         <Show when={props.item.description}>
           <span class="text-muted-foreground text-xs break-words">{props.item.description}</span>
         </Show>
+        <Show when={props.item.action}>
+          {(action) => (
+            <button
+              type="button"
+              class="text-foreground mt-1 self-start text-xs font-medium underline underline-offset-2"
+              onClick={() => {
+                action().onClick();
+                props.onDismiss();
+              }}
+            >
+              {action().label}
+            </button>
+          )}
+        </Show>
       </div>
+      <button
+        type="button"
+        class="text-muted-foreground hover:text-foreground -mt-0.5 -mr-1 flex size-5 shrink-0 items-center justify-center rounded transition-colors"
+        aria-label="Dismiss"
+        title="Dismiss"
+        onClick={props.onDismiss}
+      >
+        <IconX class="size-3.5" />
+      </button>
     </Toast>
   );
 }

@@ -33,17 +33,17 @@ export default function ComposerTextarea(props: ComposerTextareaProps) {
   const minHeight = () => props.minHeight ?? 76;
   const maxHeight = () => props.maxHeight ?? 200;
 
-  function resize(element: HTMLTextAreaElement | undefined): void {
+  function resize(element: HTMLTextAreaElement | undefined, max: number): void {
     if (element === undefined) return;
     element.style.height = "auto";
-    element.style.height = `${Math.min(element.scrollHeight, maxHeight())}px`;
+    element.style.height = `${Math.min(element.scrollHeight, max)}px`;
   }
 
   // Keep the height in sync when the value is changed programmatically.
   createEffect(
-    () => ({ value: props.value ?? "", element: textarea() }),
-    ({ element }) => {
-      resize(element);
+    () => ({ value: props.value ?? "", element: textarea(), max: maxHeight() }),
+    ({ element, max }) => {
+      resize(element, max);
     },
   );
 
@@ -65,7 +65,7 @@ export default function ComposerTextarea(props: ComposerTextareaProps) {
       rows={props.rows ?? 3}
       onInput={(event) => {
         props.onValueChange?.(event.currentTarget.value);
-        resize(event.currentTarget);
+        resize(event.currentTarget, maxHeight());
       }}
       onKeyDown={(event) => props.onkeydown?.(event)}
       onPaste={(event) => props.onpaste?.(event)}

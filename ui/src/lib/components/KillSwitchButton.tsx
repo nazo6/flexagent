@@ -6,6 +6,7 @@ import { sync } from "#lib/stores/app.ts";
 import { cn } from "#lib/utils.ts";
 import { toast } from "#lib/components/ui/sonner/index.ts";
 import IconOctagonX from "~icons/lucide/octagon-x";
+import { errorMessage } from "#lib/api/error-messages.ts";
 
 export interface KillSwitchButtonProps {
   class?: string;
@@ -29,7 +30,7 @@ export default function KillSwitchButton(props: KillSwitchButtonProps) {
       toast.success(m.shell_kill_switch_sent({ count: nodes }));
       setOpen(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -57,7 +58,7 @@ export default function KillSwitchButton(props: KillSwitchButtonProps) {
             </AlertDialog.Description>
           </AlertDialog.Header>
           <AlertDialog.Footer>
-            <AlertDialog.Cancel>{m.common_cancel()}</AlertDialog.Cancel>
+            <AlertDialog.Cancel disabled={busy()}>{m.common_cancel()}</AlertDialog.Cancel>
             <AlertDialog.Action variant="destructive" onClick={confirmKill} disabled={busy()}>
               <Show when={busy()} fallback={m.shell_kill_switch_confirm()}>
                 {m.shell_kill_switch_sending()}

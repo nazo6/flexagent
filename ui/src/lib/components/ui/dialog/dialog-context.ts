@@ -12,6 +12,8 @@ export interface DialogState {
   open: () => boolean;
   setOpen: (open: boolean) => void;
   close: () => void;
+  /** The root's `disabled` prop; Terracotta ignores overlay / Escape while set. */
+  disabled: () => boolean;
 }
 
 export type DialogContext = Context<DialogState | null>;

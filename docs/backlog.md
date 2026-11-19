@@ -84,7 +84,7 @@ Phase 0（ACP v1 端末のライフサイクル・単体停止・スナップシ
 - [x] Files / Terminal の実データ動作を確認する（現行バイナリでツリー・Markdown プレビュー・PTY 接続を確認）
 - [ ] 変更のあるファイルで diff の実データ動作を確認する
 - [ ] モバイルで必要なら Drawer にドラッグ閉じ / スナップポイントを追加する（現状は閉じるボタンとオーバーレイのみ）
-- [ ] Toast にアクションボタン / 進捗 API が必要になったら `ToasterStore` の payload に載せる
+- [x] Toast にアクションボタンを追加した（進捗 API は必要になったら `ToasterStore` の payload に載せる）
 - [ ] 主要画面のライト / ダーク / Bone・Graphite・Moss のスクリーンショット比較を一巡する
 - [ ] 初期バンドル（約 1.5 MB）をルート単位の遅延読み込みで分割するかを判断する（Monaco / Shiki は既に遅延チャンク）
 - [x] 設定 URL の形を `settings-routes.ts` に集約する（route patterns / builders / pathname 判定）。型付き `paths` は採用しない

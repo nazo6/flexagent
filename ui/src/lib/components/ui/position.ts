@@ -10,7 +10,15 @@ import {
   type Placement,
   type Side,
 } from "@floating-ui/dom";
-import { createEffect, createSignal, type Accessor } from "solid-js";
+import {
+  createContext,
+  createEffect,
+  createMemo,
+  createSignal,
+  untrack,
+  useContext,
+  type Accessor,
+} from "solid-js";
 
 /**
  * Anchored floating panels.
@@ -109,10 +117,11 @@ export interface AnchoredPanel {
  */
 export function useAnchoredPanel(options: AnchoredPanelOptions): AnchoredPanel {
   const [panel, setPanel] = createSignal<HTMLElement>();
-  const [side, setSide] = createSignal<Side>(read(options.side, "bottom"));
-  const [align, setAlign] = createSignal<PanelAlign>(read(options.align, "center"));
+  const [side, setSide] = createSignal<Side>(untrack(() => read(options.side, "bottom")));
+  const [align, setAlign] = createSignal<PanelAlign>(untrack(() => read(options.align, "center")));
 
-  createEffect(
+  /** Geometry inputs; the memo keeps a re-render with equal values from restarting. */
+  const state = createMemo(
     () => ({
       element: panel(),
       anchor: options.anchor(),
@@ -125,56 +134,83 @@ export function useAnchoredPanel(options: AnchoredPanelOptions): AnchoredPanel {
       padding: read(options.padding, 8),
       arrow: options.arrow?.() ?? undefined,
     }),
-    (state) => {
-      const { element, anchor } = state;
-      // A trigger ref can be stale (for example a re-created slot tree). A
-      // detached anchor makes floating-ui walk a different document's tree, so
-      // wait for a live element in the panel's document instead.
-      if (
-        !element ||
-        !anchor ||
-        !state.open ||
-        !element.isConnected ||
-        !anchor.isConnected ||
-        anchor.ownerDocument !== element.ownerDocument
-      ) {
+    {
+      equals: (left, right) =>
+        left.element === right.element &&
+        left.anchor === right.anchor &&
+        left.open === right.open &&
+        left.placement === right.placement &&
+        left.sideOffset === right.sideOffset &&
+        left.alignOffset === right.alignOffset &&
+        left.matchWidth === right.matchWidth &&
+        left.availableHeight === right.availableHeight &&
+        left.padding === right.padding &&
+        left.arrow === right.arrow,
+    },
+  );
+
+  createEffect(state, (current) => {
+    const { element, anchor } = current;
+    if (!element || !anchor || !current.open) return;
+
+    let cancelled = false;
+    let stopAutoUpdate: (() => void) | undefined;
+    let retries = 0;
+
+    const update = () => {
+      void computePosition(anchor, element, {
+        strategy: "fixed",
+        placement: current.placement,
+        middleware: buildMiddleware(current),
+      }).then((result) => {
+        if (cancelled || !element.isConnected) return;
+
+        element.style.position = "fixed";
+        element.style.left = `${Math.round(result.x)}px`;
+        element.style.top = `${Math.round(result.y)}px`;
+        element.style.visibility = "";
+
+        const [placedSide, placedAlign] = splitPlacement(result.placement);
+        element.dataset.side = placedSide;
+        element.dataset.align = placedAlign;
+        setSide(placedSide);
+        setAlign(placedAlign);
+        untrack(() => options.onSideChange?.(placedSide));
+
+        const arrowData = result.middlewareData.arrow;
+        if (current.arrow && arrowData) positionArrow(current.arrow, placedSide, arrowData);
+      });
+    };
+
+    // A trigger ref can be stale (for example a re-created slot tree). A
+    // detached anchor makes floating-ui walk a different document's tree, so
+    // wait for a live element in the panel's document instead.
+    const start = () => {
+      if (cancelled) return;
+      const ready =
+        element.isConnected && anchor.isConnected && anchor.ownerDocument === element.ownerDocument;
+      if (!ready) {
+        if (retries >= 60) return;
+        retries += 1;
+        requestAnimationFrame(start);
         return;
       }
 
       // A panel kept mounted while closed (`unmount={false}`) would otherwise
       // paint once at the viewport's top-left before the first measurement.
       element.style.visibility = "hidden";
+      // `autoUpdate` performs the first measurement itself.
+      stopAutoUpdate = autoUpdate(anchor, element, update);
+    };
 
-      const update = () => {
-        void computePosition(anchor, element, {
-          strategy: "fixed",
-          placement: state.placement,
-          middleware: buildMiddleware(state),
-        }).then((result) => {
-          if (!element.isConnected) return;
+    start();
 
-          element.style.position = "fixed";
-          element.style.left = `${Math.round(result.x)}px`;
-          element.style.top = `${Math.round(result.y)}px`;
-          element.style.visibility = "";
-
-          const [placedSide, placedAlign] = splitPlacement(result.placement);
-          element.dataset.side = placedSide;
-          element.dataset.align = placedAlign;
-          setSide(placedSide);
-          setAlign(placedAlign);
-          options.onSideChange?.(placedSide);
-
-          const arrowElement = options.arrow?.();
-          const arrowData = result.middlewareData.arrow;
-          if (arrowElement && arrowData) positionArrow(arrowElement, placedSide, arrowData);
-        });
-      };
-
-      update();
-      return autoUpdate(anchor, element, update);
-    },
-  );
+    return () => {
+      cancelled = true;
+      stopAutoUpdate?.();
+      element.style.visibility = "";
+    };
+  });
 
   return { ref: setPanel, element: panel, side, align };
 }
@@ -226,6 +262,12 @@ function positionArrow(
   const staticSide = ARROW_SIDE[side];
   element.style.position = "absolute";
   element.dataset.side = staticSide;
+  // Clear every inset first: a `flip()` between placements would otherwise
+  // leave the previous static side set and push the arrow off the panel.
+  element.style.left = "";
+  element.style.right = "";
+  element.style.top = "";
+  element.style.bottom = "";
   element.style.left = data.x != null ? `${Math.round(data.x)}px` : "";
   element.style.top = data.y != null ? `${Math.round(data.y)}px` : "";
   element.style[staticSide] = "-4px";
@@ -240,10 +282,50 @@ function positionArrow(
  */
 export const ANCHORED_PANEL_ATTRIBUTE = "data-anchored-panel";
 
+/**
+ * Ownership tree of the portaled panels.
+ *
+ * A nested panel (a `Select` inside a `Popover`, a submenu inside a menu) is a
+ * separate portal, so `event.target.closest()` cannot see that it belongs to
+ * the outer panel. Each `Content` creates a node and registers its own element;
+ * dismissal walks from the innermost panel's node to the outer ones.
+ */
+export interface PanelTree {
+  parent: PanelTree | null;
+  element: HTMLElement | null;
+}
+
+export const PanelTreeContext = createContext<PanelTree | null>(null);
+
+const panelOwners = new WeakMap<Element, PanelTree>();
+
+/** Creates the tree node for one panel, nested under the nearest provider. */
+export function createPanelTree(): PanelTree {
+  return { parent: useContext(PanelTreeContext), element: null };
+}
+
+/** Registers the panel element that owns this tree node. */
+export function registerPanelElement(tree: PanelTree, element: HTMLElement): void {
+  tree.element = element;
+  panelOwners.set(element, tree);
+}
+
+/** Whether `element` is the panel of `tree` or of one of its nested panels. */
+function belongsToTree(element: Element, tree: PanelTree): boolean {
+  let current: PanelTree | null = panelOwners.get(element) ?? null;
+  while (current !== null) {
+    if (current === tree) return true;
+    current = current.parent;
+  }
+  return false;
+}
+
 export interface DismissOptions {
   open: Accessor<boolean>;
   /** The trigger; pressing it must not dismiss (it toggles). */
   anchor?: Accessor<HTMLElement | null | undefined>;
+  /** Ownership tree of the panel, for presses inside nested panels. */
+  tree?: PanelTree;
   onDismiss: () => void;
 }
 
@@ -258,7 +340,11 @@ export function dismissOnOutsidePointer(options: DismissOptions): void {
   const handle = (event: PointerEvent) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
-    if (target.closest(`[${ANCHORED_PANEL_ATTRIBUTE}]`)) return;
+    const panel = target.closest(`[${ANCHORED_PANEL_ATTRIBUTE}]`);
+    if (panel !== null) {
+      // A nested panel under this one keeps it open; an unrelated panel does not.
+      if (options.tree === undefined || belongsToTree(panel, options.tree)) return;
+    }
     if (options.anchor?.()?.contains(target)) return;
     options.onDismiss();
   };
@@ -268,43 +354,4 @@ export function dismissOnOutsidePointer(options: DismissOptions): void {
     document.addEventListener("pointerdown", handle, true);
     return () => document.removeEventListener("pointerdown", handle, true);
   });
-}
-
-/**
- * Returns focus to the trigger when a non-modal panel closes.
- *
- * Non-modal panels have no focus trap, so closing one with Escape or by
- * choosing an item leaves focus on the unmounted panel (or on `<body>`).
- * Focus is left alone when the user moved it somewhere outside the panel
- * first, so an outside click keeps its own target.
- */
-export function restoreFocusOnClose(options: {
-  open: Accessor<boolean>;
-  anchor: Accessor<HTMLElement | null | undefined>;
-  panel: Accessor<HTMLElement | undefined>;
-}): void {
-  let wasOpen = false;
-  createEffect(
-    () => options.open(),
-    (open) => {
-      if (open) {
-        wasOpen = true;
-        return;
-      }
-      if (!wasOpen) return;
-      wasOpen = false;
-      queueMicrotask(() => {
-        const active = document.activeElement;
-        const panel = options.panel();
-        const focusIsOutsidePanel =
-          active instanceof HTMLElement &&
-          active !== document.body &&
-          active !== document.documentElement &&
-          !panel?.contains(active);
-        if (focusIsOutsidePanel) return;
-        const anchor = options.anchor();
-        if (anchor?.isConnected) anchor.focus();
-      });
-    },
-  );
 }

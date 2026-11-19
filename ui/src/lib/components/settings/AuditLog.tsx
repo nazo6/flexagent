@@ -23,11 +23,21 @@ export default function AuditLog(props: {
   const roleLabel = () =>
     (props.nodeId ?? "") !== "" || connection.role !== "hub" ? "node.db" : "hub.db";
 
-  async function load(): Promise<void> {
+  createEffect(
+    () => props.nodeId ?? "",
+    (nodeId) => {
+      setLogs([]);
+      void load(nodeId);
+      return () => {
+        generation += 1;
+      };
+    },
+  );
+
+  async function load(nodeId = props.nodeId ?? ""): Promise<void> {
     const current = ++generation;
     setLoading(true);
     try {
-      const nodeId = props.nodeId ?? "";
       const next =
         nodeId === ""
           ? await connection.client.auditLogs(100)
@@ -40,14 +50,6 @@ export default function AuditLog(props: {
       if (current === generation) setLoading(false);
     }
   }
-
-  createEffect(
-    () => props.nodeId ?? "",
-    () => {
-      setLogs([]);
-      void load();
-    },
-  );
 
   function sessionTitle(sessionId: string): string {
     return (
@@ -94,39 +96,39 @@ export default function AuditLog(props: {
         }
       >
         <ul class="flex list-none flex-col gap-2 p-0">
-          <For each={logs()}>
+          <For each={logs()} keyed={(entry) => entry.id}>
             {(log) => (
               <li>
                 <Card class="gap-1.5 p-3">
                   <div class="flex flex-wrap items-center gap-2 text-[13px]">
-                    <Badge variant="outline">{actionLabels()[log.action] ?? log.action}</Badge>
-                    <span class="text-muted-foreground">{formatEpochMs(log.created_at)}</span>
-                    <span class="text-muted-foreground">{log.client_ip}</span>
-                    <span class="text-muted-foreground">{log.auth_subject}</span>
-                    <Show when={log.node_id}>
-                      <Badge variant="secondary">{nodeName(log.node_id ?? "")}</Badge>
+                    <Badge variant="outline">{actionLabels()[log().action] ?? log().action}</Badge>
+                    <span class="text-muted-foreground">{formatEpochMs(log().created_at)}</span>
+                    <span class="text-muted-foreground">{log().client_ip}</span>
+                    <span class="text-muted-foreground">{log().auth_subject}</span>
+                    <Show when={log().node_id}>
+                      <Badge variant="secondary">{nodeName(log().node_id ?? "")}</Badge>
                     </Show>
-                    <Show when={log.session_id}>
+                    <Show when={log().session_id}>
                       <a
                         class="ml-auto text-[13px] font-medium hover:underline"
-                        href={`/sessions/${log.session_id}`}
+                        href={`/sessions/${log().session_id}`}
                       >
-                        {sessionTitle(log.session_id ?? "")}
+                        {sessionTitle(log().session_id ?? "")}
                       </a>
                     </Show>
                   </div>
-                  <Show when={log.client_user_agent}>
+                  <Show when={log().client_user_agent}>
                     <p class="text-muted-foreground truncate text-[11px]">
-                      {log.client_user_agent}
+                      {log().client_user_agent}
                     </p>
                   </Show>
-                  <Show when={log.details !== null && log.details !== undefined}>
+                  <Show when={log().details !== null && log().details !== undefined}>
                     <details>
                       <summary class="text-muted-foreground hover:text-foreground cursor-pointer text-[13px] select-none">
                         {m.settings_audit_details()}
                       </summary>
                       <pre class="bg-muted/40 mt-1 max-h-40 overflow-auto rounded-md p-2 font-mono text-[13px] whitespace-pre-wrap">
-                        {JSON.stringify(log.details, null, 2)}
+                        {JSON.stringify(log().details, null, 2)}
                       </pre>
                     </details>
                   </Show>

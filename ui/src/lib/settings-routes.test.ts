@@ -35,10 +35,12 @@ describe("settings-routes", () => {
     expect(isSettingsPath("/settings/nodes/n1")).toBe(true);
     expect(isSettingsPath("/settings-other")).toBe(false);
     expect(isSettingsPath("/projects")).toBe(false);
+    expect(isSettingsPath("/settings/")).toBe(true);
 
     expect(settingsScopeFromPath("/settings/hub/tokens")).toBe("hub");
     expect(settingsScopeFromPath("/settings/nodes/n1/agents")).toBe("node");
     expect(settingsScopeFromPath("/settings/browser")).toBe("browser");
+    expect(settingsScopeFromPath("/settings/browser/")).toBe("browser");
     expect(settingsScopeFromPath("/settings")).toBeNull();
     expect(settingsScopeFromPath("/projects")).toBeNull();
   });
@@ -47,7 +49,7 @@ describe("settings-routes", () => {
     expect(isSettingsIndexPath("/settings")).toBe(true);
     expect(isSettingsIndexPath("/settings/hub")).toBe(true);
     expect(isSettingsIndexPath("/settings/browser")).toBe(true);
-    expect(isSettingsIndexPath("/settings/nodes")).toBe(true);
+    expect(isSettingsIndexPath("/settings/nodes")).toBe(false);
     expect(isSettingsIndexPath("/settings/nodes/n1")).toBe(true);
     expect(isSettingsIndexPath("/settings/nodes/n1/agents")).toBe(false);
     expect(isSettingsIndexPath("/settings/hub/tokens")).toBe(false);

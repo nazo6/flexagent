@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, onSettled, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onSettled, Show } from "solid-js";
 import AgentUsage from "#lib/components/session/AgentUsage.tsx";
 import SessionInfo from "#lib/components/session/SessionInfo.tsx";
 import SessionActionsMenu from "#lib/components/session/SessionActionsMenu.tsx";
@@ -70,16 +70,18 @@ export default function SessionHeader(props: SessionHeaderProps) {
     }
   }
 
-  createEffect(
-    () => ({ nodeId: props.session?.node_id ?? "", agentId: props.session?.agent_id ?? "" }),
-    ({ nodeId, agentId }) => {
-      if (nodeId === "" || agentId === "") {
-        setAgentIcon(null);
-        return;
-      }
-      void loadAgentIcon(nodeId, agentId);
-    },
+  const agentIdentity = createMemo(
+    () => `${props.session?.node_id ?? ""}\u0000${props.session?.agent_id ?? ""}`,
   );
+
+  createEffect(agentIdentity, (key) => {
+    const [nodeId, agentId] = key.split("\u0000");
+    if (nodeId === "" || agentId === "") {
+      setAgentIcon(null);
+      return;
+    }
+    void loadAgentIcon(nodeId, agentId);
+  });
 
   // Component-level setup and teardown (not a reactive dependency).
   onSettled(() => {

@@ -1,4 +1,13 @@
-import { For, Match, Show, Switch, createEffect, createSignal, untrack } from "solid-js";
+import {
+  For,
+  Match,
+  Show,
+  Switch,
+  createEffect,
+  createMemo,
+  createSignal,
+  untrack,
+} from "solid-js";
 import CodeView from "#lib/components/dock/CodeView.tsx";
 import GitStatusBadge from "#lib/components/dock/GitStatusBadge.tsx";
 import DiffViewer from "#lib/components/diff/DiffViewer.tsx";
@@ -45,11 +54,11 @@ export default function FilePreview(props: FilePreviewProps) {
   let previewKey = untrack(() => `${props.tab.path}\u0000${props.tab.line ?? ""}`);
   // A chat link with a line opens in source view; keep the toggle available.
   createEffect(
-    () => `${props.tab.path}\u0000${props.tab.line ?? ""}`,
-    (key) => {
-      if (key === previewKey) return;
-      previewKey = key;
-      setMarkdownPreview(props.tab.line === null);
+    () => ({ key: `${props.tab.path}\u0000${props.tab.line ?? ""}`, line: props.tab.line }),
+    (current) => {
+      if (current.key === previewKey) return;
+      previewKey = current.key;
+      setMarkdownPreview(current.line === null);
     },
   );
   const [view, setView] = createSignal<WorkspaceFileView | null>(null);
@@ -79,31 +88,47 @@ export default function FilePreview(props: FilePreviewProps) {
     return content?.kind === "too_large" ? content : null;
   };
 
-  createEffect(
+  /** Everything the loads depend on; compared by value, not by object identity. */
+  const loadTarget = createMemo(
     () => ({
+      nodeId: props.ctx.nodeId,
+      localPath: props.ctx.localPath,
       path: path(),
       mode: mode(),
       scope: scope(),
+      remote: remote(),
       token: refreshToken(),
     }),
-    (current) => {
-      if (current.path === "" || remote()) return;
-      void loadFileStatus(current.path);
-      if (current.mode === "view") {
-        void loadView(current.path);
-      } else {
-        void loadDiff(current.path, current.scope);
-      }
+    {
+      equals: (left, right) =>
+        left.nodeId === right.nodeId &&
+        left.localPath === right.localPath &&
+        left.path === right.path &&
+        left.mode === right.mode &&
+        left.scope === right.scope &&
+        left.remote === right.remote &&
+        left.token === right.token,
     },
   );
 
-  async function loadFileStatus(filePath: string): Promise<void> {
+  createEffect(loadTarget, (target) => {
+    if (target.path === "" || target.remote) return;
+    void loadFileStatus(target.nodeId, target.localPath, target.path);
+    if (target.mode === "view") {
+      void loadView(target.nodeId, target.path);
+    } else {
+      void loadDiff(target.nodeId, target.localPath, target.path, target.scope);
+    }
+  });
+
+  async function loadFileStatus(
+    nodeId: string,
+    localPath: string,
+    filePath: string,
+  ): Promise<void> {
     const token = ++statusGeneration;
     try {
-      const result = await sync.connection.client.workspaceGitStatus(
-        props.ctx.nodeId,
-        props.ctx.localPath,
-      );
+      const result = await sync.connection.client.workspaceGitStatus(nodeId, localPath);
       if (token !== statusGeneration) return;
       setFileStatus(
         result.entries.find((entry) => entry.absolute_path === filePath)?.status ?? null,
@@ -113,12 +138,12 @@ export default function FilePreview(props: FilePreviewProps) {
     }
   }
 
-  async function loadView(filePath: string): Promise<void> {
+  async function loadView(nodeId: string, filePath: string): Promise<void> {
     const token = ++viewGeneration;
     setViewLoading(true);
     setViewError(null);
     try {
-      const result = await sync.connection.client.workspaceFsFile(props.ctx.nodeId, filePath);
+      const result = await sync.connection.client.workspaceFsFile(nodeId, filePath);
       if (token !== viewGeneration) return;
       setView(result);
     } catch (cause) {
@@ -130,19 +155,20 @@ export default function FilePreview(props: FilePreviewProps) {
     }
   }
 
-  async function loadDiff(filePath: string, diffScope: DockDiffScope): Promise<void> {
+  async function loadDiff(
+    nodeId: string,
+    localPath: string,
+    filePath: string,
+    diffScope: DockDiffScope,
+  ): Promise<void> {
     const token = ++diffGeneration;
     setDiffLoading(true);
     setDiffError(null);
     try {
-      const result = await sync.connection.client.workspaceGitDiff(
-        props.ctx.nodeId,
-        props.ctx.localPath,
-        {
-          scope: diffScope,
-          file: filePath,
-        },
-      );
+      const result = await sync.connection.client.workspaceGitDiff(nodeId, localPath, {
+        scope: diffScope,
+        file: filePath,
+      });
       if (token !== diffGeneration) return;
       setDiff(result);
     } catch (cause) {
@@ -174,7 +200,7 @@ export default function FilePreview(props: FilePreviewProps) {
             class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md transition-colors"
             title={m.dock_files_title()}
             aria-label={m.dock_files_title()}
-            onClick={props.onback}
+            onClick={() => props.onback()}
           >
             <IconChevronLeft class="size-4" />
           </button>

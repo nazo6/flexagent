@@ -1,21 +1,15 @@
 import { encodeBytesToBase64 } from "#lib/base64.ts";
 import type { AttachmentMeta } from "#lib/generated/bindings.ts";
 import { m } from "#lib/paraglide/messages.js";
-import { problems } from "#lib/stores/problems.ts";
+import { toast } from "#lib/components/ui/sonner/index.ts";
 import { ReactiveCell } from "#lib/stores/reactive.ts";
 
 /** Inline attachment upload limit (matches the node-side limit). */
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
-/**
- * Report a rejected attachment.
- *
- * The Svelte app used `svelte-sonner` here; the Solid app routes user-visible
- * failures through the problem store until the shared Terracotta toaster is
- * mounted app-wide.
- */
+/** Reject an attachment the browser allowed to pick but the node will not take. */
 function rejectAttachment(message: string): void {
-  problems.warn("attachment", message);
+  toast.error(message);
 }
 
 /** Best-effort MIME type from a file name (mirrors the CLI helper). */
@@ -64,7 +58,7 @@ export function createComposerAttachments(
   /** Apply one mutation and hand the result to the owner. */
   function mutate(change: (current: AttachmentMeta[]) => AttachmentMeta[]): void {
     attachments.update(change);
-    options.onChange?.(attachments.get());
+    options.onChange?.(attachments.peek());
   }
 
   async function addImageFiles(files: FileList | File[]): Promise<void> {

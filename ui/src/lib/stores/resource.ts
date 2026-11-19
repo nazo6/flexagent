@@ -1,3 +1,4 @@
+import { errorMessage } from "#lib/api/error-messages.ts";
 import { ReactiveCell } from "#lib/stores/reactive.ts";
 
 /**
@@ -58,10 +59,6 @@ export interface KeyedResource<K extends string, T> {
 
 const IDLE: ResourceEntry<never> = { data: undefined, loading: false, error: null };
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 /** Creates a resource for a single value. */
 export function createResource<T>(
   load: () => Promise<T>,
@@ -73,7 +70,7 @@ export function createResource<T>(
   let generation = 0;
 
   async function refresh(loadOptions: ResourceLoadOptions = {}): Promise<void> {
-    if (loading.get()) return;
+    if (loading.peek()) return;
     const current = ++generation;
     loading.set(true);
     error.set(null);

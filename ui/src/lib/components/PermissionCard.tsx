@@ -11,6 +11,7 @@ import { toast } from "#lib/components/ui/sonner/index.ts";
 import IconCheck from "~icons/lucide/check";
 import IconShieldCheck from "~icons/lucide/shield-check";
 import IconX from "~icons/lucide/x";
+import { errorMessage } from "#lib/api/error-messages.ts";
 
 export interface PermissionCardProps {
   sessionId: string;
@@ -77,7 +78,7 @@ export default function PermissionCard(props: PermissionCardProps) {
         toast.success(m.chat_permission_sent());
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       setBusyOptionId(null);
     }

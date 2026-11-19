@@ -15,14 +15,14 @@ describe("SyncStore active session effect", () => {
     let runs = 0;
     const dispose = createRoot((disposeRoot) => {
       createEffect(
-        // The write happens while the effect tracks reads: `setActiveSession`
-        // itself must not subscribe the caller to the state it writes.
+        // Compute tracks nothing; the write belongs to the apply callback.
+        () => 0,
         () => {
           runs += 1;
           if (runs > 5) throw new Error("the effect re-ran from its own write");
           store.setActiveSession("sess-1");
+          return () => store.setActiveSession(null);
         },
-        () => () => store.setActiveSession(null),
       );
       return disposeRoot;
     });

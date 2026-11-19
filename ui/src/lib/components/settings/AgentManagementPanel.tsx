@@ -37,25 +37,39 @@ export default function AgentManagementPanel(props: {
   const [mcpUrl, setMcpUrl] = createSignal("");
 
   createEffect(
-    () => `${targetNode()}:${props.agentId}`,
-    () => {
-      if (targetNode() === "" || props.agentId === "") return;
-      void load();
+    () => `${targetNode()}\u0000${props.agentId}`,
+    (key) => {
+      const [node, agent] = key.split("\u0000");
+      if (node === "" || agent === "") {
+        setLoading(false);
+        setSnapshot(null);
+        return;
+      }
+      // Drop the previous agent's data immediately; the in-flight response is
+      // discarded by the generation check in `load`.
+      setSnapshot(null);
+      setError(null);
+      void load(node, agent);
     },
   );
 
-  async function load(): Promise<void> {
-    const node = targetNode();
-    const agent = props.agentId;
-    if (node === "" || agent === "" || loading()) return;
+  /** Latest management request; a target switch invalidates older responses. */
+  let generation = 0;
+
+  async function load(node = targetNode(), agent = props.agentId): Promise<void> {
+    if (node === "" || agent === "") return;
+    const current = ++generation;
     setLoading(true);
     setError(null);
     try {
-      setSnapshot(await sync.connection.client.agentManagement(node, agent));
+      const next = await sync.connection.client.agentManagement(node, agent);
+      if (current !== generation) return;
+      setSnapshot(next);
     } catch (cause) {
+      if (current !== generation) return;
       setError(errorMessage(cause));
     } finally {
-      setLoading(false);
+      if (current === generation) setLoading(false);
     }
   }
 

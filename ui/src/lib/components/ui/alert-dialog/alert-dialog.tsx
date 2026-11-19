@@ -1,15 +1,15 @@
 import type { ComponentProps, JSX } from "@solidjs/web";
 import { Portal } from "@solidjs/web";
-import { createEffect, omit, Show } from "solid-js";
+import { omit, Show } from "solid-js";
 import {
   AlertDialog as AlertDialogPrimitive,
   AlertDialogDescription,
-  AlertDialogOverlay,
   AlertDialogPanel,
   AlertDialogTitle,
 } from "terracotta/alert-dialog";
 import { cn } from "#lib/utils.ts";
-import { createControllable, type MouseHandler } from "../controllable.ts";
+import { type MouseHandler } from "../controllable.ts";
+import { createModalState } from "../modal.ts";
 import { buttonVariants, type ButtonSize, type ButtonVariant } from "../button/index.ts";
 import { makeDialogContext, useDialogState } from "../dialog/dialog-context.ts";
 import type { ElementRef } from "../position.ts";
@@ -34,39 +34,7 @@ export interface RootProps {
 }
 
 export function Root(props: RootProps) {
-  const [open, setOpen] = createControllable(
-    () => props.open,
-    props.onOpenChange,
-    props.defaultOpen ?? false,
-  );
-
-  let restoreFocus: HTMLElement | null = null;
-
-  const change = (next: boolean) => {
-    if (next === open()) return;
-    if (next) {
-      restoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    }
-    const target = next ? null : restoreFocus;
-    if (!next) restoreFocus = null;
-    setOpen(next);
-    if (target) queueMicrotask(() => target.focus());
-  };
-
-  const state = { open, setOpen: change, close: () => change(false) };
-
-  createEffect(
-    () => open(),
-    (isOpen) => {
-      if (!isOpen) return;
-      const previous = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
-      return () => {
-        document.body.style.overflow = previous;
-      };
-    },
-  );
-
+  const state = createModalState(props);
   return <AlertDialogContext value={state}>{props.children}</AlertDialogContext>;
 }
 
@@ -90,7 +58,8 @@ export function Trigger(props: TriggerProps) {
 
   const handleClick: MouseHandler<HTMLButtonElement> = (event) => {
     props.onClick?.(event);
-    if (!props.disabled) state.setOpen(true);
+    if (event.defaultPrevented || props.disabled || state.disabled()) return;
+    state.setOpen(true);
   };
 
   return (
@@ -115,7 +84,7 @@ export type OverlayProps = Omit<ComponentProps<"div">, "ref"> & { ref?: ElementR
 export function Overlay(props: OverlayProps) {
   const rest = omit(props, "class", "children", "ref");
   return (
-    <AlertDialogOverlay
+    <div
       {...rest}
       ref={props.ref}
       data-slot="alert-dialog-overlay"
@@ -139,7 +108,11 @@ export function Content(props: ContentProps) {
   return (
     <Show when={state.open()}>
       <Portal>
-        <AlertDialogPrimitive isOpen onChange={(next) => state.setOpen(next)}>
+        <AlertDialogPrimitive
+          isOpen
+          disabled={state.disabled()}
+          onChange={(next) => state.setOpen(next)}
+        >
           <Overlay />
           <AlertDialogPanel
             {...rest}
@@ -195,13 +168,16 @@ export function Footer(props: FooterProps) {
   );
 }
 
-export type TitleProps = ComponentProps<"h2">;
+export type TitleProps = Omit<ComponentProps<"h2">, "ref"> & {
+  ref?: ElementRef<HTMLHeadingElement>;
+};
 
 export function Title(props: TitleProps) {
   const rest = omit(props, "class", "children", "ref");
   return (
     <AlertDialogTitle
       {...rest}
+      ref={props.ref}
       data-slot="alert-dialog-title"
       class={cn(
         "text-lg font-medium sm:group-data-[size=default]/alert-dialog-content:group-has-data-[slot=alert-dialog-media]/alert-dialog-content:col-start-2",
@@ -213,13 +189,16 @@ export function Title(props: TitleProps) {
   );
 }
 
-export type DescriptionProps = ComponentProps<"p">;
+export type DescriptionProps = Omit<ComponentProps<"p">, "ref"> & {
+  ref?: ElementRef<HTMLParagraphElement>;
+};
 
 export function Description(props: DescriptionProps) {
   const rest = omit(props, "class", "children", "ref");
   return (
     <AlertDialogDescription
       {...rest}
+      ref={props.ref}
       data-slot="alert-dialog-description"
       class={cn(
         "text-muted-foreground *:[a]:hover:text-foreground text-sm text-balance md:text-pretty *:[a]:underline *:[a]:underline-offset-3",
@@ -285,6 +264,7 @@ export function Cancel(props: CancelProps) {
 
   const handleClick: MouseHandler<HTMLButtonElement> = (event) => {
     props.onClick?.(event);
+    if (event.defaultPrevented) return;
     state.close();
   };
 

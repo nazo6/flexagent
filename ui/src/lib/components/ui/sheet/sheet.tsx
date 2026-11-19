@@ -1,6 +1,6 @@
 import type { ComponentProps, JSX } from "@solidjs/web";
 import { Portal } from "@solidjs/web";
-import { createEffect, omit, Show } from "solid-js";
+import { omit, Show } from "solid-js";
 import {
   Dialog as DialogPrimitive,
   DialogDescription,
@@ -10,7 +10,8 @@ import {
 } from "terracotta/dialog";
 import { cn } from "#lib/utils.ts";
 import IconX from "~icons/lucide/x";
-import { createControllable, type MouseHandler } from "../controllable.ts";
+import { type MouseHandler } from "../controllable.ts";
+import { createModalState } from "../modal.ts";
 import type { ElementRef } from "../position.ts";
 import { Button } from "../button/index.ts";
 import { makeDialogContext, useDialogState } from "../dialog/dialog-context.ts";
@@ -37,39 +38,7 @@ export interface RootProps {
 }
 
 export function Root(props: RootProps) {
-  const [open, setOpen] = createControllable(
-    () => props.open,
-    props.onOpenChange,
-    props.defaultOpen ?? false,
-  );
-
-  let restoreFocus: HTMLElement | null = null;
-
-  const change = (next: boolean) => {
-    if (next === open()) return;
-    if (next) {
-      restoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    }
-    const target = next ? null : restoreFocus;
-    if (!next) restoreFocus = null;
-    setOpen(next);
-    if (target) queueMicrotask(() => target.focus());
-  };
-
-  const state = { open, setOpen: change, close: () => change(false) };
-
-  createEffect(
-    () => open(),
-    (isOpen) => {
-      if (!isOpen) return;
-      const previous = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
-      return () => {
-        document.body.style.overflow = previous;
-      };
-    },
-  );
-
+  const state = createModalState(props);
   return <SheetContext value={state}>{props.children}</SheetContext>;
 }
 
@@ -94,7 +63,8 @@ export function Trigger(props: TriggerProps) {
 
   const handleClick: MouseHandler<HTMLButtonElement> = (event) => {
     props.onClick?.(event);
-    if (!props.disabled) state.setOpen(true);
+    if (event.defaultPrevented || props.disabled || state.disabled()) return;
+    state.setOpen(true);
   };
 
   return (
@@ -164,36 +134,42 @@ export function Content(props: ContentProps) {
 
   return (
     <Show when={state.open()}>
-      <DialogPrimitive isOpen onChange={(next) => state.setOpen(next)}>
-        <Overlay dataSlot={props.overlayDataSlot} />
-        <DialogPanel
-          {...rest}
-          ref={props.ref}
-          data-slot={props.dataSlot ?? "sheet-content"}
-          data-side={side()}
-          class={cn(
-            "bg-popover text-popover-foreground fixed z-50 flex flex-col gap-4 bg-clip-padding text-sm shadow-lg transition duration-200 ease-in-out animate-in fade-in-0",
-            SIDE_CLASSES,
-            props.class,
-          )}
+      <Portal>
+        <DialogPrimitive
+          isOpen
+          disabled={state.disabled()}
+          onChange={(next) => state.setOpen(next)}
         >
-          {props.handle && side() === "bottom" ? (
-            <div class="bg-muted mx-auto mt-4 h-1.5 w-[100px] shrink-0 rounded-full" />
-          ) : null}
-          {props.children}
-          {props.showCloseButton === false ? null : (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              class="absolute top-4 right-4"
-              onClick={() => state.close()}
-            >
-              <IconX />
-              <span class="sr-only">Close</span>
-            </Button>
-          )}
-        </DialogPanel>
-      </DialogPrimitive>
+          <Overlay dataSlot={props.overlayDataSlot} />
+          <DialogPanel
+            {...rest}
+            ref={props.ref}
+            data-slot={props.dataSlot ?? "sheet-content"}
+            data-side={side()}
+            class={cn(
+              "bg-popover text-popover-foreground fixed z-50 flex flex-col gap-4 bg-clip-padding text-sm shadow-lg transition duration-200 ease-in-out animate-in fade-in-0",
+              SIDE_CLASSES,
+              props.class,
+            )}
+          >
+            {props.handle && side() === "bottom" ? (
+              <div class="bg-muted mx-auto mt-4 h-1.5 w-[100px] shrink-0 rounded-full" />
+            ) : null}
+            {props.children}
+            {props.showCloseButton === false ? null : (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                class="absolute top-4 right-4"
+                onClick={() => state.close()}
+              >
+                <IconX />
+                <span class="sr-only">Close</span>
+              </Button>
+            )}
+          </DialogPanel>
+        </DialogPrimitive>
+      </Portal>
     </Show>
   );
 }
@@ -228,13 +204,17 @@ export function Footer(props: FooterProps) {
   );
 }
 
-export type TitleProps = ComponentProps<"h2"> & { dataSlot?: string };
+export type TitleProps = Omit<ComponentProps<"h2">, "ref"> & {
+  ref?: ElementRef<HTMLHeadingElement>;
+  dataSlot?: string;
+};
 
 export function Title(props: TitleProps) {
   const rest = omit(props, "class", "children", "ref", "dataSlot");
   return (
     <DialogTitle
       {...rest}
+      ref={props.ref}
       data-slot={props.dataSlot ?? "sheet-title"}
       class={cn("text-foreground font-medium", props.class)}
     >
@@ -243,13 +223,17 @@ export function Title(props: TitleProps) {
   );
 }
 
-export type DescriptionProps = ComponentProps<"p"> & { dataSlot?: string };
+export type DescriptionProps = Omit<ComponentProps<"p">, "ref"> & {
+  ref?: ElementRef<HTMLParagraphElement>;
+  dataSlot?: string;
+};
 
 export function Description(props: DescriptionProps) {
   const rest = omit(props, "class", "children", "ref", "dataSlot");
   return (
     <DialogDescription
       {...rest}
+      ref={props.ref}
       data-slot={props.dataSlot ?? "sheet-description"}
       class={cn("text-muted-foreground text-sm", props.class)}
     >
@@ -270,6 +254,7 @@ export function Close(props: CloseProps) {
 
   const handleClick: MouseHandler<HTMLButtonElement> = (event) => {
     props.onClick?.(event);
+    if (event.defaultPrevented) return;
     state.close();
   };
 

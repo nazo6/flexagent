@@ -18,6 +18,7 @@ import IconPlay from "~icons/lucide/play";
 import IconPlus from "~icons/lucide/plus";
 import IconSkull from "~icons/lucide/skull";
 import IconTrash2 from "~icons/lucide/trash-2";
+import { errorMessage } from "#lib/api/error-messages.ts";
 
 export interface SessionActionsMenuProps {
   session: SessionSummary;
@@ -62,7 +63,7 @@ export default function SessionActionsMenu(props: SessionActionsMenuProps) {
       toast.success(m.session_renamed());
       setRenameOpen(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       setRenaming(false);
     }
@@ -78,7 +79,7 @@ export default function SessionActionsMenu(props: SessionActionsMenuProps) {
       await sync.archiveSession(props.session.session_id, !wasArchived);
       toast.success(wasArchived ? m.session_unarchived() : m.session_archived());
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -94,7 +95,7 @@ export default function SessionActionsMenu(props: SessionActionsMenuProps) {
       setConfirmOpen(false);
       props.onDeleted?.();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       setBusy(false);
     }

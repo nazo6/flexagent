@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, createSignal } from "solid-js";
+import { Show, createMemo, createSignal, onSettled } from "solid-js";
 import type { FileDiff } from "#lib/generated/bindings.ts";
 import { m } from "#lib/paraglide/messages.js";
 import MonacoDiff from "./MonacoDiff.tsx";
@@ -14,15 +14,12 @@ export default function DiffViewer(props: DiffViewerProps) {
     typeof window === "undefined" ? 0 : window.innerWidth,
   );
 
-  createEffect(
-    () => typeof window !== "undefined",
-    (enabled) => {
-      if (!enabled) return;
-      const update = () => setViewportWidth(window.innerWidth);
-      window.addEventListener("resize", update);
-      return () => window.removeEventListener("resize", update);
-    },
-  );
+  onSettled(() => {
+    if (typeof window === "undefined") return;
+    const update = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  });
 
   const canUseMonaco = createMemo(() => {
     const file = props.file;

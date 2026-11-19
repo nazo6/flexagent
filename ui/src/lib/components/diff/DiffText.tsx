@@ -28,9 +28,11 @@ export default function DiffText(props: DiffTextProps) {
         "bg-muted/30 overflow-auto rounded-md border p-2 font-mono text-[13px] leading-relaxed",
         props.class ?? "",
       )}
-      style={`max-height:${maxHeight()}`}
+      style={{ "max-height": maxHeight() }}
     >
-      <For each={lines()}>{(line) => <span class={lineClass(line)}>{`${line}\n`}</span>}</For>
+      <For each={lines()} keyed={false}>
+        {(line) => <span class={lineClass(line())}>{`${line()}\n`}</span>}
+      </For>
     </pre>
   );
 }

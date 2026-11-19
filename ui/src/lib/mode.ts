@@ -1,4 +1,11 @@
-import { createEffect, createRoot, createSignal, onCleanup, type Accessor } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createRoot,
+  createSignal,
+  onCleanup,
+  type Accessor,
+} from "solid-js";
 
 /**
  * Light / dark / system mode.
@@ -26,7 +33,10 @@ function readStoredMode(): Mode {
 
 function createModeStore() {
   const [userPrefersMode, setUserPrefersMode] = createSignal<Mode>(readStoredMode());
-  const query = typeof window === "undefined" ? null : window.matchMedia(DARK_QUERY);
+  const query =
+    typeof window === "undefined" || typeof window.matchMedia !== "function"
+      ? null
+      : window.matchMedia(DARK_QUERY);
   const [systemPrefersMode, setSystemPrefersMode] = createSignal<ResolvedMode>(
     query?.matches ? "dark" : "light",
   );
@@ -39,14 +49,25 @@ function createModeStore() {
     onCleanup(() => query.removeEventListener("change", onChange));
   }
 
-  const mode: Accessor<ResolvedMode> = () => {
+  /** Follow changes made in another tab (the same key, already used by mode-watcher). */
+  if (typeof window !== "undefined") {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== STORAGE_KEY) return;
+      setUserPrefersMode(readStoredMode());
+    };
+    window.addEventListener("storage", onStorage);
+    onCleanup(() => window.removeEventListener("storage", onStorage));
+  }
+
+  const mode: Accessor<ResolvedMode> = createMemo(() => {
     const preference = userPrefersMode();
     return preference === "system" ? systemPrefersMode() : preference;
-  };
+  });
 
   createEffect(
     () => mode(),
     (resolved) => {
+      if (typeof document === "undefined") return;
       document.documentElement.classList.toggle("dark", resolved === "dark");
       document.documentElement.style.colorScheme = resolved;
     },
@@ -70,7 +91,7 @@ function createModeStore() {
   };
 }
 
-/** Singleton; created at import time so the class is applied before first paint. */
+/** Singleton; the index.html inline script paints the class before this runs. */
 export const modeStore = createRoot(createModeStore);
 
 export const mode = modeStore.mode;

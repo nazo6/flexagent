@@ -28,7 +28,7 @@ export default function BrandIcon(props: { class?: string }) {
       />
       <g
         fill="none"
-        class="stroke-canvas dark:stroke-ink"
+        class="stroke-ink"
         stroke-width={BRAND_STROKE_WIDTH}
         stroke-linecap="round"
         stroke-linejoin="round"

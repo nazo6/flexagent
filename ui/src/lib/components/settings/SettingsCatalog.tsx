@@ -73,11 +73,12 @@ export default function SettingsCatalog(props: { section: Section; nodeId?: stri
   const [secrets, setSecrets] = createSignal<SecretSummary[]>([]);
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
-  /** Guard against overlapping loads (plain flag: a signal write is only
-   * visible after the flush, and the retry below runs in the same microtask). */
-  let inFlight = false;
+  /** Latest load; a section/target/role switch invalidates older responses. */
+  let generation = 0;
   /** Target whose snapshot / form is currently loaded (null = none). */
   const [loadedTarget, setLoadedTarget] = createSignal<string | null>(null);
+  /** Plain mirror of `loadedTarget`, readable from an effect apply. */
+  let loadedTargetValue: string | null = null;
 
   const [nodeForm, setNodeForm] = createStore<NodeForm>(emptyNodeForm());
   const [hubForm, setHubForm] = createStore<HubForm>({ vapid_subject: "", revision: 0 });
@@ -93,60 +94,65 @@ export default function SettingsCatalog(props: { section: Section; nodeId?: stri
   createEffect(
     // Track only the keys; `load` itself must not become an effect dependency
     // (otherwise setting `loading` would retrigger it).
-    () => `${props.section}:${targetNode()}:${sync.connection.role}`,
-    () => {
-      void load();
+    () => ({
+      section: props.section,
+      node: targetNode(),
+      hub: isHub(),
+    }),
+    (target) => {
+      void load(target.section, target.node, target.hub);
+      return () => {
+        generation += 1;
+      };
     },
   );
 
-  async function load(): Promise<void> {
-    if (inFlight) return;
-    inFlight = true;
-    // Capture the target: it can change while the requests are in flight.
-    const node = targetNode();
-    if (loadedTarget() !== node) {
+  async function load(section = props.section, node = targetNode(), hub = isHub()): Promise<void> {
+    const current = ++generation;
+    if (loadedTargetValue !== node) {
       // Never keep the previous node's snapshot / form around: a failed load
       // must not let Save or Delete act on the new node with stale values.
       setNodeSnapshot(null);
       setHubSnapshot(null);
       setSecrets([]);
       setLoadedTarget(null);
+      loadedTargetValue = null;
     }
     setLoading(true);
     setError(null);
     try {
-      if (props.section === "bootstrap" || props.section === "machine") {
+      if (section === "bootstrap" || section === "machine") {
         const snapshot = node !== "" ? await sync.connection.client.nodeSettings(node) : null;
-        if (targetNode() !== node) return;
+        if (current !== generation) return;
         setNodeSnapshot(snapshot);
         syncNodeForm(snapshot);
       }
-      if (props.section === "bootstrap" || props.section === "machine" || props.section === "hub") {
-        if (isHub()) {
+      if (section === "bootstrap" || section === "machine" || section === "hub") {
+        if (hub) {
           const snapshot = await sync.connection.client.hubSettings();
-          if (targetNode() !== node) return;
+          if (current !== generation) return;
           setHubSnapshot(snapshot);
           syncHubForm(snapshot);
         }
       }
-      if (props.section === "machine") {
+      if (section === "machine") {
         const response =
           node !== "" ? await sync.connection.client.nodeSecrets(node) : { secrets: [] };
-        if (targetNode() !== node) return;
+        if (current !== generation) return;
         setSecrets(response.secrets);
-      } else if (props.section === "hub" && isHub()) {
+      } else if (section === "hub" && hub) {
         const response = await sync.connection.client.hubSecrets();
-        if (targetNode() !== node) return;
+        if (current !== generation) return;
         setSecrets(response.secrets);
       }
+      if (current !== generation) return;
+      loadedTargetValue = node;
       setLoadedTarget(node);
     } catch (cause) {
+      if (current !== generation) return;
       setError(errorMessage(cause));
     } finally {
-      inFlight = false;
-      setLoading(false);
-      // The target changed while loading; retry now that the guard is released.
-      if (targetNode() !== node) void load();
+      if (current === generation) setLoading(false);
     }
   }
 

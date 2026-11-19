@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["typescript", "unicorn", "oxc"],
+  "plugins": ["typescript", "unicorn", "oxc", "vitest"],
   "categories": {
     "correctness": "error",
     "suspicious": "warn"
@@ -9,5 +9,5 @@
     "no-empty": ["error", { "allowEmptyCatch": false }],
     "unicorn/consistent-function-scoping": "off"
   },
-  "ignorePatterns": ["src/lib/generated/**", "src/lib/paraglide/**", "dist/**", "node_modules/**"]
+  "ignorePatterns": ["src/lib/generated/**", "src/lib/paraglide/**", "build/**", "node_modules/**"]
 }

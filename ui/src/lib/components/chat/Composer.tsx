@@ -118,16 +118,22 @@ export default function Composer(props: ComposerProps) {
   async function toggleAutoApprove(): Promise<void> {
     const next = autoApprove() ? "ask" : "auto_allow_all";
     setOptimisticPolicy({ base: policy(), value: next === "auto_allow_all" });
-    const result = await sync.controlSession(props.sessionId, {
-      action: "set_permission_policy",
-      policy: next,
-    });
-    if (!result.success) {
+    try {
+      const result = await sync.controlSession(props.sessionId, {
+        action: "set_permission_policy",
+        policy: next,
+      });
+      if (!result.success) {
+        setOptimisticPolicy(null);
+        if (result.error) problems.reportInfo("permission policy", result.error);
+        return;
+      }
+      toast.info(autoApprove() ? m.chat_auto_approve_enabled() : m.chat_auto_approve_disabled());
+    } catch (error) {
+      // Never leave the optimistic toggle showing a policy the server rejected.
       setOptimisticPolicy(null);
-      if (result.error) problems.reportInfo("permission policy", result.error);
-      return;
+      problems.report("permission policy", error);
     }
-    toast.info(autoApprove() ? m.chat_auto_approve_enabled() : m.chat_auto_approve_disabled());
   }
 
   const isRunning = () =>
@@ -445,16 +451,16 @@ export default function Composer(props: ComposerProps) {
               />
             </Show>
 
-            <For each={configOptions()}>
+            <For each={configOptions()} keyed={(option) => option.key}>
               {(option) => (
                 <ConfigOptionPicker
-                  option={option}
+                  option={option()}
                   class="shrink-0"
                   favoriteScope={props.agentId ?? ""}
                   onchange={(value) =>
                     void runControl({
                       action: "set_config",
-                      key: option.key,
+                      key: option().key,
                       value,
                     })
                   }

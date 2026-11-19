@@ -4,6 +4,7 @@ import type { ConnectionRole, SystemInfoResponse } from "#lib/generated/bindings
 import { m } from "#lib/paraglide/messages.js";
 import { ReactiveCell } from "#lib/stores/reactive.ts";
 import { randomUuid } from "#lib/uuid.ts";
+import { errorMessage } from "#lib/api/error-messages.ts";
 
 /** A switchable connection target (per origin). */
 export interface ConnectionTarget {
@@ -166,6 +167,7 @@ export class ConnectionStore {
       this.tokenRequired = false;
       this.error = null;
     } catch (err) {
+      this.role = null;
       this.systemInfo = null;
       this.authenticated = false;
       if (err instanceof ApiError && err.isUnauthorized) {
@@ -173,7 +175,7 @@ export class ConnectionStore {
         this.error = null;
       } else {
         this.tokenRequired = false;
-        this.error = err instanceof Error ? err.message : String(err);
+        this.error = errorMessage(err);
       }
     } finally {
       this.ready = true;

@@ -1,5 +1,5 @@
 import type { JSX } from "@solidjs/web";
-import { createEffect, Show } from "solid-js";
+import { children, createEffect, Show } from "solid-js";
 import * as Popover from "#lib/components/ui/popover/index.ts";
 import { cn } from "#lib/utils.ts";
 import IconChevronDown from "~icons/lucide/chevron-down";
@@ -18,7 +18,7 @@ export interface PickerPillProps {
   contentClass?: string;
   open?: boolean;
   /** Called whenever the popover opens or closes. */
-  onopenchange?: (open: boolean) => void;
+  onOpenChange?: (open: boolean) => void;
   children?: JSX.Element;
 }
 
@@ -29,6 +29,9 @@ type Edge = "first" | "last";
 /** Pill-shaped trigger plus popover used by the composer selectors. */
 export default function PickerPill(props: PickerPillProps) {
   const value = () => props.value ?? "";
+  // Resolve the optional icon slot once: a JSX-valued prop builds a new tree on
+  // every read.
+  const icon = children(() => props.icon);
   let panel: HTMLElement | undefined;
   let pendingEdge: Edge | null = null;
 
@@ -68,7 +71,7 @@ export default function PickerPill(props: PickerPillProps) {
     event.stopPropagation();
     if (!props.open) {
       pendingEdge = event.key === "ArrowDown" ? "first" : "last";
-      props.onopenchange?.(true);
+      props.onOpenChange?.(true);
       return;
     }
     focusEdge(event.key === "ArrowDown" ? "first" : "last");
@@ -105,7 +108,7 @@ export default function PickerPill(props: PickerPillProps) {
   );
 
   return (
-    <Popover.Root open={props.open} onOpenChange={(next) => props.onopenchange?.(next)}>
+    <Popover.Root open={props.open} onOpenChange={(next) => props.onOpenChange?.(next)}>
       <Popover.Trigger
         disabled={props.disabled ?? false}
         aria-haspopup="listbox"
@@ -117,7 +120,7 @@ export default function PickerPill(props: PickerPillProps) {
         title={value() === "" ? props.label : `${props.label}: ${value()}`}
         aria-label={value() === "" ? props.label : `${props.label}: ${value()}`}
       >
-        {props.icon}
+        {icon()}
         <Show
           when={value() !== ""}
           fallback={<span class="text-muted-foreground truncate">{props.label}</span>}

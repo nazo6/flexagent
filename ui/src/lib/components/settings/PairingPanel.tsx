@@ -29,9 +29,6 @@ export default function PairingPanel(props: { nodeId?: string }) {
   );
 
   const [snapshot, setSnapshot] = createSignal<NodeSettingsSnapshot | null>(null);
-  /** Guard against overlapping loads (signal writes are only visible after
-   * the flush, and the retry below runs in the same microtask). */
-  let inFlight = false;
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   /** Target whose snapshot is currently loaded (null = none). */
@@ -50,6 +47,10 @@ export default function PairingPanel(props: { nodeId?: string }) {
       pairing()?.hub_url !== hubUrl().trim(),
   );
 
+  let generation = 0;
+  /** Plain mirror of `loadedTarget`, readable from an effect apply. */
+  let loadedTargetValue: string | null = null;
+
   createEffect(
     () => targetNode(),
     (node) => {
@@ -58,36 +59,37 @@ export default function PairingPanel(props: { nodeId?: string }) {
       // form while the user types. Save/clear already refresh the snapshot
       // from the response.
       if (node === "") return;
-      void load();
+      if (loadedTargetValue !== node) {
+        setSnapshot(null);
+        setLoadedTarget(null);
+        loadedTargetValue = null;
+        setHubUrl("");
+        setToken("");
+        setTested(null);
+      }
+      void load(node);
+      return () => {
+        // A response that lands after a node switch / unmount is discarded.
+        generation += 1;
+      };
     },
   );
 
-  async function load(): Promise<void> {
-    const node = targetNode();
-    if (node === "" || inFlight) return;
-    inFlight = true;
-    // Capture the target: it can change while the request is in flight.
-    if (loadedTarget() !== node) {
-      setSnapshot(null);
-      setLoadedTarget(null);
-      setHubUrl("");
-      setToken("");
-      setTested(null);
-    }
+  async function load(node = targetNode()): Promise<void> {
+    if (node === "") return;
+    const current = ++generation;
     setError(null);
     try {
       const next = await sync.connection.client.nodeSettings(node);
-      // Do not overwrite what the user is typing if the target moved on.
-      if (targetNode() !== node) return;
+      if (current !== generation) return;
       setSnapshot(next);
+      loadedTargetValue = node;
       setLoadedTarget(node);
       setHubUrl(next.pairing.hub_url ?? "");
       setToken("");
     } catch (cause) {
+      if (current !== generation) return;
       setError(errorMessage(cause));
-    } finally {
-      inFlight = false;
-      if (targetNode() !== node) void load();
     }
   }
 

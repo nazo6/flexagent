@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createMemo, createSignal, For, Show, type Accessor } from "solid-js";
 import PickerItem from "./PickerItem.tsx";
 import PickerPill from "./PickerPill.tsx";
 import {
@@ -107,30 +107,30 @@ export default function ConfigOptionPicker(props: ConfigOptionPickerProps) {
     setQuery("");
   }
 
-  const choiceRow = (choice: ConfigOptionChoice) => {
-    const favorited = isFavoriteChoice(choice);
+  const choiceRow = (choice: Accessor<ConfigOptionChoice>) => {
     return (
       <PickerItem
-        selected={choice.value === current()}
+        selected={choice().value === current()}
         favorite={
           showStar()
             ? {
-                active: favorited,
-                label: favorited
+                active: isFavoriteChoice(choice()),
+                label: isFavoriteChoice(choice())
                   ? m.composer_model_favorite_remove()
                   : m.composer_model_favorite_add(),
-                onToggle: () => toggleFavorite(choice),
+                onToggle: () => toggleFavorite(choice()),
               }
             : null
         }
         onselect={() => {
-          setOptimistic({ base: base(), value: choice.raw });
-          props.onchange(resolveConfigChoice(choices(), choice.value));
+          const picked = choice();
+          setOptimistic({ base: base(), value: picked.raw });
+          props.onchange(resolveConfigChoice(choices(), picked.value));
           closePicker();
         }}
       >
-        <span class="block truncate">{choice.label}</span>
-        <Show when={configChoiceDescription(choice.raw)}>
+        <span class="block truncate">{choice().label}</span>
+        <Show when={configChoiceDescription(choice().raw)}>
           {(description) => (
             <span class="text-muted-foreground block truncate text-[11px]">{description()}</span>
           )}
@@ -153,7 +153,7 @@ export default function ConfigOptionPicker(props: ConfigOptionPickerProps) {
       }
       disabled={props.disabled ?? false}
       open={open()}
-      onopenchange={(next) => {
+      onOpenChange={(next) => {
         setOpen(next);
         if (!next) setQuery("");
       }}
@@ -186,7 +186,9 @@ export default function ConfigOptionPicker(props: ConfigOptionPickerProps) {
             <p class="text-muted-foreground px-2 py-1 text-[11px] font-medium">
               {m.composer_model_favorites()}
             </p>
-            <For each={favoriteChoices()}>{(choice) => choiceRow(choice)}</For>
+            <For each={favoriteChoices()} keyed={(choice) => choice.value}>
+              {(choice) => choiceRow(choice)}
+            </For>
           </Show>
           <Show when={otherChoices().length > 0}>
             <Show when={favoriteChoices().length > 0}>
@@ -194,7 +196,9 @@ export default function ConfigOptionPicker(props: ConfigOptionPickerProps) {
                 {m.composer_models_other()}
               </p>
             </Show>
-            <For each={otherChoices()}>{(choice) => choiceRow(choice)}</For>
+            <For each={otherChoices()} keyed={(choice) => choice.value}>
+              {(choice) => choiceRow(choice)}
+            </For>
           </Show>
           <Show when={filteredChoices().length === 0}>
             <p class="text-muted-foreground px-2 py-3 text-center text-[13px]">

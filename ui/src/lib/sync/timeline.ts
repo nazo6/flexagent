@@ -4,6 +4,7 @@ import {
   applyStreamDelta,
   clearStreamBuffers,
   insertEventSorted,
+  type MutableStreamBuffers,
   type ThoughtTiming,
   type ToolProgress,
 } from "./reducer";
@@ -129,19 +130,40 @@ export class SessionTimeline {
 
   /** Apply a persisted event to the rendered conversation window (`false` when it is a duplicate). */
   applyEvent(event: SessionEventEnvelope): boolean {
-    if (!insertEventSorted(this.events, event)) return false;
-    // `insertEventSorted` splices the held array in place, so readers are
-    // notified explicitly (the cell cannot observe an in-place mutation).
-    this.#events.touch();
-    clearStreamBuffers(event, this);
-    this.#streamKeys.touch();
+    // Work on a copy: `createMemo` readers compare by reference, so an in-place
+    // splice would keep the same array identity and hide the change.
+    const events = [...this.events];
+    if (!insertEventSorted(events, event)) return false;
+    this.#events.set(events);
+    this.#withStreamKeys((sources) => clearStreamBuffers(event, sources));
     return true;
   }
 
   /** Apply an event of the oldest page kept aside for session metadata. */
   applyHeadEvent(event: SessionEventEnvelope): void {
-    if (!insertEventSorted(this.headEvents, event)) return;
-    this.#headEvents.touch();
+    const events = [...this.headEvents];
+    if (!insertEventSorted(events, event)) return;
+    this.#headEvents.set(events);
+  }
+
+  /** Runs a stream-buffer mutation with a copied key list and notifies on change. */
+  #withStreamKeys(change: (sources: MutableStreamBuffers) => void): void {
+    const previous = this.streamKeys;
+    const streamKeys = [...previous];
+    change({
+      messageDeltas: this.messageDeltas,
+      thoughtDeltas: this.thoughtDeltas,
+      subagentByMessage: this.subagentByMessage,
+      subagentByThought: this.subagentByThought,
+      toolProgress: this.toolProgress,
+      terminalDeltas: this.terminalDeltas,
+      thoughtTimes: this.thoughtTimes,
+      streamKeys,
+    });
+    const changed =
+      streamKeys.length !== previous.length ||
+      streamKeys.some((key, index) => key !== previous[index]);
+    if (changed) this.#streamKeys.set(streamKeys);
   }
 
   /**
@@ -174,10 +196,9 @@ export class SessionTimeline {
 
   /** Merge a `LiveStreamDelta`. */
   applyDelta(delta: StreamDeltaPayload): void {
-    applyStreamDelta(this, delta);
-    // `applyStreamDelta` rewrites the buffers in place and pushes to
-    // `streamKeys`; the maps notify themselves, the array needs a nudge.
-    this.#streamKeys.touch();
+    // The maps notify themselves; the key array only notifies when the set of
+    // streaming buffers actually changes.
+    this.#withStreamKeys((sources) => applyStreamDelta(sources, delta));
   }
 
   /** Discard all streaming buffers (for example on disconnect). */

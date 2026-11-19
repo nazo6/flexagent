@@ -1,6 +1,6 @@
 import type { ComponentProps, JSX } from "@solidjs/web";
 import { Portal } from "@solidjs/web";
-import { createEffect, omit, Show } from "solid-js";
+import { omit, Show } from "solid-js";
 import {
   Dialog as DialogPrimitive,
   DialogDescription,
@@ -10,7 +10,8 @@ import {
 } from "terracotta/dialog";
 import { cn } from "#lib/utils.ts";
 import IconX from "~icons/lucide/x";
-import { createControllable, type MouseHandler } from "../controllable.ts";
+import { type MouseHandler } from "../controllable.ts";
+import { createModalState } from "../modal.ts";
 import type { ElementRef } from "../position.ts";
 import { Button } from "../button/index.ts";
 import { makeDialogContext, useDialogState } from "./dialog-context.ts";
@@ -45,41 +46,7 @@ export interface RootProps {
 }
 
 export function Root(props: RootProps) {
-  const [open, setOpen] = createControllable(
-    () => props.open,
-    props.onOpenChange,
-    props.defaultOpen ?? false,
-  );
-
-  let restoreFocus: HTMLElement | null = null;
-
-  const change = (next: boolean) => {
-    if (next === open()) return;
-    if (next) {
-      restoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    }
-    const target = next ? null : restoreFocus;
-    if (!next) restoreFocus = null;
-    setOpen(next);
-    // After the flush: the closed dialog has released `inert` by then.
-    if (target) queueMicrotask(() => target.focus());
-  };
-
-  const state = { open, setOpen: change, close: () => change(false) };
-
-  // bits-ui locked the page for us; Terracotta leaves it to the app.
-  createEffect(
-    () => open(),
-    (isOpen) => {
-      if (!isOpen) return;
-      const previous = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
-      return () => {
-        document.body.style.overflow = previous;
-      };
-    },
-  );
-
+  const state = createModalState(props);
   return <DialogContext value={state}>{props.children}</DialogContext>;
 }
 
@@ -105,7 +72,8 @@ export function Trigger(props: TriggerProps) {
 
   const handleClick: MouseHandler<HTMLButtonElement> = (event) => {
     props.onClick?.(event);
-    if (!props.disabled) state.setOpen(true);
+    if (event.defaultPrevented || props.disabled || state.disabled()) return;
+    state.setOpen(true);
   };
 
   return (
@@ -154,7 +122,11 @@ export function Content(props: ContentProps) {
   return (
     <Show when={state.open()}>
       <Portal>
-        <DialogPrimitive isOpen onChange={(next) => state.setOpen(next)}>
+        <DialogPrimitive
+          isOpen
+          disabled={state.disabled()}
+          onChange={(next) => state.setOpen(next)}
+        >
           <Overlay />
           <DialogPanel
             {...rest}
@@ -216,13 +188,16 @@ export function Footer(props: FooterProps) {
   );
 }
 
-export type TitleProps = ComponentProps<"h2">;
+export type TitleProps = Omit<ComponentProps<"h2">, "ref"> & {
+  ref?: ElementRef<HTMLHeadingElement>;
+};
 
 export function Title(props: TitleProps) {
   const rest = omit(props, "class", "children", "ref");
   return (
     <DialogTitle
       {...rest}
+      ref={props.ref}
       data-slot="dialog-title"
       class={cn("leading-none font-medium", props.class)}
     >
@@ -231,13 +206,16 @@ export function Title(props: TitleProps) {
   );
 }
 
-export type DescriptionProps = ComponentProps<"p">;
+export type DescriptionProps = Omit<ComponentProps<"p">, "ref"> & {
+  ref?: ElementRef<HTMLParagraphElement>;
+};
 
 export function Description(props: DescriptionProps) {
   const rest = omit(props, "class", "children", "ref");
   return (
     <DialogDescription
       {...rest}
+      ref={props.ref}
       data-slot="dialog-description"
       class={cn(
         "text-muted-foreground *:[a]:hover:text-foreground text-sm *:[a]:underline *:[a]:underline-offset-3",
@@ -260,6 +238,7 @@ export function Close(props: CloseProps) {
 
   const handleClick: MouseHandler<HTMLButtonElement> = (event) => {
     props.onClick?.(event);
+    if (event.defaultPrevented) return;
     state.close();
   };
 

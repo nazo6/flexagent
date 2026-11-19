@@ -125,7 +125,7 @@ function ProblemCard(props: ProblemCardProps) {
         </Show>
         <div class="min-w-0 flex-1">
           <p class="min-w-0 break-words">
-            <span class="text-muted-foreground">{props.problem.context}:</span>
+            <span class="text-muted-foreground">{props.problem.context}:</span>{" "}
             {props.problem.message}
           </p>
           <Show when={safety() !== null}>

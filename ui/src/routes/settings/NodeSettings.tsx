@@ -37,10 +37,10 @@ export default function NodeSettings() {
 
   // A tab-less node URL is an entry point: canonicalize it to `general`.
   createEffect(
-    () => params.tab ?? null,
-    (raw) => {
-      if (raw === null && nodeId() !== "") {
-        navigate(nodeSettingsPath("general", nodeId()), { replace: true });
+    () => ({ node: nodeId(), tab: params.tab ?? null }),
+    (target) => {
+      if (target.tab === null && target.node !== "") {
+        navigate(nodeSettingsPath("general", target.node), { replace: true });
       }
     },
   );
@@ -57,7 +57,7 @@ export default function NodeSettings() {
   );
 
   return (
-    <Show when={nodeId() !== ""}>
+    <Show when={nodeId() !== "" && params.tab !== undefined}>
       <Switch>
         <Match when={!tabAvailable()}>
           <Card class="gap-3 p-5">

@@ -1,6 +1,6 @@
 import type { JSX } from "@solidjs/web";
 import { useLocation, useNavigate, useParams } from "@solidjs/router";
-import { createEffect, createMemo, createSignal, For, Match, Show, Switch } from "solid-js";
+import { createMemo, createSignal, For, Match, Show, Switch } from "solid-js";
 import IconCpu from "~icons/lucide/cpu";
 import IconPalette from "~icons/lucide/palette";
 import IconSearch from "~icons/lucide/search";
@@ -40,6 +40,7 @@ import {
 } from "#lib/settings-search.ts";
 import { sync } from "#lib/stores/app.ts";
 import { cn } from "#lib/utils.ts";
+import { useDocumentTitle } from "#lib/document-title.ts";
 
 /**
  * Tab triggers are rendered as links (so they navigate like the URL does)
@@ -224,16 +225,7 @@ export default function SettingsShell(props: { children?: JSX.Element }) {
 
   const isIndexRedirectRoute = createMemo(() => isSettingsIndexPath(location.pathname ?? ""));
 
-  createEffect(
-    () => m.settings_page_title(),
-    (title) => {
-      const previous = document.title;
-      document.title = title;
-      return () => {
-        document.title = previous;
-      };
-    },
-  );
+  useDocumentTitle(() => m.settings_page_title(), { restore: true });
 
   return (
     <Show when={!isIndexRedirectRoute()} fallback={<>{props.children}</>}>

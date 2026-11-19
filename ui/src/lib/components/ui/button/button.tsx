@@ -1,4 +1,5 @@
 import type { ComponentProps, JSX } from "@solidjs/web";
+import type { ClassValue } from "cn";
 import { omit, Show } from "solid-js";
 import { cn } from "#lib/utils.ts";
 import type { ElementRef } from "../position.ts";
@@ -12,7 +13,7 @@ import type { ElementRef } from "../position.ts";
  */
 
 const base =
-  "focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:aria-invalid:border-destructive/50 rounded-md border border-transparent bg-clip-padding text-sm font-medium focus-visible:ring-3 aria-invalid:ring-3 active:not-aria-[haspopup]:translate-y-px [&_svg:not([class*='size-'])]:size-4 group/button inline-flex shrink-0 items-center justify-center whitespace-nowrap transition-all outline-none select-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0";
+  "focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:aria-invalid:border-destructive/50 rounded-md border border-transparent bg-clip-padding text-sm font-medium focus-visible:ring-3 aria-invalid:ring-3 active:not-aria-[haspopup]:translate-y-px aria-disabled:pointer-events-none aria-disabled:opacity-50 [&_svg:not([class*='size-'])]:size-4 group/button inline-flex shrink-0 items-center justify-center whitespace-nowrap transition-all outline-none select-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0";
 
 const variants = {
   default: "bg-primary text-primary-foreground hover:bg-primary/80",
@@ -56,8 +57,10 @@ export function buttonVariants(options: ButtonVariantsOptions = {}): string {
 interface ButtonCommon {
   variant?: ButtonVariant;
   size?: ButtonSize;
-  class?: string;
+  class?: ClassValue;
   ref?: ElementRef;
+  /** Disables the button, or removes the link and its tab stop for `<a>`. */
+  disabled?: boolean;
   children?: JSX.Element;
 }
 
@@ -74,38 +77,24 @@ export function Root(props: ButtonProps) {
   const className = () =>
     cn(buttonVariants({ variant: props.variant, size: props.size }), props.class);
 
-  const buttonRest = () =>
-    omit(
-      props as ButtonCommon & ComponentProps<"button">,
-      "variant",
-      "size",
-      "class",
-      "children",
-      "ref",
-      "type",
-    );
-
-  const anchorRest = () =>
-    omit(
-      props as ButtonCommon & ComponentProps<"a">,
-      "variant",
-      "size",
-      "class",
-      "children",
-      "ref",
-      "type",
-    );
-
   const setRef = (element: HTMLElement) => props.ref?.(element);
   const disabled = () => (props as Omit<ComponentProps<"button">, "class">).disabled;
   const type = () => (props as { type?: "button" | "submit" | "reset" }).type;
 
   return (
     <Show
-      when={props.href}
+      when={props.href !== undefined}
       fallback={
         <button
-          {...buttonRest()}
+          {...omit(
+            props as ButtonCommon & ComponentProps<"button">,
+            "variant",
+            "size",
+            "class",
+            "children",
+            "ref",
+            "type",
+          )}
           ref={setRef}
           data-slot="button"
           class={className()}
@@ -116,14 +105,22 @@ export function Root(props: ButtonProps) {
       }
     >
       <a
-        {...anchorRest()}
+        {...omit(
+          props as ButtonCommon & ComponentProps<"a"> & { disabled?: boolean },
+          "variant",
+          "size",
+          "class",
+          "children",
+          "ref",
+          "type",
+          "disabled",
+        )}
+        {...(disabled() ? { role: "link", tabindex: -1 } : {})}
         ref={setRef}
         data-slot="button"
         class={className()}
         href={disabled() ? undefined : props.href}
         aria-disabled={disabled() ? "true" : undefined}
-        role={disabled() ? "link" : undefined}
-        tabindex={disabled() ? -1 : undefined}
       >
         {props.children}
       </a>

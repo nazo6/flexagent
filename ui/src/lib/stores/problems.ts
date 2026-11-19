@@ -63,7 +63,7 @@ export class ProblemStore {
 
   /** Removes one problem by ID. */
   dismiss(id: string): void {
-    this.problems = this.problems.filter((problem) => problem.id !== id);
+    this.problems = this.#problems.peek().filter((problem) => problem.id !== id);
   }
 
   /** Removes every problem. */
@@ -83,7 +83,7 @@ export class ProblemStore {
 
   /** Replaces an identical problem (same key) or prepends a new one. */
   #upsert(problem: AppProblem): AppProblem {
-    const others = this.problems.filter((candidate) => candidate.key !== problem.key);
+    const others = this.#problems.peek().filter((candidate) => candidate.key !== problem.key);
     this.problems = [problem, ...others].slice(0, MAX_PROBLEMS);
     return problem;
   }

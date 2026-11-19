@@ -45,7 +45,7 @@ export default function DockRail(props: DockRailProps) {
         class="text-muted-foreground hover:bg-accent hover:text-foreground mt-auto flex size-8 items-center justify-center rounded-md transition-colors"
         title={m.session_tools_hide()}
         aria-label={m.session_tools_hide()}
-        onClick={props.oncollapse}
+        onClick={() => props.oncollapse()}
       >
         <IconPanelRightClose class="size-4" />
       </button>

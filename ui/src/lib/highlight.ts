@@ -7,6 +7,8 @@
  * text).
  */
 
+import { mode } from "#lib/mode.ts";
+
 type ShikiModule = typeof import("shiki");
 
 interface SharedHighlighter {
@@ -40,9 +42,12 @@ function focusLineTransformer(line: number): unknown {
 let shikiPromise: Promise<ShikiModule> | null = null;
 let highlighterPromise: Promise<SharedHighlighter> | null = null;
 
-/** Lazy-load the shiki module. */
+/** Lazy-load the shiki module (a failed import can be retried). */
 function getShiki(): Promise<ShikiModule> {
-  shikiPromise ??= import("shiki");
+  shikiPromise ??= import("shiki").catch((error: unknown) => {
+    shikiPromise = null;
+    throw error;
+  });
   return shikiPromise;
 }
 
@@ -54,13 +59,16 @@ export function getSharedHighlighter(): Promise<SharedHighlighter> {
       themes: [shiki.bundledThemes["github-light"], shiki.bundledThemes["github-dark"]],
       langs: [shiki.bundledLanguages["diff"]],
     }) as unknown as SharedHighlighter;
-  })();
+  })().catch((error: unknown) => {
+    highlighterPromise = null;
+    throw error;
+  });
   return highlighterPromise;
 }
 
-/** Whether the system color scheme is dark (shares the same check as the UI). */
-export function prefersDarkMode(): boolean {
-  return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
+/** Whether the app's current theme is dark (Browser Settings overrides system). */
+export function isDarkMode(): boolean {
+  return mode() === "dark";
 }
 
 /** Convert a Unified Diff into highlighted HTML. */
@@ -117,7 +125,7 @@ const codeHtmlCache = new Map<string, string>();
  * identical content are reused from the cache.
  */
 export async function enhanceCodeBlocks(root: ParentNode): Promise<void> {
-  const dark = prefersDarkMode();
+  const dark = isDarkMode();
   const blocks = Array.from(root.querySelectorAll<HTMLElement>("pre > code[class*='language-']"));
   for (const code of blocks) {
     const pre = code.parentElement;

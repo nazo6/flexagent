@@ -1,13 +1,15 @@
-import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
+import { For, Show, createMemo, createSignal } from "solid-js";
 import { Button } from "#lib/components/ui/button/index.ts";
 import { Input } from "#lib/components/ui/input/index.ts";
 import { toast } from "#lib/components/ui/sonner/index.ts";
+import { useDocumentTitle } from "#lib/document-title.ts";
 import { formatRelativeTime } from "#lib/format.ts";
 import type { SearchHit } from "#lib/generated/bindings.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { shortId } from "#lib/session-status.ts";
 import { connection, sync } from "#lib/stores/app.ts";
 import IconSearch from "~icons/lucide/search";
+import { errorMessage } from "#lib/api/error-messages.ts";
 
 /** A piece of an FTS5 snippet, marked when it is the match. */
 interface Segment {
@@ -25,12 +27,7 @@ export default function SearchPage() {
     connection.role === "hub" ? m.search_scope_hub() : m.search_scope_node(),
   );
 
-  createEffect(
-    () => m.search_page_title(),
-    (title) => {
-      document.title = title;
-    },
-  );
+  useDocumentTitle(() => m.search_page_title());
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
@@ -41,7 +38,7 @@ export default function SearchPage() {
       setHits(await connection.client.search(needle, 50));
       setSearched(true);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       setSearching(false);
     }

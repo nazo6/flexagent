@@ -11,13 +11,20 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <title>FlexAgent</title>
     <script>
-      // Apply the stored palette before first paint to avoid a colour flash.
+      // Apply the stored palette and color mode before first paint to avoid a flash.
       (function () {
         try {
           var palette = localStorage.getItem("fxg:palette");
           if (palette === "bone" || palette === "graphite" || palette === "moss") {
             document.documentElement.dataset.palette = palette;
           }
+          var mode = localStorage.getItem("mode-watcher-mode");
+          var systemDark =
+            typeof window.matchMedia === "function" &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var dark = mode === "dark" || (mode !== "light" && systemDark);
+          document.documentElement.classList.toggle("dark", dark);
+          document.documentElement.style.colorScheme = dark ? "dark" : "light";
         } catch (error) {
           /* localStorage can be unavailable; the default palette is fine. */
         }

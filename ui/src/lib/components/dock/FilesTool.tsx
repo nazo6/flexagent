@@ -128,27 +128,32 @@ export default function FilesTool(props: FilesToolProps) {
     return result;
   });
 
-  createEffect(
-    () => ({ key: `${props.ctx.nodeId}\u0000${props.ctx.localPath}`, token: refreshToken() }),
-    () => {
-      void reload();
-    },
+  const reloadKey = createMemo(
+    () => `${props.ctx.nodeId}\u0000${props.ctx.localPath}\u0000${refreshToken()}`,
   );
+  createEffect(reloadKey, () => {
+    // The key memo has already tracked the workspace identity; the load itself
+    // reads the same props untracked so the effect does not depend on them twice.
+    void untrack(() => reload());
+  });
 
   // On mobile the tree and the preview share one pane. Every openFile request
   // reveals the preview; the back button brings the tree back. Tracking the
   // request counter (not only the path) also covers reopening the same file,
   // while the initial run preserves the persisted tree/preview choice.
-  let lastOpenVersion = dock.fileOpenVersion;
+  let lastOpenVersion = untrack(() => dock.fileOpenVersion);
   createEffect(
-    () => dock.fileOpenVersion,
-    (version) => {
-      if (version === lastOpenVersion) return;
-      lastOpenVersion = version;
-      if (!isMobile() || dock.activeFile === null) return;
-      if (untrack(() => dock.treeVisible)) {
-        dock.setTreeVisible(false);
-      }
+    () => ({
+      version: dock.fileOpenVersion,
+      mobile: isMobile(),
+      activeFile: dock.activeFile,
+      treeVisible: dock.treeVisible,
+    }),
+    (current) => {
+      if (current.version === lastOpenVersion) return;
+      lastOpenVersion = current.version;
+      if (!current.mobile || current.activeFile === null) return;
+      if (current.treeVisible) dock.setTreeVisible(false);
     },
   );
 
@@ -210,39 +215,41 @@ export default function FilesTool(props: FilesToolProps) {
   }
 
   async function loadDir(path: string, token: number): Promise<void> {
-    const previous = dirs()[path];
-    setDirs({
-      ...dirs(),
-      [path]: {
-        entries: previous?.entries ?? [],
-        loading: true,
-        error: null,
-        truncated: previous?.truncated ?? false,
-      },
+    setDirs((previous) => {
+      const current = previous[path];
+      return {
+        ...previous,
+        [path]: {
+          entries: current?.entries ?? [],
+          loading: true,
+          error: null,
+          truncated: current?.truncated ?? false,
+        },
+      };
     });
     try {
       const result = await sync.connection.client.workspaceFsList(props.ctx.nodeId, path);
       if (token !== generation) return;
-      setDirs({
-        ...dirs(),
+      setDirs((previous) => ({
+        ...previous,
         [path]: {
           entries: result.entries,
           loading: false,
           error: null,
           truncated: result.truncated,
         },
-      });
+      }));
     } catch (cause) {
       if (token !== generation) return;
-      setDirs({
-        ...dirs(),
+      setDirs((previous) => ({
+        ...previous,
         [path]: {
-          entries: previous?.entries ?? [],
+          entries: previous[path]?.entries ?? [],
           loading: false,
           error: errorMessage(cause),
           truncated: false,
         },
-      });
+      }));
     }
   }
 
@@ -406,7 +413,7 @@ export default function FilesTool(props: FilesToolProps) {
               "flex min-h-0 flex-col",
               isMobile() ? "w-full" : "min-w-[160px] max-w-[70%] shrink-0 border-r border-border",
             )}
-            style={isMobile() ? undefined : `width:${treeWidth()}%`}
+            style={isMobile() ? undefined : { width: `${treeWidth()}%` }}
           >
             <div class="app-scroll min-h-0 flex-1 overflow-y-auto p-1">
               <Show
@@ -445,7 +452,7 @@ export default function FilesTool(props: FilesToolProps) {
                                 <button
                                   type="button"
                                   class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm py-1 pr-1.5 text-left text-[12px]"
-                                  style={`padding-left: ${row().depth * 12 + 6}px`}
+                                  style={{ "padding-left": `${row().depth * 12 + 6}px` }}
                                   title={row().entry.path}
                                   onClick={() => openEntry(row().entry)}
                                   onDblClick={() => openEntryPinned(row().entry)}
@@ -502,7 +509,7 @@ export default function FilesTool(props: FilesToolProps) {
                                 <Show when={row().error !== null}>
                                   <p
                                     class="text-destructive pb-1 text-[11px]"
-                                    style={`padding-left: ${row().depth * 12 + 30}px`}
+                                    style={{ "padding-left": `${row().depth * 12 + 30}px` }}
                                   >
                                     {row().error}
                                   </p>

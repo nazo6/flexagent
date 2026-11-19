@@ -34,7 +34,7 @@ self.addEventListener("activate", (event) => {
       const keys = await caches.keys();
       // Keep the current cache and the previous one: an open tab may lazy-load
       // a chunk from the previous build after this worker activates.
-      const fxgKeys = keys.filter((key) => key.startsWith("fxg-")).sort();
+      const fxgKeys = keys.filter((key) => key.startsWith("fxg-")).toSorted();
       const keep = new Set([CACHE_NAME, ...fxgKeys.slice(-2)]);
       await Promise.all(keys.filter((key) => !keep.has(key)).map((key) => caches.delete(key)));
       await self.clients.claim();

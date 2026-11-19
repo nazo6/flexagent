@@ -1,5 +1,7 @@
-import { createEffect, Show } from "solid-js";
+import { Show } from "solid-js";
+import { errorMessage } from "#lib/api/error-messages.ts";
 import { Button } from "#lib/components/ui/button/index.ts";
+import { useDocumentTitle } from "#lib/document-title.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { cn } from "#lib/utils.ts";
 import IconTriangleAlert from "~icons/lucide/triangle-alert";
@@ -12,9 +14,9 @@ export interface ErrorPageProps {
   class?: string;
 }
 
-function errorMessage(error: unknown): string | null {
+function describeError(error: unknown): string | null {
   if (error === undefined || error === null) return null;
-  return error instanceof Error ? error.message : String(error);
+  return errorMessage(error);
 }
 
 /**
@@ -29,18 +31,9 @@ export default function ErrorPage(props: ErrorPageProps) {
     props.notFound === true ? m.error_page_not_found_title() : m.error_page_unexpected_title();
   const body = () =>
     props.notFound === true ? m.error_page_not_found_body() : m.error_page_unexpected_body();
-  const message = () => errorMessage(props.error);
+  const message = () => describeError(props.error);
 
-  createEffect(
-    () => title(),
-    (current) => {
-      const previous = document.title;
-      document.title = `${current} - FlexAgent`;
-      return () => {
-        document.title = previous;
-      };
-    },
-  );
+  useDocumentTitle(title, { suffix: " - FlexAgent", restore: true });
 
   return (
     <div

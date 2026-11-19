@@ -158,7 +158,7 @@ function GroupView(props: { group: TimelineGroup; ctx: TimelineContext }) {
 
 /** One conversation item (message, reasoning, approval, plan, notice, ...). */
 function SingleRow(props: { item: TimelineItem; ctx: TimelineContext }): JSX.Element {
-  const ctx = props.ctx;
+  const ctx = () => props.ctx;
   return (
     <Switch>
       <Match when={props.item.kind === "user" ? props.item : null}>
@@ -197,15 +197,15 @@ function SingleRow(props: { item: TimelineItem; ctx: TimelineContext }): JSX.Ele
             </div>
             <MessageActions
               text={item().text}
-              canFork={ctx.forkState(item()).canFork}
-              forkReason={ctx.forkState(item()).reason}
-              canRevert={ctx.revert.canRevert}
-              revertReason={ctx.revert.reason}
-              prominent={item().seq === ctx.lastForkableSeq}
+              canFork={ctx().forkState(item()).canFork}
+              forkReason={ctx().forkState(item()).reason}
+              canRevert={ctx().revert.canRevert}
+              revertReason={ctx().revert.reason}
+              prominent={item().seq === ctx().lastForkableSeq}
               meta={`${item().clientSource} · ${formatClockTime(item().createdAt)}`}
               metaTitle={formatEpochMs(item().createdAt)}
-              onfork={() => ctx.onfork?.(item())}
-              onrevert={() => ctx.onrevert?.(item())}
+              onfork={() => ctx().onfork?.(item())}
+              onrevert={() => ctx().onrevert?.(item())}
             />
           </div>
         )}
@@ -228,12 +228,12 @@ function SingleRow(props: { item: TimelineItem; ctx: TimelineContext }): JSX.Ele
             </div>
             <MessageActions
               text={item().text}
-              canFork={ctx.forkState(item()).canFork}
-              forkReason={ctx.forkState(item()).reason}
+              canFork={ctx().forkState(item()).canFork}
+              forkReason={ctx().forkState(item()).reason}
               canRevert={null}
               revertReason={null}
-              prominent={item().seq === ctx.lastForkableSeq}
-              onfork={() => ctx.onfork?.(item())}
+              prominent={item().seq === ctx().lastForkableSeq}
+              onfork={() => ctx().onfork?.(item())}
             />
           </div>
         )}
@@ -252,7 +252,7 @@ function SingleRow(props: { item: TimelineItem; ctx: TimelineContext }): JSX.Ele
                 {item().command === "" ? item().terminalId : item().command}
               </span>
               <Show
-                when={item().running && !ctx.sessionStopped && ctx.onstopterminal !== undefined}
+                when={item().running && !ctx().sessionStopped && ctx().onstopterminal !== undefined}
                 fallback={
                   <Show when={item().exitCode !== null}>
                     <Badge variant={item().exitCode === 0 ? "secondary" : "destructive"}>
@@ -265,20 +265,20 @@ function SingleRow(props: { item: TimelineItem; ctx: TimelineContext }): JSX.Ele
                   type="button"
                   class="text-muted-foreground hover:bg-destructive/10 hover:text-destructive ml-auto flex size-5 shrink-0 items-center justify-center rounded transition-colors disabled:opacity-50"
                   title={
-                    ctx.isStoppingTerminal(item().terminalId)
+                    ctx().isStoppingTerminal(item().terminalId)
                       ? m.chat_terminal_stopping()
                       : m.chat_terminal_stop()
                   }
                   aria-label={
-                    ctx.isStoppingTerminal(item().terminalId)
+                    ctx().isStoppingTerminal(item().terminalId)
                       ? m.chat_terminal_stopping()
                       : m.chat_terminal_stop()
                   }
-                  disabled={ctx.isStoppingTerminal(item().terminalId)}
-                  onClick={() => ctx.stopTerminal(item().terminalId)}
+                  disabled={ctx().isStoppingTerminal(item().terminalId)}
+                  onClick={() => ctx().stopTerminal(item().terminalId)}
                 >
                   <Show
-                    when={ctx.isStoppingTerminal(item().terminalId)}
+                    when={ctx().isStoppingTerminal(item().terminalId)}
                     fallback={<IconCircleStop class="size-3.5" />}
                   >
                     <IconLoaderCircle class="size-3.5 animate-spin" />
@@ -296,7 +296,7 @@ function SingleRow(props: { item: TimelineItem; ctx: TimelineContext }): JSX.Ele
       <Match when={props.item.kind === "permission" ? props.item : null}>
         {(item) => (
           <PermissionCard
-            sessionId={ctx.sessionId}
+            sessionId={ctx().sessionId}
             requestId={item().requestId}
             toolName={item().toolName}
             summary={item().summary}
@@ -304,7 +304,7 @@ function SingleRow(props: { item: TimelineItem; ctx: TimelineContext }): JSX.Ele
             details={item().details}
             resolved={item().resolved}
             createdAt={item().createdAt}
-            subagentTitle={ctx.subagentTitle}
+            subagentTitle={ctx().subagentTitle}
           />
         )}
       </Match>
@@ -312,7 +312,7 @@ function SingleRow(props: { item: TimelineItem; ctx: TimelineContext }): JSX.Ele
       <Match when={props.item.kind === "elicitation" ? props.item : null}>
         {(item) => (
           <ElicitationCard
-            sessionId={ctx.sessionId}
+            sessionId={ctx().sessionId}
             elicitationId={item().elicitationId}
             message={item().message}
             requestedSchema={item().requestedSchema}

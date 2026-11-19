@@ -16,6 +16,7 @@ import IconClock from "~icons/lucide/clock";
 import IconLogOut from "~icons/lucide/log-out";
 import IconPlus from "~icons/lucide/plus";
 import IconServer from "~icons/lucide/server";
+import { errorMessage } from "#lib/api/error-messages.ts";
 
 /** Log out (stop syncing + invalidate the Cookie) and report the outcome. */
 async function logout(): Promise<void> {
@@ -23,7 +24,7 @@ async function logout(): Promise<void> {
     await logoutAndStop();
     toast(m.connection_logged_out());
   } catch (error) {
-    toast.error(error instanceof Error ? error.message : String(error));
+    toast.error(errorMessage(error));
   }
 }
 

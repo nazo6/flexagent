@@ -6,7 +6,7 @@ PC ブラウザ、ローカル直結 (`node.addr`、既定 `localhost:7860`)、�
 
 ## 1. フロントエンド技術スタック & 状態管理
 
-- **フレームワーク & ルーティング**: Solid 2 (`solid-js` 2.x + `@solidjs/web`) + `@solidjs/router` 2.x（型付き `paths` / `matchFilters`） + Vite + TypeScript（TSX）。静的 SPA を `rust-embed` で同梱する
+- **フレームワーク & ルーティング**: Solid 2 (`solid-js` 2.x + `@solidjs/web`) + `@solidjs/router` 2.x（URL 形状は `settings-routes.ts` に集約し、`matchFilters` を併用） + Vite + TypeScript（TSX）。静的 SPA を `rust-embed` で同梱する
 - **パッケージマネージャ & タスクランナー**: `pnpm` + `mise`（`mise.toml` による `specta` 型生成 → UI ビルド → Cargo ビルドの一貫管理）
 - **Lint / Format / Test**: `oxlint` / `oxfmt` / `tsc --noEmit` / `Vitest` (+ `jsdom`)
 - **スタイリング & コンポーネント**: Tailwind CSS v4 (`@tailwindcss/vite`) + Terracotta 2（ヘッドレス。状態は `tc-*` 属性で公開）+ `@floating-ui/dom` による自前配置 + `unplugin-icons`（Lucide）

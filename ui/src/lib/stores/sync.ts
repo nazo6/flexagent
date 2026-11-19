@@ -177,8 +177,14 @@ export class SyncStore {
    */
   readonly provisioningLogs = new ReactiveMap<string, string[]>();
 
-  /** Identity cache for the per-session timelines (not reactive state). */
+  /** Identity cache for the per-session timelines (plain map; resets are broadcast separately). */
   readonly #timelines = new Map<string, SessionTimeline>();
+  /** Bumped when every timeline is discarded, so `timelineFor` readers recompute. */
+  readonly #timelineReset = new ReactiveCell(0);
+  /** In-flight REST refreshes: a second request is skipped, not queued. */
+  #sessionsRefreshing = false;
+  #nodesRefreshing = false;
+  #projectsRefreshing = false;
   #ws: WebSocket | null = null;
   #stopped = true;
   #reconnectDelayMs = 1_000;
@@ -346,6 +352,7 @@ export class SyncStore {
     this.#ws?.close();
     this.#ws = null;
     this.wsConnected = false;
+    this.#clearStreams();
   }
 
   /** Stop once and reconnect (e.g. right after login). */
@@ -365,8 +372,12 @@ export class SyncStore {
     }
     this.#ws = ws;
     ws.addEventListener("open", () => {
+      if (this.#ws !== ws) return;
       this.wsConnected = true;
       this.#reconnectDelayMs = 1_000;
+      // A fresh connection may replay only part of a stream; drop the old
+      // buffers so no half message survives a reconnect.
+      this.#clearStreams();
       // A client with no stored cursor starts at the store tail: chat history
       // is loaded per session from the paginated events API, so replaying the
       // whole log would defeat paging and grow memory. A stored cursor is kept
@@ -390,6 +401,7 @@ export class SyncStore {
       void this.refreshAll();
     });
     ws.addEventListener("message", (event: MessageEvent) => {
+      if (this.#ws !== ws) return;
       if (typeof event.data === "string") this.#handleMessage(event.data);
     });
     ws.addEventListener("close", () => {
@@ -399,8 +411,14 @@ export class SyncStore {
       if (this.#ws !== ws) return;
       this.#ws = null;
       this.wsConnected = false;
+      this.#clearStreams();
       this.#scheduleReconnect();
     });
+  }
+
+  /** Drops every streaming buffer (a disconnected socket will not finish them). */
+  #clearStreams(): void {
+    for (const timeline of this.#timelines.values()) timeline.clearStreams();
   }
 
   #scheduleReconnect(): void {
@@ -428,6 +446,8 @@ export class SyncStore {
   }
 
   async refreshSessions(): Promise<void> {
+    if (this.#sessionsRefreshing) return;
+    this.#sessionsRefreshing = true;
     this.sessionsLoading = true;
     try {
       // Always refresh the newest page. Pages the reader loaded explicitly are
@@ -467,6 +487,7 @@ export class SyncStore {
       this.sessionsError = errorMessage(error);
       this.#warn("sessions", error);
     } finally {
+      this.#sessionsRefreshing = false;
       this.sessionsLoading = false;
     }
   }
@@ -521,6 +542,8 @@ export class SyncStore {
   }
 
   async refreshNodes(): Promise<void> {
+    if (this.#nodesRefreshing) return;
+    this.#nodesRefreshing = true;
     this.nodesLoading = true;
     try {
       this.nodes = await this.connection.client.nodes();
@@ -529,11 +552,14 @@ export class SyncStore {
       this.nodesError = errorMessage(error);
       this.#warn("nodes", error);
     } finally {
+      this.#nodesRefreshing = false;
       this.nodesLoading = false;
     }
   }
 
   async refreshProjects(): Promise<void> {
+    if (this.#projectsRefreshing) return;
+    this.#projectsRefreshing = true;
     this.projectsLoading = true;
     try {
       this.projects = await this.connection.client.projects();
@@ -542,6 +568,7 @@ export class SyncStore {
       this.projectsError = errorMessage(error);
       this.#warn("projects", error);
     } finally {
+      this.#projectsRefreshing = false;
       this.projectsLoading = false;
     }
   }
@@ -576,6 +603,9 @@ export class SyncStore {
 
   /** A session's timeline (created if it does not exist). */
   timelineFor(sessionId: string): SessionTimeline {
+    // Subscribe to resets without creating the timeline inside a reactive write:
+    // a cursor rewind clears the cache and bumps this generation.
+    this.#timelineReset.get();
     let timeline = this.#timelines.get(sessionId);
     if (!timeline) {
       timeline = new SessionTimeline(sessionId);
@@ -1059,6 +1089,7 @@ export class SyncStore {
         cursor,
       });
       this.#timelines.clear();
+      this.#timelineReset.update((value) => value + 1);
       this.provisioningLogs.clear();
       void this.refreshAll();
     }

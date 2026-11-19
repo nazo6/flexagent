@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onSettled, Show, untrack } from "solid-js";
+import { createEffect, createMemo, createSignal, flush, onSettled, Show, untrack } from "solid-js";
 import { useNavigate, useParams } from "@solidjs/router";
 import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
 import ProvisioningLogCard from "#lib/components/ProvisioningLogCard.tsx";
@@ -28,10 +28,12 @@ import {
   type TimelineItem,
 } from "#lib/sync/reducer.ts";
 import { cn } from "#lib/utils.ts";
+import { useDocumentTitle } from "#lib/document-title.ts";
 import IconArchive from "~icons/lucide/archive";
 import IconArrowDown from "~icons/lucide/arrow-down";
 import IconLoaderCircle from "~icons/lucide/loader-circle";
 import IconSkull from "~icons/lucide/skull";
+import { errorMessage } from "#lib/api/error-messages.ts";
 
 /** Distance from the bottom that still counts as "reading the tail". */
 const FOLLOW_THRESHOLD_PX = 80;
@@ -191,11 +193,12 @@ export default function SessionPage() {
     dock.setWidth(Math.round(percentage));
   }
 
-  function handlePointerUp(): void {
+  function stopResize(): void {
     if (!isResizing()) return;
     setIsResizing(false);
     window.removeEventListener("pointermove", handlePointerMove);
-    window.removeEventListener("pointerup", handlePointerUp);
+    window.removeEventListener("pointerup", stopResize);
+    window.removeEventListener("pointercancel", stopResize);
     dock.commitWidth();
   }
 
@@ -204,8 +207,16 @@ export default function SessionPage() {
     event.preventDefault();
     setIsResizing(true);
     window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
   }
+
+  // Never leave the window listeners behind when the page unmounts mid-drag.
+  onSettled(() => () => {
+    window.removeEventListener("pointermove", handlePointerMove);
+    window.removeEventListener("pointerup", stopResize);
+    window.removeEventListener("pointercancel", stopResize);
+  });
 
   // The workspace owns the dock state; the session only supplies tool context.
   // Switching sessions inside one workspace must not reset the active tool or
@@ -226,6 +237,10 @@ export default function SessionPage() {
       if (!id) return;
       untrack(() => {
         sync.setActiveSession(id);
+        setResumeRequired(false);
+        setFollowOutput(true);
+        setShowScrollBottom(false);
+        lastUserItemKey = null;
         if (loadedFor !== id) {
           loadedFor = id;
           setSelectedSubagentId(null);
@@ -239,10 +254,13 @@ export default function SessionPage() {
   );
 
   // Deep links may point at a session outside the loaded sidebar pages.
+  const sessionListed = createMemo(() =>
+    sync.sessions.some((entry) => entry.session_id === sessionId()),
+  );
   createEffect(
     () => ({
       id: sessionId(),
-      listed: sync.sessions.some((entry) => entry.session_id === sessionId()),
+      listed: sessionListed(),
       fallbackId: fallbackSession()?.id ?? null,
     }),
     ({ id, listed, fallbackId }) => {
@@ -288,20 +306,24 @@ export default function SessionPage() {
     () => ({
       container: chatContainer(),
       items: items(),
-      follow: followOutput(),
       userKey: lastUserKeyOf(items()),
     }),
-    ({ container, items: currentItems, follow, userKey }) => {
+    ({ container, items: currentItems, userKey }) => {
       // Reading the container and the item list subscribes to the container
       // being mounted and to content growth (new items as well as streamed text
       // inside an existing item).
       if (container === null || currentItems.length === 0) return;
+      const wasFollowing = untrack(followOutput);
       if (userKey !== lastUserItemKey) {
         // A message was just sent: jump back to the conversation tail.
         lastUserItemKey = userKey;
         setFollowOutput(true);
+        scheduleScrollToBottom();
+        return;
       }
-      if (follow) scheduleScrollToBottom();
+      // Do not subscribe to `followOutput` here: the apply below writes it, and
+      // an effect that reads its own source re-runs forever.
+      if (wasFollowing) scheduleScrollToBottom();
     },
   );
 
@@ -363,8 +385,10 @@ export default function SessionPage() {
     try {
       const added = await sync.loadOlderSessionEvents(sessionId());
       if (added) {
-        // The list has already been rendered by the time the promise settles;
-        // keep the reader anchored to the same content.
+        // Solid 2 batches signal writes until the next microtask flush; measure
+        // the DOM only after the prepended events have been rendered.
+        flush();
+        // Keep the reader anchored to the same content.
         container.scrollTop = previousTop + (container.scrollHeight - previousHeight);
       }
     } catch {
@@ -397,7 +421,7 @@ export default function SessionPage() {
         toast.error(commandErrorMessage(result.error) ?? m.chat_action_revert_failed());
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     }
   }
 
@@ -413,35 +437,35 @@ export default function SessionPage() {
         toast.error(commandErrorMessage(result.error) ?? m.chat_terminal_stop_failed());
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     }
   }
 
   function handleForkItem(item: TimelineItem): void {
     const current = session();
     if (!sessionId() || !current) return;
-    const params = new URLSearchParams();
-    params.set("fork_session", sessionId());
-    params.set("project", current.project_id);
-    params.set("node", current.node_id);
-    params.set("path", current.local_path);
-    if (current.agent_id) params.set("agent", current.agent_id);
+    const query = new URLSearchParams();
+    query.set("fork_session", sessionId());
+    query.set("project", current.project_id);
+    query.set("node", current.node_id);
+    query.set("path", current.local_path);
+    if (current.agent_id) query.set("agent", current.agent_id);
     // A message-scope agent can fork at a boundary. `last` agents must fork at
     // the current end, so their request intentionally omits the boundary.
-    if (forkScope() === "message") params.set("fork_upto", String(item.seq));
-    navigate(`/?${params.toString()}`);
+    if (forkScope() === "message") query.set("fork_upto", String(item.seq));
+    navigate(`/?${query.toString()}`);
   }
 
   /** Open a new session on the same node and working directory as this session. */
   function handleNewSessionHere(): void {
     const current = session();
     if (!current) return;
-    const params = new URLSearchParams();
-    params.set("project", current.project_id);
-    params.set("node", current.node_id);
-    params.set("path", current.local_path);
-    if (current.agent_id) params.set("agent", current.agent_id);
-    navigate(`/?${params.toString()}`);
+    const query = new URLSearchParams();
+    query.set("project", current.project_id);
+    query.set("node", current.node_id);
+    query.set("path", current.local_path);
+    if (current.agent_id) query.set("agent", current.agent_id);
+    navigate(`/?${query.toString()}`);
   }
 
   /** Resume a stopped session via history replay (`POST /sessions/:id/resume`). */
@@ -457,7 +481,7 @@ export default function SessionPage() {
         toast.success(m.session_resume_success_replay());
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       setResuming(false);
     }
@@ -476,7 +500,7 @@ export default function SessionPage() {
         toast.error(commandErrorMessage(result.error) ?? m.session_kill_failed());
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       setKilling(false);
     }
@@ -489,17 +513,13 @@ export default function SessionPage() {
       await sync.archiveSession(sessionId(), false);
       toast.success(m.session_unarchived());
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     }
   }
 
-  createEffect(
-    () => session()?.title,
-    (title) => {
-      if (typeof document === "undefined") return;
-      document.title = `${title ?? m.session_title_fallback()} - FlexAgent`;
-    },
-  );
+  useDocumentTitle(() => session()?.title ?? m.session_title_fallback(), {
+    suffix: " - FlexAgent",
+  });
 
   return (
     <div class="bg-background flex h-full w-full flex-col overflow-hidden">

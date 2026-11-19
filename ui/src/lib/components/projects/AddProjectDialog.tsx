@@ -154,16 +154,21 @@ export function createAddProjectDialog(
     return preview()?.project_id ?? "";
   });
 
-  const canSubmit = createMemo(
-    () =>
-      !busy() &&
-      !previewLoading() &&
-      previewError() === null &&
-      preview() !== null &&
-      selectedNodeId() !== "" &&
-      selectedAvailability().isAvailable &&
-      (!advanced() || customKey().trim() !== ""),
-  );
+  const canSubmit = createMemo(() => {
+    if (
+      busy() ||
+      previewLoading() ||
+      previewError() !== null ||
+      preview() === null ||
+      selectedNodeId() === "" ||
+      !selectedAvailability().isAvailable
+    ) {
+      return false;
+    }
+    // Selecting an already-linked folder needs no custom key; a new link does.
+    if (alreadyAdded()) return true;
+    return !advanced() || customKey().trim() !== "";
+  });
 
   // Debounced identity preview for the folder currently under the picker.
   createEffect(
@@ -340,7 +345,9 @@ export function createAddProjectDialog(
                   class="h-full"
                   onpathchange={(path) => setTargetPath(path)}
                   onerror={(message) => {
-                    setTargetPath("");
+                    // Keep `targetPath` so the preview effect does not erase the
+                    // error it just showed; the load failure is specific to the
+                    // folder browser and lives in its own state.
                     setPreview(null);
                     setPreviewError(message);
                   }}
@@ -470,11 +477,7 @@ export function createAddProjectDialog(
             <Button variant="outline" size="sm" onClick={() => setOpen(false)} disabled={busy()}>
               {m.common_cancel()}
             </Button>
-            <Button
-              size="sm"
-              disabled={!canSubmit() && !alreadyAdded()}
-              onClick={() => void submit()}
-            >
+            <Button size="sm" disabled={!canSubmit()} onClick={() => void submit()}>
               <Switch>
                 <Match when={busy()}>
                   <IconLoaderCircle class="size-3.5 animate-spin" />

@@ -27,8 +27,10 @@ export default function FolderBrowserDialog(props: FolderBrowserDialogProps) {
 
   const close = (): void => {
     // A dialog can be reopened programmatically, which does not emit
-    // `onOpenChange`, so clear the pending selection on every close path.
+    // `onOpenChange`, so clear the pending selection and the browsed path on
+    // every close path (otherwise another node inherits the previous path).
     setSelectedPath("");
+    setPickerPath("");
     props.onOpenChange?.(false);
   };
 
@@ -44,7 +46,10 @@ export default function FolderBrowserDialog(props: FolderBrowserDialogProps) {
     <Dialog.Root
       open={props.open}
       onOpenChange={(next) => {
-        if (!next) setSelectedPath("");
+        if (!next) {
+          setSelectedPath("");
+          setPickerPath("");
+        }
         props.onOpenChange?.(next);
       }}
     >

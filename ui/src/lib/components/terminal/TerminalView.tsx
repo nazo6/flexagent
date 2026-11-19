@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onSettled } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onSettled, untrack } from "solid-js";
 import { Badge } from "#lib/components/ui/badge/index.ts";
 import { Button } from "#lib/components/ui/button/index.ts";
 import { decodeBase64ToBytes, encodeTextToBase64 } from "#lib/base64.ts";
@@ -50,11 +50,11 @@ export default function TerminalView(props: TerminalViewProps) {
   /** Workspace key of the connected socket (`nodeId` + path + terminal id). */
   let connectedWorkspace: string | null = null;
 
-  const isActive = () => props.active ?? true;
+  const isActive = createMemo(() => props.active ?? true);
 
-  function workspaceKey(): string {
-    return `${props.nodeId}\u0000${props.path}\u0000${props.terminalId}`;
-  }
+  const workspaceKey = createMemo(
+    () => `${props.nodeId}\u0000${props.path}\u0000${props.terminalId}`,
+  );
 
   function send(message: PtyClientMessage): boolean {
     if (socket === null || socket.readyState !== WebSocket.OPEN) return false;
@@ -187,26 +187,28 @@ export default function TerminalView(props: TerminalViewProps) {
   }
 
   /**
-   * Mounts the terminal display during render, so the connection effects below
-   * always see a fitted adapter.
+   * Mounts the terminal display once the component's DOM is attached, so the
+   * canvas always measures the real container instead of a detached node.
    */
   const mountContainer = (element: HTMLDivElement): void => {
     setContainer(() => element);
-    if (adapter !== null) return;
-    const next = new GhosttyWebAdapter();
-    next.mount(element);
-    next.onData((data) => sendInput(data));
-    next.onResize(({ cols, rows }) => {
-      send({ op: "resize", cols, rows });
-    });
-    adapter = next;
-    props.onregister?.(() => {
-      send({ op: "kill" });
-      socket?.close();
-    });
   };
 
   onSettled(() => {
+    const element = container();
+    if (element !== undefined) {
+      const next = new GhosttyWebAdapter();
+      next.mount(element);
+      next.onData((data) => sendInput(data));
+      next.onResize(({ cols, rows }) => {
+        send({ op: "resize", cols, rows });
+      });
+      adapter = next;
+      props.onregister?.(() => {
+        send({ op: "kill" });
+        socket?.close();
+      });
+    }
     return () => {
       disposed = true;
       socket?.close();
@@ -236,7 +238,7 @@ export default function TerminalView(props: TerminalViewProps) {
         connectedWorkspace = null;
         return;
       }
-      reconnect();
+      untrack(() => reconnect());
     },
   );
 
@@ -247,7 +249,7 @@ export default function TerminalView(props: TerminalViewProps) {
       if (!active) return;
       if (socket === null) {
         connectedWorkspace = workspaceKey();
-        connect();
+        untrack(() => connect());
       }
     },
   );

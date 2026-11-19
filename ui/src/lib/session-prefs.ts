@@ -47,9 +47,9 @@ export function loadNewSessionPrefs(
 ): NewSessionPrefs | null {
   const store = resolveStorage(storage);
   if (store === null || projectId === "") return null;
-  const raw = store.getItem(KEY_PREFIX + projectId);
-  if (raw === null) return null;
   try {
+    const raw = store.getItem(KEY_PREFIX + projectId);
+    if (raw === null) return null;
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return null;
     const record = parsed as Record<string, unknown>;
@@ -103,9 +103,9 @@ export function loadSessionConfig(
 ): Record<string, ConfigOptionValue> {
   const store = resolveStorage(storage);
   if (store === null || projectId === "" || agentId === "") return {};
-  const raw = store.getItem(sessionConfigKey(projectId, agentId));
-  if (raw === null) return {};
   try {
+    const raw = store.getItem(sessionConfigKey(projectId, agentId));
+    if (raw === null) return {};
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     return parsed as Record<string, ConfigOptionValue>;
@@ -145,9 +145,9 @@ const MODEL_FAVORITES_KEY_PREFIX = "fxg:model_favorites:";
 export function loadModelFavorites(agentId: string, storage?: Storage | null): string[] {
   const store = resolveStorage(storage);
   if (store === null || agentId === "") return [];
-  const raw = store.getItem(MODEL_FAVORITES_KEY_PREFIX + agentId);
-  if (raw === null) return [];
   try {
+    const raw = store.getItem(MODEL_FAVORITES_KEY_PREFIX + agentId);
+    if (raw === null) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     const seen = new Set<string>();
@@ -208,8 +208,12 @@ const SHORTCUT_KEY = "fxg:send_shortcut";
 export function loadSendShortcutPreference(storage?: Storage | null): SendShortcut {
   const store = resolveStorage(storage);
   if (store === null) return "enter";
-  const raw = store.getItem(SHORTCUT_KEY);
-  if (raw === "modifier_enter" || raw === "enter") return raw;
+  try {
+    const raw = store.getItem(SHORTCUT_KEY);
+    if (raw === "modifier_enter" || raw === "enter") return raw;
+  } catch {
+    // localStorage can be unavailable (private mode).
+  }
   return "enter";
 }
 

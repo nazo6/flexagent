@@ -1,14 +1,20 @@
 import type { ComponentProps, JSX } from "@solidjs/web";
 import { Portal } from "@solidjs/web";
-import { createContext, createEffect, createSignal, omit, onSettled, useContext } from "solid-js";
+import { createContext, createEffect, createSignal, omit, useContext } from "solid-js";
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from "terracotta/listbox";
 import { cn } from "#lib/utils.ts";
 import IconCheck from "~icons/lucide/check";
 import IconChevronDown from "~icons/lucide/chevron-down";
 import IconChevronUp from "~icons/lucide/chevron-up";
 import { createControllable, toBoolean, type MouseHandler } from "../controllable.ts";
-import { composeRef, restoreFocusOnClose, useAnchoredPanel, type ElementRef } from "../position.ts";
-import { ANCHORED_PANEL_ATTRIBUTE, dismissOnOutsidePointer } from "../position.ts";
+import { composeRef, useAnchoredPanel, type ElementRef } from "../position.ts";
+import {
+  createPanelTree,
+  dismissOnOutsidePointer,
+  PanelTreeContext,
+  registerPanelElement,
+} from "../position.ts";
+import { ANCHORED_PANEL_ATTRIBUTE } from "../position.ts";
 import { Separator as SeparatorRoot } from "../separator/index.ts";
 
 /**
@@ -34,6 +40,7 @@ interface SelectState {
   setAnchor: (element: HTMLElement) => void;
   labelFor: (value: unknown) => string | undefined;
   registerLabel: (value: unknown, label: () => string | undefined) => void;
+  unregisterLabel: (value: unknown) => void;
 }
 
 const SelectContext = createContext<SelectState | null>(null);
@@ -78,13 +85,13 @@ export interface RootProps<V> {
 export function Root<V>(props: RootProps<V>) {
   const [open, setOpen] = createControllable(
     () => props.open,
-    props.onOpenChange,
-    props.defaultOpen ?? false,
+    () => props.onOpenChange,
+    () => props.defaultOpen ?? false,
   );
   const [value, setValue] = createControllable<V | undefined>(
     () => props.value,
-    props.onValueChange,
-    props.defaultValue,
+    () => props.onValueChange,
+    () => props.defaultValue,
   );
   const [anchor, setAnchorElement] = createSignal<HTMLElement>();
   const [labels, setLabels] = createSignal(new Map<unknown, () => string | undefined>());
@@ -104,6 +111,14 @@ export function Root<V>(props: RootProps<V>) {
         return next;
       });
     },
+    unregisterLabel: (candidate) => {
+      setLabels((previous) => {
+        if (!previous.has(candidate)) return previous;
+        const next = new Map(previous);
+        next.delete(candidate);
+        return next;
+      });
+    },
   };
 
   return (
@@ -113,7 +128,7 @@ export function Root<V>(props: RootProps<V>) {
         onDisclosureChange={(next) => setOpen(next)}
         value={value()}
         onSelectChange={(next) => setValue(next)}
-        disabled={props.disabled}
+        disabled={props.disabled === undefined ? undefined : toBoolean(props.disabled)}
       >
         {props.children}
       </Listbox>
@@ -121,15 +136,16 @@ export function Root<V>(props: RootProps<V>) {
   );
 }
 
-export interface TriggerProps extends Omit<ComponentProps<"button">, "ref" | "onClick"> {
+export interface TriggerProps extends Omit<ComponentProps<"button">, "ref" | "onClick" | "type"> {
   ref?: ElementRef<HTMLButtonElement>;
   onClick?: MouseHandler<HTMLButtonElement>;
+  type?: "button" | "submit" | "reset";
   size?: "sm" | "default";
 }
 
 export function Trigger(props: TriggerProps) {
   const state = useSelect("Select.Trigger");
-  const rest = omit(props, "class", "children", "ref", "onClick", "disabled", "size");
+  const rest = omit(props, "class", "children", "ref", "onClick", "disabled", "size", "type");
 
   return (
     <ListboxButton
@@ -137,7 +153,9 @@ export function Trigger(props: TriggerProps) {
       ref={composeRef(props.ref, (element: HTMLButtonElement) => state.setAnchor(element))}
       data-slot="select-trigger"
       data-size={props.size ?? "default"}
-      disabled={toBoolean(props.disabled)}
+      data-placeholder={state.value() === undefined ? "" : undefined}
+      type={props.type ?? "button"}
+      disabled={props.disabled === undefined ? undefined : toBoolean(props.disabled)}
       class={cn(
         "border-input data-[placeholder]:text-muted-foreground dark:bg-input/30 dark:hover:bg-input/50 focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:aria-invalid:border-destructive/50 gap-1.5 rounded-md border bg-transparent py-2 pr-2 pl-2.5 text-sm shadow-xs transition-[color,box-shadow] focus-visible:ring-3 aria-invalid:ring-3 data-[size=default]:h-9 data-[size=sm]:h-8 *:data-[slot=select-value]:flex *:data-[slot=select-value]:gap-1.5 [&_svg:not([class*='size-'])]:size-4 flex w-fit items-center justify-between whitespace-nowrap outline-none disabled:cursor-not-allowed disabled:opacity-50 *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center [&_svg]:pointer-events-none [&_svg]:shrink-0",
         props.class,
@@ -189,11 +207,13 @@ export interface ContentProps extends Omit<ComponentProps<"ul">, "ref"> {
 
 export function Content(props: ContentProps) {
   const state = useSelect("Select.Content");
+  const tree = createPanelTree();
   const rest = omit(props, "class", "children", "ref", "side", "align", "sideOffset");
 
   dismissOnOutsidePointer({
     open: state.open,
     anchor: state.anchor,
+    tree,
     onDismiss: () => state.setOpen(false),
   });
 
@@ -205,8 +225,6 @@ export function Content(props: ContentProps) {
     sideOffset: () => props.sideOffset ?? 4,
     matchWidth: true,
   });
-
-  restoreFocusOnClose({ open: state.open, anchor: state.anchor, panel: panel.element });
 
   const [element, setElement] = createSignal<HTMLElement>();
   const [scrollTop, setScrollTop] = createSignal(0);
@@ -256,6 +274,7 @@ export function Content(props: ContentProps) {
         unmount={false}
         ref={composeRef(panel.ref, (next: HTMLElement) => {
           panelState.setElement(next);
+          registerPanelElement(tree, next);
           props.ref?.(next);
         })}
         {...{ [ANCHORED_PANEL_ATTRIBUTE]: "" }}
@@ -265,11 +284,13 @@ export function Content(props: ContentProps) {
           props.class,
         )}
       >
-        <PanelContext value={panelState}>
-          <ScrollUpButton />
-          {props.children}
-          <ScrollDownButton />
-        </PanelContext>
+        <PanelTreeContext value={tree}>
+          <PanelContext value={panelState}>
+            <ScrollUpButton />
+            {props.children}
+            <ScrollDownButton />
+          </PanelContext>
+        </PanelTreeContext>
       </ListboxOptions>
     </Portal>
   );
@@ -286,9 +307,15 @@ export function Item(props: ItemProps) {
   const state = useSelect("Select.Item");
   const label = () => props.label ?? String(props.value);
 
-  onSettled(() => {
-    state.registerLabel(props.value, label);
-  });
+  // Register (and unregister) on value changes / unmount so the trigger label
+  // never points at a stale item.
+  createEffect(
+    () => ({ value: props.value, labelText: props.label }),
+    ({ value }) => {
+      state.registerLabel(value, label);
+      return () => state.unregisterLabel(value);
+    },
+  );
 
   const rest = omit(props, "class", "children", "ref", "value", "label", "disabled");
   const selected = () => state.value() === props.value;
@@ -371,30 +398,35 @@ export interface ScrollButtonProps extends Omit<ComponentProps<"button">, "ref">
   ref?: ElementRef<HTMLButtonElement>;
 }
 
-function ScrollButton(props: ScrollButtonProps & { direction: "up" | "down" }) {
+export function ScrollButton(props: ScrollButtonProps & { direction: "up" | "down" }) {
   const panel = usePanel("Select.ScrollButton");
   const visible = () => (props.direction === "up" ? panel.canScrollUp() : panel.canScrollDown());
-  const rest = omit(props, "class", "children", "ref", "direction");
+  const rest = omit(props, "class", "children", "ref", "direction", "onClick");
 
   return (
-    <button
-      {...rest}
-      ref={(element) => props.ref?.(element)}
-      data-slot={props.direction === "up" ? "select-scroll-up-button" : "select-scroll-down-button"}
-      type="button"
-      tabindex={-1}
-      class={cn(
-        "bg-popover z-10 flex cursor-default items-center justify-center py-1 [&_svg:not([class*='size-'])]:size-4",
-        visible() ? undefined : "hidden",
-        props.class,
-      )}
-      onClick={() => {
-        if (props.direction === "up") panel.scrollUp();
-        else panel.scrollDown();
-      }}
-    >
-      {props.children ?? (props.direction === "up" ? <IconChevronUp /> : <IconChevronDown />)}
-    </button>
+    <li class="contents">
+      <button
+        {...rest}
+        ref={(element) => props.ref?.(element)}
+        data-slot={
+          props.direction === "up" ? "select-scroll-up-button" : "select-scroll-down-button"
+        }
+        type="button"
+        tabindex={-1}
+        class={cn(
+          "bg-popover z-10 flex w-full cursor-default items-center justify-center py-1 [&_svg:not([class*='size-'])]:size-4",
+          props.direction === "up" ? "sticky top-0" : "sticky bottom-0",
+          visible() ? undefined : "hidden",
+          props.class,
+        )}
+        onClick={() => {
+          if (props.direction === "up") panel.scrollUp();
+          else panel.scrollDown();
+        }}
+      >
+        {props.children ?? (props.direction === "up" ? <IconChevronUp /> : <IconChevronDown />)}
+      </button>
+    </li>
   );
 }
 

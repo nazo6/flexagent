@@ -13,7 +13,12 @@ export class PreferencesStore {
   readonly #sendShortcut: ReactiveCell<SendShortcut>;
 
   constructor() {
-    const stored = typeof localStorage === "undefined" ? "enter" : loadSendShortcutPreference();
+    let stored: SendShortcut = "enter";
+    try {
+      if (typeof localStorage !== "undefined") stored = loadSendShortcutPreference();
+    } catch {
+      // localStorage can be unavailable (private mode); keep the default.
+    }
     this.#sendShortcut = new ReactiveCell<SendShortcut>(stored);
   }
 

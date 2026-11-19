@@ -9,16 +9,14 @@
  * change notification:
  *
  * - `get()` returns the current value immediately and subscribes the caller.
+ * - `peek()` returns it without subscribing (store mutators read their own state).
  * - `set()` / `update()` write immediately and notify subscribers, which read
  *   the new value on the next flush.
  *
- * `ownedWrite` is enabled for the notification signal because one real write
- * runs inside an owned scope: an effect cleanup that resets store state while
- * its owner is being disposed (`SessionPage` clears the active session on
- * unmount). Solid has no unowned place to run that reset, and skipping it
- * would leave the previous session active in the store. `sync-effect.test.ts`
- * pins the behaviour; do not widen this to new writes — a write from a
- * component body or a memo means the state belongs somewhere else.
+ * The notification signal deliberately does not enable `ownedWrite`: writes
+ * from a component body or a memo still mean the state belongs somewhere else.
+ * Effect cleanups run inside `enterDisposal` in Solid 2, so the one legitimate
+ * unmount-time reset (`SessionPage` clearing the active session) is allowed.
  */
 import { createSignal, type Accessor, type Setter } from "solid-js";
 
@@ -28,7 +26,7 @@ class Notifier {
   readonly #notify: Setter<number>;
 
   constructor() {
-    [this.#read, this.#notify] = createSignal(0, { ownedWrite: true });
+    [this.#read, this.#notify] = createSignal(0);
   }
 
   /** Subscribes the current reader (no-op outside a tracking scope). */
@@ -53,6 +51,11 @@ export class ReactiveCell<T> {
   /** Reads the current value and subscribes the caller to changes. */
   get(): T {
     this.#notifier.track();
+    return this.#value;
+  }
+
+  /** Reads the current value without subscribing (for store mutators). */
+  peek(): T {
     return this.#value;
   }
 
@@ -105,6 +108,7 @@ export class ReactiveMap<K, V> implements Map<K, V> {
   }
 
   set(key: K, value: V): this {
+    if (this.#map.has(key) && Object.is(this.#map.get(key), value)) return this;
     this.#map.set(key, value);
     this.#notifier.notify();
     return this;

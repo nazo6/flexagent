@@ -33,7 +33,11 @@ export default function ExternalSessionsDialog(props: ExternalSessionsDialogProp
   const [error, setError] = createSignal<string | null>(null);
   const [response, setResponse] = createSignal<ExternalSessionListResponse | null>(null);
   const [selectedNodeId, setSelectedNodeId] = createSignal("");
+  /** Session whose history replay was unavailable, awaiting a no-history retry. */
+  const [historyFallback, setHistoryFallback] = createSignal<ExternalSessionSummary | null>(null);
   let loadGeneration = 0;
+  /** Node whose list is currently loaded (null while none). */
+  let loadedNodeId: string | null = null;
 
   const isHub = () => sync.connection.role === "hub";
   const onlineNodes = () => sync.nodes.filter((node) => node.is_online);
@@ -64,23 +68,33 @@ export default function ExternalSessionsDialog(props: ExternalSessionsDialogProp
     return onlineNodes()[0]?.node_id ?? "";
   }
 
-  async function load(force: boolean): Promise<void> {
-    if (isHub() && selectedNodeId() === "") {
-      setSelectedNodeId(pickNode());
-      if (selectedNodeId() === "") {
-        setError(m.error_node_offline());
-        return;
-      }
+  /**
+   * Loads the external sessions of one node.
+   *
+   * The target is passed in rather than read back from `selectedNodeId()`:
+   * Solid 2 does not commit a signal write before the next flush, so a
+   * write-then-read would request the previous node.
+   */
+  async function load(force: boolean, nodeId = selectedNodeId()): Promise<void> {
+    const target = isHub() ? nodeId : "";
+    if (isHub() && target === "") {
+      loadedNodeId = null;
+      setSelectedNodeId("");
+      setResponse(null);
+      setError(m.error_node_offline());
+      return;
     }
     const token = ++loadGeneration;
+    setSelectedNodeId(target);
     setLoading(true);
     setError(null);
     try {
       const next = await sync.connection.client.listExternalSessions({
-        nodeId: isHub() ? selectedNodeId() : undefined,
+        nodeId: isHub() ? target : undefined,
         force,
       });
       if (token !== loadGeneration) return;
+      loadedNodeId = target;
       setResponse(next);
     } catch (err) {
       if (token !== loadGeneration) return;
@@ -90,22 +104,27 @@ export default function ExternalSessionsDialog(props: ExternalSessionsDialogProp
     }
   }
 
-  function handleNodeChange(): void {
+  function handleNodeChange(nodeId: string): void {
+    loadedNodeId = null;
+    setHistoryFallback(null);
     setResponse(null);
-    void load(true);
+    void load(true, nodeId);
   }
 
   // Load when the sidebar opens the dialog (the trigger lives outside Dialog.Root,
-  // so `onOpenChange` does not fire for it).
-  let lastOpen = false;
+  // so `onOpenChange` does not fire for it). The default node is computed while
+  // the open flag and node list are tracked, and passed to the load.
   createEffect(
-    () => props.open,
-    (open) => {
-      if (open === lastOpen) return;
-      lastOpen = open;
-      if (!open) return;
-      setSelectedNodeId(pickNode());
-      void load(true);
+    () => (props.open ? { node: pickNode() } : null),
+    (target) => {
+      if (target === null) {
+        loadedNodeId = null;
+        return;
+      }
+      if (target.node === loadedNodeId) return;
+      setHistoryFallback(null);
+      setResponse(null);
+      void load(true, target.node);
     },
   );
 
@@ -140,14 +159,16 @@ export default function ExternalSessionsDialog(props: ExternalSessionsDialogProp
         mirror_history: mirrorHistory,
       });
       toast.success(m.external_sessions_imported_toast());
+      setHistoryFallback(null);
       props.onOpenChange?.(false);
       await Promise.all([sync.refreshSessions(), sync.refreshProjects()]);
       navigate(`/sessions/${result.session_id}`);
     } catch (err) {
-      // The agent accepted `session/load` but replayed no history. Offer the
-      // explicit no-history import instead of creating an empty session silently.
+      // The agent accepted `session/load` but replayed no history. Keep the
+      // dialog open with an explicit no-history retry instead of creating an
+      // empty session silently.
       if (mirrorHistory && err instanceof ApiError && err.code === "HISTORY_UNAVAILABLE") {
-        // `toast` in this app has no action button, so describe the next step.
+        setHistoryFallback(session);
         toast.error(errorMessage(err), {
           description: m.external_sessions_import_no_history(),
           duration: 8000,
@@ -179,10 +200,7 @@ export default function ExternalSessionsDialog(props: ExternalSessionsDialogProp
               <span>{m.external_sessions_node()}</span>
               <select
                 value={selectedNodeId()}
-                onChange={(event) => {
-                  setSelectedNodeId(event.currentTarget.value);
-                  handleNodeChange();
-                }}
+                onChange={(event) => handleNodeChange(event.currentTarget.value)}
                 class="bg-chip border-border h-8 rounded-md border px-2 text-xs"
               >
                 <For each={onlineNodes()}>
@@ -207,6 +225,22 @@ export default function ExternalSessionsDialog(props: ExternalSessionsDialogProp
 
         <Show when={error()}>
           {(message) => <p class="text-destructive text-xs">{message()}</p>}
+        </Show>
+
+        <Show when={historyFallback()}>
+          {(session) => (
+            <div class="border-warn/40 bg-warn-soft/40 flex flex-wrap items-center gap-2 rounded-md border p-2 text-xs">
+              <span class="min-w-0 flex-1">{m.external_sessions_import_no_history()}</span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={importing() !== null}
+                onClick={() => void importSession(session(), { mirrorHistory: false })}
+              >
+                {m.external_sessions_import_no_history()}
+              </Button>
+            </div>
+          )}
         </Show>
 
         <div class="min-h-32 overflow-y-auto pr-1">

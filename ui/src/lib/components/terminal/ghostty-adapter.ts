@@ -52,12 +52,18 @@ export class GhosttyWebAdapter implements ITerminalAdapter {
   #dataListeners = new Set<(data: string) => void>();
   #resizeListeners = new Set<(dims: TerminalDimensions) => void>();
   #disposers: { dispose(): void }[] = [];
+  /** `dispose()` may run while the async WASM init is still pending. */
+  #disposed = false;
+  /** Invalidates an older `mount()` when the same adapter is mounted again. */
+  #mountToken = 0;
 
   mount(element: HTMLElement): void {
-    if (this.#terminal !== null) return;
+    if (this.#terminal !== null || this.#disposed) return;
+    const token = ++this.#mountToken;
     // WASM initialization is async, so writes are buffered until it completes
     void (async () => {
       await init();
+      if (this.#disposed || token !== this.#mountToken) return;
       const terminal = new Terminal({
         fontSize: FONT_SIZE,
         cursorBlink: true,
@@ -89,6 +95,7 @@ export class GhosttyWebAdapter implements ITerminalAdapter {
   }
 
   write(data: string | Uint8Array): void {
+    if (this.#disposed) return;
     if (this.#terminal === null) {
       this.#pendingWrites.push(data);
       return;
@@ -134,6 +141,8 @@ export class GhosttyWebAdapter implements ITerminalAdapter {
   }
 
   dispose(): void {
+    this.#disposed = true;
+    this.#mountToken += 1;
     for (const disposer of this.#disposers.splice(0)) disposer.dispose();
     this.#fitAddon?.dispose();
     this.#terminal?.dispose();

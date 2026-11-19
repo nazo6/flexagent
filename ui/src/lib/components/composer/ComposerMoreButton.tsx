@@ -11,7 +11,7 @@ export interface ComposerMoreButtonProps {
   active?: boolean;
   open?: boolean;
   /** Called whenever the popover opens or closes (`bind:open` in the Svelte app). */
-  onopenchange?: (open: boolean) => void;
+  onOpenChange?: (open: boolean) => void;
   contentClass?: string;
   children?: JSX.Element;
 }
@@ -19,7 +19,7 @@ export interface ComposerMoreButtonProps {
 /** Round "more options" button plus popover. */
 export default function ComposerMoreButton(props: ComposerMoreButtonProps) {
   return (
-    <Popover.Root open={props.open} onOpenChange={(next) => props.onopenchange?.(next)}>
+    <Popover.Root open={props.open} onOpenChange={(next) => props.onOpenChange?.(next)}>
       <Popover.Trigger
         class={cn(
           "text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring/40 relative inline-flex size-7 shrink-0 items-center justify-center rounded-full outline-none transition-colors focus-visible:ring-2",

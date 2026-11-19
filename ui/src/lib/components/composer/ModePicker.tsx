@@ -50,7 +50,7 @@ export default function ModePicker(props: ModePickerProps) {
       disabled={(props.disabled ?? false) || (props.loading ?? false)}
       class={props.class}
       open={open()}
-      onopenchange={setOpen}
+      onOpenChange={setOpen}
       contentClass="w-[min(20rem,calc(100vw-1.5rem))]"
     >
       <div class="max-h-72 overflow-y-auto p-1">

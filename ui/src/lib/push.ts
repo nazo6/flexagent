@@ -40,9 +40,22 @@ async function activeServiceWorkerRegistration(): Promise<ServiceWorkerRegistrat
   if (!hasPushSupport()) return null;
   // Check getRegistration() first because navigator.serviceWorker.ready never
   // resolves when no Service Worker is registered (e.g. Vite dev builds).
-  const registered = await navigator.serviceWorker.getRegistration();
-  if (!registered) return null;
-  return navigator.serviceWorker.ready;
+  try {
+    const registered = await navigator.serviceWorker.getRegistration();
+    if (!registered) return null;
+    return await navigator.serviceWorker.ready;
+  } catch {
+    // A browser may reject both calls in private mode or before install.
+    return null;
+  }
+}
+
+/** Byte-wise comparison of two keys supplied as ArrayBuffer / typed array. */
+function sameKey(left: ArrayBuffer | null | undefined, right: Uint8Array): boolean {
+  if (left === null || left === undefined) return false;
+  const bytes = new Uint8Array(left);
+  if (bytes.length !== right.length) return false;
+  return bytes.every((value, index) => value === right[index]);
 }
 
 async function systemInfo(): Promise<SystemInfoResponse | null> {
@@ -103,12 +116,21 @@ export async function enablePushNotifications(): Promise<void> {
     throw new Error(m.push_permission_denied());
   }
 
-  const subscription =
-    (await registration.pushManager.getSubscription()) ??
-    (await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey,
-    }));
+  let subscription = await registration.pushManager.getSubscription();
+  // Re-subscribe when the hub rotated its VAPID key; the old endpoint would
+  // deliver notifications nobody can decrypt.
+  if (
+    subscription !== null &&
+    !sameKey(subscription.options.applicationServerKey, applicationServerKey)
+  ) {
+    await subscription.unsubscribe();
+    subscription = null;
+  }
+  const created = subscription === null;
+  subscription ??= await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey,
+  });
 
   const keys = subscription.toJSON().keys ?? {};
   const p256dh = keys.p256dh;
@@ -116,12 +138,19 @@ export async function enablePushNotifications(): Promise<void> {
   if (!p256dh || !auth) {
     throw new Error(m.push_missing_subscription_keys());
   }
-  await connection.client.pushSubscribe({
-    endpoint: subscription.endpoint,
-    p256dh,
-    auth,
-    device_name: navigator.userAgent,
-  });
+  try {
+    await connection.client.pushSubscribe({
+      endpoint: subscription.endpoint,
+      p256dh,
+      auth,
+      device_name: navigator.userAgent,
+    });
+  } catch (error) {
+    // The server does not know this endpoint; do not leave a local subscription
+    // that will never receive anything.
+    if (created) await subscription.unsubscribe().catch(() => undefined);
+    throw error;
+  }
 }
 
 /** Unsubscribe this device (the server entry expires naturally on 404/410). */

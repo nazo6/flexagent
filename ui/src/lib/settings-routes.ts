@@ -76,16 +76,23 @@ export function isBrowserTab(tab: string): tab is BrowserSettingsTab {
   return BROWSER_TAB_SET.has(tab);
 }
 
+/** Drops a trailing slash so `/settings/` and `/settings` compare equal. */
+function normalizePathname(pathname: string): string {
+  return pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+}
+
 /** Whether a pathname is `/settings` or lives under it. */
 export function isSettingsPath(pathname: string): boolean {
-  return pathname === SETTINGS_ROOT || pathname.startsWith(`${SETTINGS_ROOT}/`);
+  const path = normalizePathname(pathname);
+  return path === SETTINGS_ROOT || path.startsWith(`${SETTINGS_ROOT}/`);
 }
 
 /** Settings scope a pathname belongs to (`null` outside `/settings/...`). */
 export function settingsScopeFromPath(pathname: string): SettingsScope | null {
-  if (pathname === HUB_BASE || pathname.startsWith(`${HUB_BASE}/`)) return "hub";
-  if (pathname === NODES_BASE || pathname.startsWith(`${NODES_BASE}/`)) return "node";
-  if (pathname === BROWSER_BASE || pathname.startsWith(`${BROWSER_BASE}/`)) return "browser";
+  const path = normalizePathname(pathname);
+  if (path === HUB_BASE || path.startsWith(`${HUB_BASE}/`)) return "hub";
+  if (path === NODES_BASE || path.startsWith(`${NODES_BASE}/`)) return "node";
+  if (path === BROWSER_BASE || path.startsWith(`${BROWSER_BASE}/`)) return "browser";
   return null;
 }
 
@@ -93,15 +100,18 @@ export function settingsScopeFromPath(pathname: string): SettingsScope | null {
  * Entry paths that redirect to a canonical destination.
  *
  * They render the child route immediately and navigate to the default tab (or
- * default node) without the settings chrome flashing first.
+ * default node) without the settings chrome flashing first. The node index
+ * (`/settings/nodes`) is deliberately absent: in the hub with no online node it
+ * must render the shell's `no_online_nodes` card instead of a blank page, and
+ * the index tab renders through the normal route.
  */
 export function isSettingsIndexPath(pathname: string): boolean {
+  const path = normalizePathname(pathname);
   return (
-    pathname === SETTINGS_ROOT ||
-    pathname === HUB_BASE ||
-    pathname === BROWSER_BASE ||
-    pathname === NODES_BASE ||
-    NODE_INDEX_PATH.test(pathname)
+    path === SETTINGS_ROOT ||
+    path === HUB_BASE ||
+    path === BROWSER_BASE ||
+    NODE_INDEX_PATH.test(path)
   );
 }
 

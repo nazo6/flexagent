@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, untrack } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { Button } from "#lib/components/ui/button/index.ts";
 import { Input } from "#lib/components/ui/input/index.ts";
@@ -18,6 +18,7 @@ import IconHouse from "~icons/lucide/house";
 import IconLoader2 from "~icons/lucide/loader-2";
 import IconRefreshCw from "~icons/lucide/refresh-cw";
 import IconSearch from "~icons/lucide/search";
+import { errorMessage } from "#lib/api/error-messages.ts";
 
 export interface FolderPickerProps {
   nodeId: string;
@@ -61,12 +62,16 @@ export default function FolderPicker(props: FolderPickerProps) {
     () => ({ active: props.active ?? true, nodeId: props.nodeId, initialPath: props.initialPath }),
     (source) => {
       if (!source.active || source.nodeId === "") return;
-      void loadDirectory(source.initialPath || undefined);
+      // The picker may be closed while the browse request is in flight; the
+      // cleanup invalidates it so no callback fires after close.
+      void untrack(() => loadDirectory(source.initialPath || undefined, source.nodeId));
+      return () => {
+        loadGeneration += 1;
+      };
     },
   );
 
-  async function loadDirectory(path?: string) {
-    const node = props.nodeId;
+  async function loadDirectory(path?: string, node = props.nodeId) {
     if (!node) return;
     const token = ++loadGeneration;
     setLoading(true);
@@ -87,7 +92,7 @@ export default function FolderPicker(props: FolderPickerProps) {
       props.onpathchange?.(res.current_path);
     } catch (cause) {
       if (token !== loadGeneration) return;
-      const message = cause instanceof Error ? cause.message : String(cause);
+      const message = errorMessage(cause);
       setError(message);
       setTruncated(false);
       setSelectedPath("");
@@ -101,14 +106,15 @@ export default function FolderPicker(props: FolderPickerProps) {
     }
   }
 
-  const displayedEntries = () =>
+  const displayedEntries = createMemo(() =>
     entries().filter((entry) => {
       if (!pickerFiles() && !entry.is_dir) return false;
       if (!showHidden() && entry.is_hidden) return false;
       return matchesFolderFilter(entry.name, filter());
-    });
+    }),
+  );
 
-  const breadcrumbs = () => buildBreadcrumbs(currentPath());
+  const breadcrumbs = createMemo(() => buildBreadcrumbs(currentPath()));
 
   function handleSelectEntry(entry: FsEntry): void {
     if (pickerMode() === "navigate" && entry.is_dir) {

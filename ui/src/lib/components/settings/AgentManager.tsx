@@ -1,12 +1,4 @@
-import {
-  createEffect,
-  createMemo,
-  createSignal,
-  createStore,
-  For,
-  onSettled,
-  Show,
-} from "solid-js";
+import { createEffect, createMemo, createSignal, createStore, For, Show } from "solid-js";
 import IconPencil from "~icons/lucide/pencil";
 import IconPlus from "~icons/lucide/plus";
 import IconRefreshCw from "~icons/lucide/refresh-cw";
@@ -75,9 +67,13 @@ export default function AgentManager(props: {
   const [agents, setAgents] = createSignal<AgentSummary[]>([]);
   const [registryAgents, setRegistryAgents] = createSignal<RegistryAgentSummary[]>([]);
   const [loading, setLoading] = createSignal(false);
+  /** Last catalog load failure (also surfaced as a toast when user-triggered). */
+  const [loadError, setLoadError] = createSignal<string | null>(null);
   /** Guard against overlapping catalog loads (a signal write is only visible
    * after the flush, and the retry below runs in the same microtask). */
   let inFlight = false;
+  /** Latest catalog request; a node switch invalidates older responses. */
+  let generation = 0;
   /** Label of the running operation (for example `Refreshing catalog…`). null = idle. */
   const [busyLabel, setBusyLabel] = createSignal<string | null>(null);
   /** Registry agent currently being imported. */
@@ -123,19 +119,32 @@ export default function AgentManager(props: {
     return [...byId].map(([id, name]) => ({ id, name }));
   });
 
-  onSettled(() => {
-    void loadAgents();
-  });
-
-  // Reload the catalog when the target node changes (the server no longer
-  // returns a representative node's catalog). `loadAgents` reads `loading` and
-  // `nodeId`, so run it untracked; otherwise the loading flag retriggers this
-  // effect and a failing node loops forever.
+  // Load once when the component mounts and again whenever the target node
+  // changes. A single effect owns the initial load; `onSettled` must not load a
+  // second time. `loadAgents` never reads the signals it writes.
   createEffect(
     () => nodeId(),
     (target) => {
-      if (target === "") return;
-      void loadAgents();
+      if (target === "") {
+        generation += 1;
+        inFlight = false;
+        setAgents([]);
+        setRegistryAgents([]);
+        setManagedAgent(null);
+        setLoadError(null);
+        setLoading(false);
+        return;
+      }
+      // Never keep another node's catalog around while its replacement loads.
+      // Bump the generation even before the load so a response from the previous
+      // node cannot win the race.
+      generation += 1;
+      inFlight = false;
+      setAgents([]);
+      setRegistryAgents([]);
+      setManagedAgent(null);
+      setLoadError(null);
+      void loadAgents(target, false);
     },
   );
 
@@ -157,22 +166,29 @@ export default function AgentManager(props: {
     return sync.nodes.find((node) => node.node_id === id)?.name ?? id;
   }
 
-  async function loadAgents(): Promise<void> {
-    const target = nodeId();
-    if (inFlight || target === "") return;
+  async function loadAgents(target = nodeId(), notify = true): Promise<void> {
+    if (target === "") return;
+    // A background load may already be running; a forced (post-mutation) refresh
+    // still wins, and its generation check discards the older response.
+    if (inFlight && !notify) return;
+    const current = ++generation;
     inFlight = true;
-    // Capture the target: it can change while the request is in flight.
     setLoading(true);
     try {
       const catalog = await sync.connection.client.nodeAgentCatalog(target);
+      if (current !== generation) return;
       setAgents(catalog.agents);
       setRegistryAgents(catalog.registry);
+      setLoadError(null);
     } catch (error) {
-      toast.error(errorMessage(error));
+      if (current !== generation) return;
+      setLoadError(errorMessage(error));
+      if (notify) toast.error(errorMessage(error));
     } finally {
-      inFlight = false;
-      setLoading(false);
-      if (nodeId() !== target) void loadAgents();
+      if (current === generation) {
+        inFlight = false;
+        setLoading(false);
+      }
     }
   }
 
@@ -525,6 +541,10 @@ export default function AgentManager(props: {
           <p class="text-muted-foreground text-[13px]">{busyLabel()}</p>
         </Show>
 
+        <Show when={loadError()}>
+          {(message) => <p class="text-destructive text-[13px]">{message()}</p>}
+        </Show>
+
         <Show
           when={nodeId() !== ""}
           fallback={
@@ -737,10 +757,7 @@ export default function AgentManager(props: {
             </Dialog.Description>
           </Dialog.Header>
 
-          <Show
-            when={customEditId() === null}
-            fallback={<Show when={customEditId() !== null}>{customAgentForm()}</Show>}
-          >
+          <Show when={customEditId() === null} fallback={customAgentForm()}>
             <Tabs.Root
               value={agentTab()}
               onValueChange={(value) => {
