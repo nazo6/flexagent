@@ -277,6 +277,9 @@ pub struct AgentSettings {
     pub registry_url: Option<String>,
     /// Registry cache TTL in seconds (`None` = built-in default)
     pub registry_cache_ttl_secs: Option<u64>,
+    /// Idle TTL of a warm ACP process in seconds (`None` = built-in default,
+    /// `0` = keep idle processes until node shutdown)
+    pub warm_idle_secs: Option<u64>,
     /// Agent name aliases (merged over the built-in aliases)
     pub aliases: BTreeMap<String, String>,
     /// Optimistic-lock revision
@@ -291,6 +294,8 @@ impl AgentSettings {
         "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
     /// Default value of the registry cache TTL (24 hours).
     pub const DEFAULT_REGISTRY_CACHE_TTL_SECS: u64 = 86_400;
+    /// Default idle TTL of a warm ACP process (10 minutes).
+    pub const DEFAULT_WARM_IDLE_SECS: u64 = 600;
 
     /// Returns the effective ACP registry URL.
     pub fn resolved_registry_url(&self) -> &str {
@@ -305,6 +310,13 @@ impl AgentSettings {
         self.registry_cache_ttl_secs
             .unwrap_or(Self::DEFAULT_REGISTRY_CACHE_TTL_SECS)
     }
+
+    /// Returns the effective warm ACP process idle TTL (seconds).
+    ///
+    /// `0` is meaningful: it keeps idle processes until node shutdown.
+    pub fn resolved_warm_idle_secs(&self) -> u64 {
+        self.warm_idle_secs.unwrap_or(Self::DEFAULT_WARM_IDLE_SECS)
+    }
 }
 
 /// `PATCH /api/v1/nodes/{node_id}/settings/agents` request.
@@ -315,6 +327,9 @@ pub struct UpdateAgentSettingsRequest {
     pub registry_url: Option<String>,
     /// Registry cache TTL in seconds
     pub registry_cache_ttl_secs: Option<u64>,
+    /// Idle TTL of a warm ACP process in seconds (`None` = default,
+    /// `0` = keep idle processes until node shutdown)
+    pub warm_idle_secs: Option<u64>,
     /// Agent name aliases
     pub aliases: BTreeMap<String, String>,
     /// Revision the client observed (`REVISION_MISMATCH` on conflict)

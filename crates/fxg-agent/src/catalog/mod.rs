@@ -9,6 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
 
 use anyhow::anyhow;
 use fxg_protocol::client_api::AgentBackendKind;
@@ -33,6 +34,8 @@ pub struct AgentCatalogState {
     pub registry_url: Option<String>,
     /// Registry cache TTL in seconds (`None` = built-in default)
     pub cache_ttl_secs: Option<u64>,
+    /// Idle TTL of a warm ACP process in seconds (`0` = until node shutdown)
+    pub warm_idle_secs: u64,
     /// Effective aliases (built-ins merged with the configured ones)
     pub aliases: BTreeMap<String, String>,
     /// Custom agent definitions
@@ -48,6 +51,7 @@ impl AgentCatalogState {
         Self {
             registry_url: settings.registry_url.clone(),
             cache_ttl_secs: settings.registry_cache_ttl_secs,
+            warm_idle_secs: settings.resolved_warm_idle_secs(),
             aliases: settings.aliases.clone(),
             custom,
         }
@@ -68,7 +72,7 @@ pub struct AgentCatalog {
     acp: Arc<AcpDriver>,
     /// Tier 2 drivers (one per extension), cached so the driver identity stays
     /// stable per agent.
-    extended: Mutex<BTreeMap<String, Arc<dyn AgentDriver>>>,
+    extended: Mutex<BTreeMap<String, Arc<AcpDriver>>>,
     /// Preset executable lookup (injectable for tests).
     preset_lookup: fn(&LaunchPreset) -> Option<PathBuf>,
 }
@@ -111,7 +115,9 @@ impl AgentCatalog {
             registry,
             agents: agent_map,
             extensions,
-            acp: Arc::new(AcpDriver::new()),
+            acp: Arc::new(AcpDriver::with_warm_idle(Duration::from_secs(
+                settings.resolved_warm_idle_secs(),
+            ))),
             extended: Mutex::new(BTreeMap::new()),
             preset_lookup: default_preset_lookup,
         }
@@ -204,6 +210,16 @@ impl AgentCatalog {
             settings.registry_url.clone(),
             settings.registry_cache_ttl_secs,
         );
+        let warm_idle = Duration::from_secs(settings.resolved_warm_idle_secs());
+        self.acp.set_warm_idle(warm_idle);
+        for driver in self
+            .extended
+            .lock()
+            .expect("extended driver cache poisoned")
+            .values()
+        {
+            driver.set_warm_idle(warm_idle);
+        }
     }
 
     /// Builds the catalog list in display order: custom → built-in presets.
@@ -472,20 +488,22 @@ impl AgentCatalog {
 
     /// Returns the cached Tier 2 driver for an extension.
     fn extended_driver(&self, extension_id: &str) -> anyhow::Result<Arc<dyn AgentDriver>> {
+        let warm_idle = Duration::from_secs(self.state().warm_idle_secs);
         let mut cache = self
             .extended
             .lock()
             .expect("extended driver cache poisoned");
         if let Some(driver) = cache.get(extension_id) {
-            return Ok(Arc::clone(driver));
+            let driver = Arc::clone(driver);
+            return Ok(driver);
         }
 
         let extension = self
             .extensions
             .get(extension_id)
             .ok_or_else(|| anyhow!("no extension is registered as {extension_id}"))?;
-        let driver: Arc<dyn AgentDriver> =
-            Arc::new(AcpDriver::with_extension(Arc::clone(extension)));
+        let driver = Arc::new(AcpDriver::with_extension(Arc::clone(extension)));
+        driver.set_warm_idle(warm_idle);
         cache.insert(extension_id.to_owned(), Arc::clone(&driver));
         Ok(driver)
     }

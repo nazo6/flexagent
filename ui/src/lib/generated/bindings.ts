@@ -200,6 +200,11 @@ export type AgentSettings = {
 	registry_url: string | null,
 	/**  Registry cache TTL in seconds (`None` = built-in default) */
 	registry_cache_ttl_secs: number | null,
+	/**
+	 *  Idle TTL of a warm ACP process in seconds (`None` = built-in default,
+	 *  `0` = keep idle processes until node shutdown)
+	 */
+	warm_idle_secs: number | null,
 	/**  Agent name aliases (merged over the built-in aliases) */
 	aliases: { [key in string]: string },
 	/**  Optimistic-lock revision */
@@ -2844,6 +2849,11 @@ export type UpdateAgentSettingsRequest = {
 	registry_url: string | null,
 	/**  Registry cache TTL in seconds */
 	registry_cache_ttl_secs: number | null,
+	/**
+	 *  Idle TTL of a warm ACP process in seconds (`None` = default,
+	 *  `0` = keep idle processes until node shutdown)
+	 */
+	warm_idle_secs: number | null,
 	/**  Agent name aliases */
 	aliases: { [key in string]: string },
 	/**  Revision the client observed (`REVISION_MISMATCH` on conflict) */

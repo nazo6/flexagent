@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT registry_url, registry_cache_ttl_secs, revision, updated_at\n          FROM agent_settings\n         WHERE id = 1\n        ",
+  "query": "\n        SELECT registry_url, registry_cache_ttl_secs, warm_idle_secs, revision, updated_at\n          FROM agent_settings\n         WHERE id = 1\n        ",
   "describe": {
     "columns": [
       {
@@ -26,8 +26,19 @@
         }
       },
       {
-        "name": "revision",
+        "name": "warm_idle_secs",
         "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "agent_settings",
+            "name": "warm_idle_secs"
+          }
+        }
+      },
+      {
+        "name": "revision",
+        "ordinal": 3,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -38,7 +49,7 @@
       },
       {
         "name": "updated_at",
-        "ordinal": 3,
+        "ordinal": 4,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -54,9 +65,10 @@
     "nullable": [
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "ca02bfd4c6e920cf3dccb17096896a4e2444aeecadeb679fa5ff6d1a85252235"
+  "hash": "38d15407ecb073fd43c1cd0d2b47483c9c7a111ef1939364308258f2d93d16ce"
 }

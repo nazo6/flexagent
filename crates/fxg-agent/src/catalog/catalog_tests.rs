@@ -12,6 +12,7 @@ fn settings() -> AgentSettings {
     AgentSettings {
         registry_url: None,
         registry_cache_ttl_secs: None,
+        warm_idle_secs: None,
         aliases: BTreeMap::new(),
         revision: 1,
         updated_at: 0,

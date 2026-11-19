@@ -293,6 +293,14 @@ ACP の必要な unstable feature（`unstable_session_fork` /
 では上書きしない。将来 ACP の capability を増やすときは variant と mapping を
 追加する。エージェントごとの分岐は extension にのみ置く。
 
+### 2.4 ウォームプール（プロセス再利用）
+
+ACP プロセスは起動が重いため、セッション終了後も `LaunchKey` ごとに 1 プロセス
+だけアイドル保持し、次の `session/new` で再利用します。保持時間は `node.db` の
+`agent_settings.warm_idle_secs` が所有し、既定は 600 秒、`0` はノード終了まで
+保持します。設定変更は `AcpDriver::set_warm_idle` で即時反映され、ノードの再起動
+は不要です。
+
 ---
 
 ## 3. カスタム ACP エージェント (任意コマンド)

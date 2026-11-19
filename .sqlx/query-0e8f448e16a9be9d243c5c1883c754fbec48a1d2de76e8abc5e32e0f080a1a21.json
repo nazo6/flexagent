@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE agent_settings\n           SET registry_url = ?,\n               registry_cache_ttl_secs = ?,\n               warm_idle_secs = ?,\n               revision = revision + 1,\n               updated_at = ?\n         WHERE id = 1 AND revision = ?\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "0e8f448e16a9be9d243c5c1883c754fbec48a1d2de76e8abc5e32e0f080a1a21"
+}

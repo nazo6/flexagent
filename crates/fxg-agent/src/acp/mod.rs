@@ -67,7 +67,7 @@ use fxg_protocol::events::UnifiedEventPayload;
 use fxg_protocol::util::uuid_v7;
 use tokio::sync::{mpsc, oneshot, watch};
 
-use crate::acp::warm::{DEFAULT_WARM_IDLE, LaunchKey, WarmPool, WarmProcess};
+use crate::acp::warm::{LaunchKey, WarmPool, WarmProcess};
 use crate::driver::{
     ActiveSessionHandle, AgentAuthRequired, AgentDriver, DriverEvent, HistoryCaptureUnavailable,
     NativeForkUnavailable, NativeResumeUnavailable, ResumeRequest, StartSessionRequest,
@@ -164,26 +164,14 @@ impl Default for AcpDriver {
 }
 
 impl AcpDriver {
-    /// Creates a driver with the idle pool enabled.
+    /// Creates a driver with the idle pool enabled (default 10-minute TTL).
     ///
-    /// The idle TTL defaults to 10 minutes; `FXG_AGENT_WARM_IDLE_SECS` overrides
-    /// it (`0` keeps processes until node shutdown).
+    /// The node applies `agent_settings.warm_idle_secs` through
+    /// [`Self::set_warm_idle`] after loading its settings.
     pub fn new() -> Self {
-        let idle = match fxg_protocol::config::process_env(
-            fxg_protocol::config::env_keys::AGENT_WARM_IDLE_SECS,
-        ) {
-            Some(value) => match value.trim().parse::<u64>() {
-                Ok(secs) => Duration::from_secs(secs),
-                Err(err) => {
-                    tracing::warn!(
-                        "invalid FXG_AGENT_WARM_IDLE_SECS value {value:?}: {err}; using the default"
-                    );
-                    DEFAULT_WARM_IDLE
-                }
-            },
-            None => DEFAULT_WARM_IDLE,
-        };
-        Self::with_warm_idle(idle)
+        Self::with_warm_idle(Duration::from_secs(
+            fxg_protocol::settings::AgentSettings::DEFAULT_WARM_IDLE_SECS,
+        ))
     }
 
     /// Creates a driver with the given warm-process idle TTL.
@@ -192,6 +180,13 @@ impl AcpDriver {
             pool: Some(Arc::new(WarmPool::new(idle))),
             stderr: StderrRegistry::default(),
             extension: None,
+        }
+    }
+
+    /// Replaces the warm-process idle TTL (`0` keeps processes until node shutdown).
+    pub fn set_warm_idle(&self, idle: Duration) {
+        if let Some(pool) = self.pool.as_ref() {
+            pool.set_ttl(idle);
         }
     }
 

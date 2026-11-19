@@ -231,7 +231,7 @@ pub async fn ensure_agent_settings(pool: &SqlitePool) -> Result<AgentSettings, D
 pub async fn get_agent_settings(pool: &SqlitePool) -> Result<Option<AgentSettings>, DbError> {
     let row = sqlx::query!(
         r#"
-        SELECT registry_url, registry_cache_ttl_secs, revision, updated_at
+        SELECT registry_url, registry_cache_ttl_secs, warm_idle_secs, revision, updated_at
           FROM agent_settings
          WHERE id = 1
         "#,
@@ -243,6 +243,9 @@ pub async fn get_agent_settings(pool: &SqlitePool) -> Result<Option<AgentSetting
     Ok(Some(AgentSettings {
         registry_url: row.registry_url,
         registry_cache_ttl_secs: row.registry_cache_ttl_secs.and_then(positive_u64),
+        warm_idle_secs: row
+            .warm_idle_secs
+            .and_then(|value| u64::try_from(value).ok()),
         aliases,
         revision: revision_u64(row.revision)?,
         updated_at: row.updated_at,
@@ -271,18 +274,23 @@ pub async fn update_agent_settings(
     let ttl = request
         .registry_cache_ttl_secs
         .map(|value| i64::try_from(value).unwrap_or(i64::MAX));
+    let warm_idle = request
+        .warm_idle_secs
+        .map(|value| i64::try_from(value).unwrap_or(i64::MAX));
     let mut tx = pool.begin().await?;
     let result = sqlx::query!(
         r#"
         UPDATE agent_settings
            SET registry_url = ?,
                registry_cache_ttl_secs = ?,
+               warm_idle_secs = ?,
                revision = revision + 1,
                updated_at = ?
          WHERE id = 1 AND revision = ?
         "#,
         request.registry_url,
         ttl,
+        warm_idle,
         now,
         expected,
     )

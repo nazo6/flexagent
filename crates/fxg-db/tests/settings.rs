@@ -58,11 +58,16 @@ async fn agent_settings_and_aliases_roundtrip() {
     let db = db().await;
     let initial: AgentSettings = db.ensure_agent_settings().await.expect("ensure");
     assert!(initial.aliases.is_empty());
+    assert_eq!(
+        initial.resolved_warm_idle_secs(),
+        AgentSettings::DEFAULT_WARM_IDLE_SECS
+    );
 
     let updated = db
         .update_agent_settings(&UpdateAgentSettingsRequest {
             registry_url: Some("https://example.test/registry.json".to_owned()),
             registry_cache_ttl_secs: Some(60),
+            warm_idle_secs: Some(0),
             aliases: BTreeMap::from([("fast".to_owned(), "opencode2".to_owned())]),
             expected_revision: initial.revision,
         })
@@ -73,11 +78,15 @@ async fn agent_settings_and_aliases_roundtrip() {
         Some("opencode2")
     );
     assert_eq!(updated.resolved_registry_cache_ttl_secs(), 60);
+    // `0` stays meaningful: it keeps idle processes until node shutdown.
+    assert_eq!(updated.warm_idle_secs, Some(0));
+    assert_eq!(updated.resolved_warm_idle_secs(), 0);
 
     let err = db
         .update_agent_settings(&UpdateAgentSettingsRequest {
             registry_url: None,
             registry_cache_ttl_secs: None,
+            warm_idle_secs: None,
             aliases: BTreeMap::new(),
             expected_revision: 1,
         })

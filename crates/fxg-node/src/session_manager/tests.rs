@@ -53,6 +53,7 @@ async fn setup() -> (SessionManager, MockAgent, tempfile::TempDir) {
     let settings = AgentSettings {
         registry_url: None,
         registry_cache_ttl_secs: None,
+        warm_idle_secs: None,
         aliases: BTreeMap::new(),
         revision: 1,
         updated_at: 0,
@@ -267,6 +268,7 @@ async fn full_custom_driver_starts_through_the_catalog() {
     let settings = AgentSettings {
         registry_url: None,
         registry_cache_ttl_secs: None,
+        warm_idle_secs: None,
         aliases: BTreeMap::new(),
         revision: 1,
         updated_at: 0,
@@ -316,6 +318,7 @@ async fn full_custom_driver_probe_uses_the_catalog_driver() {
     let settings = AgentSettings {
         registry_url: None,
         registry_cache_ttl_secs: None,
+        warm_idle_secs: None,
         aliases: BTreeMap::new(),
         revision: 1,
         updated_at: 0,

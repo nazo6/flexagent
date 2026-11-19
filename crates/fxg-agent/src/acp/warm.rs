@@ -7,7 +7,9 @@
 //! `session/new` on an initialized connection starts the session in seconds).
 //!
 //! - At most **one process per launch spec ([`LaunchKey`])** is kept.
-//! - Idle processes older than the TTL ([`DEFAULT_WARM_IDLE`]) are disposed automatically.
+//! - Idle processes older than the TTL are disposed automatically. The TTL comes
+//!   from `agent_settings.warm_idle_secs` (0 = keep until node shutdown) and can
+//!   be replaced at runtime.
 //! - When a process is released while an idle process with the same key exists, the
 //!   older one is disposed.
 //! - If the pool itself is dropped, idle processes are disposed on a best-effort
@@ -22,9 +24,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::driver::AgentLaunchSpec;
-
-/// Default idle retention time for processes.
-pub(crate) const DEFAULT_WARM_IDLE: Duration = Duration::from_secs(10 * 60);
 
 /// Process held by the pool (implemented by the caller).
 pub(crate) trait WarmProcess: Send + Sync + 'static {
@@ -82,8 +81,8 @@ impl LaunchKey {
 
 /// Reuse pool for idle processes.
 pub(crate) struct WarmPool<P: WarmProcess> {
-    /// Idle retention time
-    ttl: Duration,
+    /// Idle retention time (0 = keep until shutdown); replaced from `node.db`
+    ttl: Mutex<Duration>,
     /// Pool state (`std::sync::Mutex` because it is never held across an await)
     inner: Mutex<PoolState<P>>,
 }
@@ -104,12 +103,22 @@ impl<P: WarmProcess> WarmPool<P> {
     /// Creates a pool with a TTL.
     pub(crate) fn new(ttl: Duration) -> Self {
         Self {
-            ttl,
+            ttl: Mutex::new(ttl),
             inner: Mutex::new(PoolState {
                 idle: HashMap::new(),
                 next_token: 0,
             }),
         }
+    }
+
+    /// Replaces the idle retention time (0 = keep idle processes until shutdown).
+    pub(crate) fn set_ttl(&self, ttl: Duration) {
+        *self.ttl.lock().expect("warm pool poisoned") = ttl;
+    }
+
+    /// Returns the idle retention time.
+    pub(crate) fn ttl(&self) -> Duration {
+        *self.ttl.lock().expect("warm pool poisoned")
     }
 
     /// Takes the idle process matching the key (`None` if absent).
@@ -138,7 +147,11 @@ impl<P: WarmProcess> WarmPool<P> {
         }
         // TTL expiry timer. Holds a `Weak` reference so it does not prevent the pool
         // itself from being dropped (so Drop can dispose all remaining idle processes at once).
-        let ttl = self.ttl;
+        // A TTL of 0 means "keep until node shutdown", so no timer is scheduled.
+        let ttl = self.ttl();
+        if ttl.is_zero() {
+            return;
+        }
         let pool = Arc::downgrade(self);
         fxg_protocol::spawn_guarded!("warm pool ttl timer", async move {
             tokio::time::sleep(ttl).await;
@@ -295,6 +308,30 @@ mod tests {
         wait_for(&counter, 1).await;
         assert_eq!(counter.load(Ordering::SeqCst), 1);
         assert!(pool.checkout(&key("a")).is_none());
+    }
+
+    #[tokio::test]
+    async fn zero_ttl_keeps_idle_process_until_shutdown() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let pool = Arc::new(WarmPool::new(Duration::ZERO));
+        pool.release(key("a"), mock(&counter));
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+        assert!(pool.checkout(&key("a")).is_some());
+    }
+
+    #[tokio::test]
+    async fn set_ttl_replaces_the_retention_time() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let pool = Arc::new(WarmPool::new(Duration::from_secs(60)));
+        pool.set_ttl(Duration::ZERO);
+        assert_eq!(pool.ttl(), Duration::ZERO);
+        pool.release(key("a"), mock(&counter));
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+        assert!(pool.checkout(&key("a")).is_some());
     }
 
     #[tokio::test]
