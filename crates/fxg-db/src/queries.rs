@@ -638,7 +638,13 @@ pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<ProjectSummary>, DbE
         SELECT project_id AS "project_id!",
                name, canonical_git_url,
                identity_kind AS "identity_kind!: ProjectIdentityKind",
-               project_key, created_at, updated_at
+               project_key, created_at, updated_at,
+               EXISTS (
+                   SELECT 1
+                     FROM sessions s
+                    WHERE s.project_id = projects.project_id
+                      AND s.deleted_at IS NULL
+               ) AS "has_sessions!: bool"
           FROM projects
          ORDER BY updated_at DESC
         "#,
@@ -672,6 +678,7 @@ pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<ProjectSummary>, DbE
             },
             created_at: row.created_at,
             updated_at: row.updated_at,
+            has_sessions: row.has_sessions,
             bindings: Vec::new(),
         })
         .collect();
@@ -1087,6 +1094,7 @@ struct ProjectRow {
     project_key: Option<String>,
     created_at: i64,
     updated_at: i64,
+    has_sessions: bool,
 }
 
 struct BindingRow {

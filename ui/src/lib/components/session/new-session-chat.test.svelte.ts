@@ -51,6 +51,7 @@ function project(): ProjectSummary {
     identity: { kind: "local", key: "p1" },
     created_at: 0,
     updated_at: 0,
+    has_sessions: true,
     bindings: [
       {
         node_id: "n1",

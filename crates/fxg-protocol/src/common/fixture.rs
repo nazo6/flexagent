@@ -48,6 +48,7 @@ impl ProjectSummary {
             identity: ProjectIdentity::local(),
             created_at: 0,
             updated_at: 0,
+            has_sessions: false,
             bindings: Vec::new(),
         }
     }

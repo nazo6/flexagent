@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT project_id AS \"project_id!\",\n               name, canonical_git_url,\n               identity_kind AS \"identity_kind!: ProjectIdentityKind\",\n               project_key, created_at, updated_at\n          FROM projects\n         ORDER BY updated_at DESC\n        ",
+  "query": "\n        SELECT project_id AS \"project_id!\",\n               name, canonical_git_url,\n               identity_kind AS \"identity_kind!: ProjectIdentityKind\",\n               project_key, created_at, updated_at,\n               EXISTS (\n                   SELECT 1\n                     FROM sessions s\n                    WHERE s.project_id = projects.project_id\n                      AND s.deleted_at IS NULL\n               ) AS \"has_sessions!: bool\"\n          FROM projects\n         ORDER BY updated_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -79,6 +79,12 @@
             "name": "updated_at"
           }
         }
+      },
+      {
+        "name": "has_sessions!: bool",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -91,8 +97,9 @@
       false,
       true,
       false,
+      false,
       false
     ]
   },
-  "hash": "31e7b498457ff5a1c7fdfb12f8be49544b169dea5354cb1944877deb21fcc422"
+  "hash": "c0a7ddb327801b9254922408dc5ec7674067abc70ef1dabcfa2236b73e17002b"
 }

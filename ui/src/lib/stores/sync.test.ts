@@ -51,6 +51,7 @@ function makeProject(projectId: string, name: string): ProjectSummary {
     identity: { kind: "local", key: projectId },
     created_at: 1,
     updated_at: 1,
+    has_sessions: true,
     bindings: [],
   };
 }

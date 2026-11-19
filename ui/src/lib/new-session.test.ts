@@ -35,6 +35,7 @@ function project(
     identity: { kind: "git_remote", key: null },
     created_at: 0,
     updated_at: 0,
+    has_sessions: true,
     bindings,
   };
 }

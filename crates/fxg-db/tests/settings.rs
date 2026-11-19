@@ -187,6 +187,50 @@ async fn prune_removes_unreported_bindings_and_relinks_sessions() {
 }
 
 #[tokio::test]
+async fn project_list_reports_whether_a_project_has_sessions() {
+    let db = Db::open_in_memory(Role::Hub).await.expect("db");
+    db.upsert_node(&fxg_db::NodeRecord::new(
+        "node-a", "Node A", "linux", "x86_64", "0.1.0",
+    ))
+    .await
+    .expect("node");
+
+    for project_id in ["local:empty", "local:used"] {
+        db.upsert_project(&fxg_db::ProjectRecord {
+            project_id: project_id.to_owned(),
+            name: project_id.to_owned(),
+            canonical_git_url: None,
+            identity: ProjectIdentity::local(),
+        })
+        .await
+        .expect("project");
+    }
+    db.upsert_provisional_session(&fxg_db::registration::ProvisionalSessionRecord {
+        session_id: "s1".to_owned(),
+        project_id: "local:used".to_owned(),
+        project_name: "used".to_owned(),
+        node_id: "node-a".to_owned(),
+        local_path: "/src/used".to_owned(),
+        git_branch: None,
+        agent_id: "opencode".to_owned(),
+        title: "session".to_owned(),
+    })
+    .await
+    .expect("session");
+
+    let projects = db.list_projects().await.expect("projects");
+    let has_sessions = |project_id: &str| {
+        projects
+            .iter()
+            .find(|project| project.project_id.as_str() == project_id)
+            .expect("project is listed")
+            .has_sessions
+    };
+    assert!(!has_sessions("local:empty"));
+    assert!(has_sessions("local:used"));
+}
+
+#[tokio::test]
 async fn hub_settings_and_provisioners() {
     let db = Db::open_in_memory(Role::Hub).await.expect("db");
     let initial = db.ensure_hub_settings().await.expect("ensure");

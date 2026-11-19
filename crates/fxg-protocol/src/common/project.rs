@@ -176,6 +176,12 @@ pub struct ProjectSummary {
     pub created_at: i64,
     /// Last update time (Unix epoch ms)
     pub updated_at: i64,
+    /// Whether the projection has at least one session (deleted sessions excluded, archived ones included)
+    ///
+    /// A registered project can have no sessions yet. The client uses this to
+    /// tell such a project apart from one whose sessions are simply older than
+    /// the loaded page, which it cannot decide from the session list alone.
+    pub has_sessions: bool,
     /// Local path bindings for each participating node
     pub bindings: Vec<ProjectBindingSummary>,
 }

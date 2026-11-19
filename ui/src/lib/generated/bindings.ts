@@ -1504,6 +1504,14 @@ export type ProjectSummary = {
 	created_at: number,
 	/**  Last update time (Unix epoch ms) */
 	updated_at: number,
+	/**
+	 *  Whether the projection has at least one session (deleted sessions excluded, archived ones included)
+	 *
+	 *  A registered project can have no sessions yet. The client uses this to
+	 *  tell such a project apart from one whose sessions are simply older than
+	 *  the loaded page, which it cannot decide from the session list alone.
+	 */
+	has_sessions: boolean,
 	/**  Local path bindings for each participating node */
 	bindings: ProjectBindingSummary[],
 };

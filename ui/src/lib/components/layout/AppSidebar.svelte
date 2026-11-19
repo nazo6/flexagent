@@ -102,15 +102,19 @@
     sessions: SessionSummary[];
     pendingCount: number;
     runningCount: number;
+    /** Whether the project has any session server-side (loaded page or not) */
+    hasSessions: boolean;
   }
 
   // Session groups by project
   const projectGroups = $derived.by(() => {
     const groups: ProjectSessionGroup[] = [];
     const projectMap = new Map<string, string>();
+    const projectsWithSessions = new Set<string>();
 
     for (const p of sync.projects) {
       projectMap.set(p.project_id, p.name);
+      if (p.has_sessions) projectsWithSessions.add(p.project_id);
     }
 
     const allProjectIds = new Set<string>();
@@ -144,6 +148,7 @@
         sessions: projSessions,
         pendingCount,
         runningCount,
+        hasSessions: projectsWithSessions.has(pId) || projSessions.length > 0,
       });
     }
 
@@ -373,42 +378,19 @@
                 {/each}
                 {#if group.sessions.length === 0 && !sync.hasLoadedProjectSessions(group.projectId)}
                   <li class="py-1 px-1.5">
-                    <button
-                      type="button"
-                      class="text-muted-foreground hover:text-foreground hover:bg-accent flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] select-none disabled:opacity-60"
-                      disabled={sync.sessionsLoadingMore(group.projectId)}
-                      onclick={() => void sync.loadMoreSessions(group.projectId)}
-                    >
-                      {#if sync.sessionsLoadingMore(group.projectId)}
-                        <LoaderCircleIcon class="size-3 animate-spin" />
-                      {/if}
-                      {m.shell_load_sessions()}
-                    </button>
+                    {#if group.hasSessions}
+                      {@render loadSessionsButton(group.projectId, m.shell_load_sessions())}
+                    {:else}
+                      {@render startSessionLink(group.projectId)}
+                    {/if}
                   </li>
                 {:else if sync.hasMoreSessions(group.projectId)}
                   <li class="py-1 px-1.5">
-                    <button
-                      type="button"
-                      class="text-muted-foreground hover:text-foreground hover:bg-accent flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] select-none disabled:opacity-60"
-                      disabled={sync.sessionsLoadingMore(group.projectId)}
-                      onclick={() => void sync.loadMoreSessions(group.projectId)}
-                    >
-                      {#if sync.sessionsLoadingMore(group.projectId)}
-                        <LoaderCircleIcon class="size-3 animate-spin" />
-                      {/if}
-                      {m.shell_load_older_sessions()}
-                    </button>
+                    {@render loadSessionsButton(group.projectId, m.shell_load_older_sessions())}
                   </li>
                 {:else if group.sessions.length === 0}
                   <li class="py-1 px-1.5 text-[11px] text-muted-foreground">
-                    <a
-                      href={`/?project=${encodeURIComponent(group.projectId)}`}
-                      onclick={handleLinkClick}
-                      class="hover:underline flex items-center gap-1 text-primary/80"
-                    >
-                      <PlusIcon class="size-3" />
-                      <span>{m.shell_start_session()}</span>
-                    </a>
+                    {@render startSessionLink(group.projectId)}
                   </li>
                 {/if}
               </ul>
@@ -459,6 +441,31 @@
 </aside>
 
 <ExternalSessionsDialog bind:open={externalOpen} />
+
+{#snippet loadSessionsButton(projectId: string, label: string)}
+  <button
+    type="button"
+    class="text-muted-foreground hover:text-foreground hover:bg-accent flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] select-none disabled:opacity-60"
+    disabled={sync.sessionsLoadingMore(projectId)}
+    onclick={() => void sync.loadMoreSessions(projectId)}
+  >
+    {#if sync.sessionsLoadingMore(projectId)}
+      <LoaderCircleIcon class="size-3 animate-spin" />
+    {/if}
+    {label}
+  </button>
+{/snippet}
+
+{#snippet startSessionLink(projectId: string)}
+  <a
+    href={`/?project=${encodeURIComponent(projectId)}`}
+    onclick={handleLinkClick}
+    class="hover:underline flex items-center gap-1 text-[11px] text-primary/80"
+  >
+    <PlusIcon class="size-3" />
+    <span>{m.shell_start_session()}</span>
+  </a>
+{/snippet}
 
 {#snippet sessionRow(session: SessionSummary)}
   {@const isActive = activeSessionId === session.session_id}
