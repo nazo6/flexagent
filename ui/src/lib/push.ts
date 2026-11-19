@@ -36,6 +36,14 @@ function hasPushSupport(): boolean {
   );
 }
 
+/**
+ * Notification permission (`"default"` when the API is unavailable, e.g. on a
+ * plain-HTTP origin, so the UI does not claim the user denied it).
+ */
+function notificationPermission(): NotificationPermission {
+  return typeof Notification !== "undefined" ? Notification.permission : "default";
+}
+
 async function activeServiceWorkerRegistration(): Promise<ServiceWorkerRegistration | null> {
   if (!hasPushSupport()) return null;
   // Check getRegistration() first because navigator.serviceWorker.ready never
@@ -63,7 +71,7 @@ export async function pushCapability(): Promise<PushCapability> {
     return {
       secureContext,
       supported: false,
-      permission: typeof Notification !== "undefined" ? Notification.permission : "denied",
+      permission: notificationPermission(),
       subscribed: false,
       serverEnabled,
     };
@@ -72,7 +80,7 @@ export async function pushCapability(): Promise<PushCapability> {
   return {
     secureContext,
     supported: true,
-    permission: Notification.permission,
+    permission: notificationPermission(),
     subscribed: subscription !== null,
     serverEnabled,
   };
@@ -84,6 +92,9 @@ export async function pushCapability(): Promise<PushCapability> {
  * Throws an `Error` with a localized message on failure.
  */
 export async function enablePushNotifications(): Promise<void> {
+  if (typeof window !== "undefined" && !window.isSecureContext) {
+    throw new Error(m.settings_notifications_unsupported_insecure());
+  }
   const registration = await activeServiceWorkerRegistration();
   if (!registration) {
     throw new Error(m.push_unsupported_browser());

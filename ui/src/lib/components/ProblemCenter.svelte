@@ -1,5 +1,6 @@
 <script lang="ts">
   import * as Sheet from "#lib/components/ui/sheet/index.ts";
+  import { copyText } from "#lib/clipboard.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import type { RecoveryAction } from "#lib/generated/bindings.ts";
   import { dataSafetyMessage } from "#lib/api/data-safety.ts";
@@ -25,7 +26,7 @@
   async function copyRequestId(problem: AppProblem): Promise<void> {
     if (problem.requestId === null) return;
     try {
-      await navigator.clipboard.writeText(problem.requestId);
+      await copyText(problem.requestId);
       toast.success(m.problem_copied());
     } catch (error) {
       problems.report("copy request id", error);

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { errorMessage } from "#lib/api/error-messages.ts";
+  import { copyText } from "#lib/clipboard.ts";
   import { hubLinkLabel } from "#lib/node-status.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
@@ -161,7 +162,7 @@
 
   async function copyNodeId(): Promise<void> {
     try {
-      await navigator.clipboard.writeText(targetNode);
+      await copyText(targetNode);
       toast.success(m.settings_copied({ name: m.settings_pairing_node_id() }));
     } catch {
       toast.error(m.settings_copy_failed());

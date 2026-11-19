@@ -1,5 +1,6 @@
 <script lang="ts">
   import * as Popover from "#lib/components/ui/popover/index.ts";
+  import { copyText } from "#lib/clipboard.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import ContextMeter from "#lib/components/session/ContextMeter.svelte";
@@ -37,7 +38,7 @@
 
   async function copy(value: string, message: string): Promise<void> {
     try {
-      await navigator.clipboard.writeText(value);
+      await copyText(value);
       toast.success(message);
     } catch {
       toast.error(m.settings_copy_failed());

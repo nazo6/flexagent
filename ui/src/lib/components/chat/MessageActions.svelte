@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { copyText } from "#lib/clipboard.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { toast } from "svelte-sonner";
@@ -51,7 +52,7 @@
 
   async function copy(): Promise<void> {
     try {
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
       toast.success(m.chat_action_copied());
     } catch {
       toast.error(m.settings_copy_failed());

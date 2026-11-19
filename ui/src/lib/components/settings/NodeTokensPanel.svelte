@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { errorMessage } from "#lib/api/error-messages.ts";
+  import { copyText } from "#lib/clipboard.ts";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
@@ -78,9 +79,9 @@
     }
   }
 
-  async function copyText(text: string, label: string): Promise<void> {
+  async function copyWithToast(text: string, label: string): Promise<void> {
     try {
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
       toast.success(m.settings_copied({ name: label }));
     } catch {
       toast.error(m.settings_copy_failed());
@@ -216,7 +217,7 @@
             variant="outline"
             size="sm"
             class="h-8 shrink-0 gap-1.5 px-2.5 text-[13px]"
-            onclick={() => issued && void copyText(issued.token, m.settings_token())}
+            onclick={() => issued && void copyWithToast(issued.token, m.settings_token())}
           >
             <CopyIcon class="size-3.5" />
             {m.settings_copy()}
@@ -236,7 +237,7 @@
             variant="outline"
             size="sm"
             class="h-8 shrink-0 gap-1.5 px-2.5 text-[13px]"
-            onclick={() => void copyText(pairCommand, m.settings_node_pair_command_label())}
+            onclick={() => void copyWithToast(pairCommand, m.settings_node_pair_command_label())}
           >
             <CopyIcon class="size-3.5" />
             {m.settings_copy()}
@@ -259,7 +260,7 @@
       <Button
         type="button"
         variant="outline"
-        onclick={() => issued && void copyText(issued.token, m.settings_token())}
+        onclick={() => issued && void copyWithToast(issued.token, m.settings_token())}
       >
         <CopyIcon />
         {m.settings_copy_token()}

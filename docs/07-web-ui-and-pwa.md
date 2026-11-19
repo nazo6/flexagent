@@ -138,3 +138,31 @@ Web ターミナルは `ghostty-web`（WASM 版 `libghostty-vt` + Canvas 2D）�
     - 質問 (`elicitation`): ボタンなし、タップでセッションを開く。
     - ターン完了: `Running` 観測後の `Idle` / `Error` 遷移時に通知（`Running` 未観測や resync 再生時は送らない）。
   - 失効購読（`404` / `410`）は送信時に自動削除する。
+
+### 5.1 非セキュアオリジン（HTTP）での縮退動作
+
+ブラウザの **Secure Context** 限定 API は、`localhost` / `127.0.0.1` 以外の
+`http://` オリジンでは利用できません。FlexAgent の Web UI は LAN / Tailscale の
+HTTP アドレスで直接開かれることが多いため、使えない機能を明示しつつ、
+それ以外の基本機能は HTTP でも動作させます。
+
+- **HTTP でも動作する**: 認証（Bearer / `fxg_session` Cookie）、セッション一覧・
+  チャット、Web PTY、ファイル差分、設定、接続先切り替え。
+- **HTTP では制限される**（ブラウザの仕様であり、サーバー側の制限ではない）:
+  - Service Worker と PWA インストール（オフライン App Shell を含む）
+  - Web Push の購読・通知、Notification API
+  - `navigator.clipboard`（非同期 Clipboard API）
+  - `crypto.randomUUID()`
+- **代替実装**:
+  - UUID が必要な箇所は `crypto.getRandomValues()` から v4 UUID を生成する
+    (`ui/src/lib/uuid.ts`)。
+  - コピー操作は `navigator.clipboard` が無い / 拒否された場合に、一時的な
+    textarea と `document.execCommand("copy")` へフォールバックする
+    (`ui/src/lib/clipboard.ts`)。コピーはユーザー操作（クリック）を起点に
+    実行するため、レガシー経路でも成功する。
+- 通知パネル（**設定 > ブラウザ > 通知**）は、非セキュアオリジンでは
+  `Requires HTTPS or localhost (secure context)` と表示して購読ボタンを無効化する。
+  Notification API 自体が無い環境では権限を「拒否」ではなく「未要求」として扱う。
+- 制限を解除するには、TLS リバースプロキシで HTTPS 配信するか `localhost` で開く。
+  HTTP のまま公開する場合も、ハブ / ノードは LAN / VPN の内側に限定する
+  （[`docs/01-architecture-and-sync.md`](./01-architecture-and-sync.md) §7）。

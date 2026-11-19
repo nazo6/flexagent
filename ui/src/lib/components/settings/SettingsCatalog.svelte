@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { errorMessage } from "#lib/api/error-messages.ts";
+  import { copyText } from "#lib/clipboard.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Card } from "#lib/components/ui/card/index.ts";
@@ -218,6 +219,15 @@
       toast.success(`Deleted secret "${secret.id}".`);
     } catch (cause) {
       toast.error(errorMessage(cause));
+    }
+  }
+
+  async function copySecretId(id: string): Promise<void> {
+    try {
+      await copyText(id);
+      toast.success(m.settings_copied({ name: id }));
+    } catch {
+      toast.error(m.settings_copy_failed());
     }
   }
 
@@ -533,12 +543,7 @@
                 variant="ghost"
                 size="sm"
                 class="h-6 px-1.5 text-[11px]"
-                onclick={() => {
-                  if (typeof navigator !== "undefined" && navigator.clipboard) {
-                    void navigator.clipboard.writeText(secret.id);
-                    toast.success(`Copied key "${secret.id}" to clipboard.`);
-                  }
-                }}
+                onclick={() => void copySecretId(secret.id)}
               >
                 Copy key
               </Button>
