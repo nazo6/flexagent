@@ -44,9 +44,7 @@ use fxg_protocol::paths::{Paths, Role};
     bin = "fxg",
     version = env!("CARGO_PKG_VERSION"),
     about = "FlexAgent: a local-first agent manager",
-    default_subcommand = "web",
-    default_subcommand_flags,
-    default_subcommand_on_empty
+    arg_required_else_help
 )]
 struct Fxg {
     #[usage(subcommand)]

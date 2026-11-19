@@ -27,7 +27,8 @@ CLI のコマンド・引数の正は `fxg --help` / `fxg <noun> --help` と
 
 ### 1.2 コマンド群
 
-- `fxg` / `fxg web [node|hub]`: トークン付き URL で Web UI を開く。
+- `fxg`: サブコマンドを指定せずに実行するとヘルプを表示する（プロセスは起動しない）。
+- `fxg web [node|hub]`: トークン付き URL を表示し、既定ブラウザで Web UI を開く。
 - `fxg session ...`: セッションの作成・一覧・表示・プロンプト・停止・再開・
   Fork・Import・Archive・Delete。
 - `fxg node ...`: ローカルノードの起動・停止・状態・ペアリング・Web
