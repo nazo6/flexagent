@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { copyText } from "./clipboard";
 
 function stubExecCommand(result: boolean) {
-  const execCommand = vi.fn((command: string) => {
+  const execCommand = vi.fn<(command: string) => boolean>((command) => {
     expect(command).toBe("copy");
     return result;
   });
@@ -17,7 +17,7 @@ describe("copyText", () => {
   });
 
   it("uses the async Clipboard API when it is available", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
+    const writeText = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", { clipboard: { writeText } });
 
     await copyText("hello");
@@ -29,7 +29,7 @@ describe("copyText", () => {
     vi.stubGlobal("navigator", {});
     let copied: string | null = null;
     Object.defineProperty(document, "execCommand", {
-      value: vi.fn(() => {
+      value: vi.fn<() => boolean>(() => {
         copied =
           document.activeElement instanceof HTMLTextAreaElement
             ? document.activeElement.value
@@ -46,7 +46,7 @@ describe("copyText", () => {
   });
 
   it("falls back to execCommand when the async copy rejects", async () => {
-    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    const writeText = vi.fn<() => Promise<void>>().mockRejectedValue(new Error("denied"));
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     const execCommand = stubExecCommand(true);
 

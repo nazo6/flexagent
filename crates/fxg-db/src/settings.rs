@@ -33,6 +33,13 @@ fn positive_u64(value: i64) -> Option<u64> {
     }
 }
 
+fn non_negative_u64(value: i64) -> Option<u64> {
+    if value < 0 {
+        return None;
+    }
+    Some(value as u64)
+}
+
 // ----------------------------------------------------------------------
 // Node settings
 // ----------------------------------------------------------------------
@@ -243,9 +250,7 @@ pub async fn get_agent_settings(pool: &SqlitePool) -> Result<Option<AgentSetting
     Ok(Some(AgentSettings {
         registry_url: row.registry_url,
         registry_cache_ttl_secs: row.registry_cache_ttl_secs.and_then(positive_u64),
-        warm_idle_secs: row
-            .warm_idle_secs
-            .and_then(|value| u64::try_from(value).ok()),
+        warm_idle_secs: row.warm_idle_secs.and_then(non_negative_u64),
         aliases,
         revision: revision_u64(row.revision)?,
         updated_at: row.updated_at,
