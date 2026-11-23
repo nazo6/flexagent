@@ -6,6 +6,9 @@
   import ProvisioningLogCard from "#lib/components/ProvisioningLogCard.svelte";
   import ChatTimeline from "#lib/components/chat/ChatTimeline.svelte";
   import SubagentDetail from "#lib/components/chat/SubagentDetail.svelte";
+  import TurnOutline from "#lib/components/chat/TurnOutline.svelte";
+  import TurnRail from "#lib/components/chat/TurnRail.svelte";
+  import { buildChatTurns, type ChatTurn } from "#lib/chat-turns.ts";
   import { groupTimelineItems } from "#lib/chat-groups.ts";
   import Composer from "#lib/components/chat/Composer.svelte";
   import SessionHeader from "#lib/components/session/SessionHeader.svelte";
@@ -121,6 +124,11 @@
   });
 
   let chatContainer = $state<HTMLDivElement | null>(null);
+  /** Turns of the loaded timeline, the unit of the rail and the outline. */
+  const turns = $derived(buildChatTurns(items));
+  let turnsOpen = $state(false);
+  /** Turn currently under the viewport; the rail measures it. */
+  let activeTurnSeq = $state<number | null>(null);
   let loadedFor = $state<string | null>(null);
   let showScrollBottom = $state(false);
   /** Whether new output should pull the view along (true while reading the tail). */
@@ -196,6 +204,8 @@
     if (loadedFor !== id) {
       loadedFor = id;
       selectedSubagentId = null;
+      turnsOpen = false;
+      activeTurnSeq = null;
       sync.loadSessionEvents(id).catch(() => {
         /* Ignore: the WS replay will make it visible once it arrives. */
       });
@@ -305,6 +315,22 @@
       behavior: "smooth",
     });
     showScrollBottom = false;
+  }
+
+  /** Scroll to the start of a turn (rail and outline navigation). */
+  function jumpToTurn(turn: ChatTurn): void {
+    const container = chatContainer;
+    if (container === null) return;
+    const anchor = container.querySelector<HTMLElement>(`[data-turn-seq="${turn.seq}"]`);
+    if (anchor === null) return;
+    // Landing on the latest turn keeps following the stream; anywhere else stops.
+    followOutput = turn.seq === turns.at(-1)?.seq;
+    const top =
+      anchor.getBoundingClientRect().top -
+      container.getBoundingClientRect().top +
+      container.scrollTop -
+      8;
+    container.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
   }
 
   let loadingOlder = $state(false);
@@ -469,6 +495,8 @@
     onForceStop={() => (killDialogOpen = true)}
     activeTool={visibleLauncher}
     onToggleTool={handleToggleTool}
+    {turnsOpen}
+    onToggleTurns={() => (turnsOpen = !turnsOpen)}
     onDeleted={() => void goto("/")}
   />
 
@@ -542,7 +570,7 @@
         <div
           bind:this={chatContainer}
           onscroll={handleScroll}
-          class="app-scroll-centered h-full overflow-y-auto px-4 pt-5 pb-6 md:px-8"
+          class="app-scroll-centered h-full overflow-y-auto pt-5 pr-8 pb-6 pl-4 md:px-8"
         >
           <div class="mx-auto flex max-w-[760px] flex-col gap-4">
             <ProvisioningLogCard lines={provisioningLines} />
@@ -579,6 +607,17 @@
           </div>
         </div>
 
+        {#if turns.length > 0}
+          <TurnRail
+            {turns}
+            container={chatContainer}
+            hasOlder={timeline.hasOlder}
+            onloadearlier={() => void loadOlder()}
+            onjump={jumpToTurn}
+            onactive={(seq) => (activeTurnSeq = seq)}
+          />
+        {/if}
+
         {#if selectedSubagent}
           <SubagentDetail
             {sessionId}
@@ -599,6 +638,15 @@
             <ArrowDownIcon class="size-3.5" />
             <span>{m.session_jump_to_latest()}</span>
           </button>
+        {/if}
+
+        {#if turnsOpen && turns.length > 0}
+          <TurnOutline
+            {turns}
+            activeSeq={activeTurnSeq}
+            onjump={jumpToTurn}
+            onclose={() => (turnsOpen = false)}
+          />
         {/if}
       </div>
 

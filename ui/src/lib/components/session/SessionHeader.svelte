@@ -19,6 +19,7 @@
   import { DOCK_LAUNCHERS, type DockLauncherId } from "#lib/dock/registry.ts";
   import { cn } from "#lib/utils.ts";
   import MenuIcon from "@lucide/svelte/icons/menu";
+  import ListIcon from "@lucide/svelte/icons/list";
   import PanelLeftOpenIcon from "@lucide/svelte/icons/panel-left-open";
   import PanelRightOpenIcon from "@lucide/svelte/icons/panel-right-open";
 
@@ -36,6 +37,9 @@
     /** Active launcher tool (null while the dock is closed or a file tab is active). */
     activeTool: DockLauncherId | null;
     onToggleTool: (id: DockLauncherId) => void;
+    /** Whether the turn outline is open (the chat column owns the overlay). */
+    turnsOpen: boolean;
+    onToggleTurns: () => void;
     onDeleted: () => void;
   }
 
@@ -52,6 +56,8 @@
     onForceStop,
     activeTool,
     onToggleTool,
+    turnsOpen,
+    onToggleTurns,
     onDeleted,
   }: Props = $props();
 
@@ -164,6 +170,23 @@
     </div>
 
     <div class="flex shrink-0 items-center gap-1">
+      {#if session}
+        <button
+          type="button"
+          class={cn(
+            "flex size-7 shrink-0 items-center justify-center rounded-md border transition-colors",
+            turnsOpen
+              ? "border-signal/40 bg-signal-soft text-signal"
+              : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+          )}
+          title={m.chat_turns_title()}
+          aria-label={m.chat_turns_title()}
+          aria-pressed={turnsOpen}
+          onclick={onToggleTurns}
+        >
+          <ListIcon class="size-4" />
+        </button>
+      {/if}
       <!-- On desktop the sidebar footer owns the badge; when the sidebar is
            collapsed this header is the only remaining place for it. -->
       <ProblemBadge

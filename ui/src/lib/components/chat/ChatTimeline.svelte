@@ -244,7 +244,7 @@
     {#if item.kind === "user"}
       {@const fork = forkState(item)}
       <div class="message-group">
-        <div class="flex justify-end">
+        <div class="flex justify-end" data-turn-seq={nested ? undefined : item.seq}>
           <div
             class="bg-user-message text-foreground max-w-[82%] rounded-xl rounded-br-sm px-4 py-2.5"
           >
@@ -344,26 +344,30 @@
           class="bg-muted/40 max-h-56 overflow-auto rounded-md border border-border p-2.5 font-mono text-[13px] leading-relaxed whitespace-pre-wrap">{item.output}</pre>
       </div>
     {:else if item.kind === "permission"}
-      <PermissionCard
-        {sessionId}
-        requestId={item.requestId}
-        toolName={item.toolName}
-        summary={item.summary}
-        options={item.options}
-        details={item.details}
-        resolved={item.resolved}
-        createdAt={item.createdAt}
-        {subagentTitle}
-      />
+      <div data-attention={item.resolved === null ? "danger" : undefined}>
+        <PermissionCard
+          {sessionId}
+          requestId={item.requestId}
+          toolName={item.toolName}
+          summary={item.summary}
+          options={item.options}
+          details={item.details}
+          resolved={item.resolved}
+          createdAt={item.createdAt}
+          {subagentTitle}
+        />
+      </div>
     {:else if item.kind === "elicitation"}
-      <ElicitationCard
-        {sessionId}
-        elicitationId={item.elicitationId}
-        message={item.message}
-        requestedSchema={item.requestedSchema}
-        resolved={item.resolved}
-        createdAt={item.createdAt}
-      />
+      <div data-attention={item.resolved === null ? "danger" : undefined}>
+        <ElicitationCard
+          {sessionId}
+          elicitationId={item.elicitationId}
+          message={item.message}
+          requestedSchema={item.requestedSchema}
+          resolved={item.resolved}
+          createdAt={item.createdAt}
+        />
+      </div>
     {:else if item.kind === "plan"}
       <div class="bg-card flex flex-col gap-1.5 rounded-lg border border-border p-3">
         <div class="flex items-center gap-2 text-[13px] font-medium">
@@ -385,6 +389,7 @@
       </div>
     {:else if item.kind === "notice"}
       <div
+        data-attention={item.tone === "info" ? undefined : "warn"}
         class="flex items-start gap-2 rounded-lg border p-3 text-sm {item.tone === 'error'
           ? 'border-danger/30 bg-danger-soft/50 text-danger'
           : item.tone === 'warning'
