@@ -1,13 +1,12 @@
 <script lang="ts">
   /**
-   * Vertical map of the conversation, next to the timeline.
+   * Tick column that marks where each turn starts, next to the timeline.
    *
-   * One segment per turn, sized by the rendered height of the turn, so the
-   * scroll position maps linearly onto the rail. Prompt segments are thick and
-   * dark; the agent's answer and folded work are a thin line. Unresolved
-   * approvals, questions and error notices are dots.
-   *
-   * Positions are measured from the DOM (`data-turn-seq` anchors) because
+   * It deliberately does not redraw the scrollbar: turns are ticks at their
+   * measured position, not a proportional track, because the browser already
+   * shows how much of the document each part occupies. The current turn is the
+   * only coloured tick; unresolved approvals, questions and error notices are
+   * dots. Positions are measured from the DOM (`data-turn-seq` anchors) because
    * markdown, code blocks and folded sections make source length useless as a
    * proxy for height.
    */
@@ -32,15 +31,14 @@
 
   /** Height of the "older history is not loaded" notch at the top. */
   const CAP_PX = 14;
-  /** Very short turns still need a clickable band. */
-  const MIN_BAND_PX = 3;
 
+  /**
+   * A turn is a tick, not a segment: the scrollbar already shows how much of
+   * the document each part occupies, so the rail only marks where turns start.
+   */
   interface Band {
     seq: number;
     top: number;
-    height: number;
-    /** Height of the prompt segment at the top of the band. */
-    prompt: number;
   }
 
   interface Marker {
@@ -52,8 +50,6 @@
   let railEl = $state<HTMLDivElement | null>(null);
   let bands = $state<Band[]>([]);
   let markers = $state<Marker[]>([]);
-  let viewTop = $state(0);
-  let viewHeight = $state(0);
   /** -1 until the first measurement decides which turn is on screen. */
   let activeIndex = $state(-1);
   /** Change detection for `activeIndex`; kept out of the measured effect's deps. */
@@ -98,14 +94,8 @@
       const next = rects[index + 1];
       const end = next === undefined ? height : next.top - origin;
       const bandTop = toRail(top);
-      const bandEnd = toRail(end);
       nextAnchors.push({ top, end });
-      nextBands.push({
-        seq: Number(node.dataset.turnSeq),
-        top: bandTop,
-        height: Math.max(MIN_BAND_PX, bandEnd - bandTop - 1),
-        prompt: Math.max(2, toRail(top + rect.height) - bandTop - 1),
-      });
+      nextBands.push({ seq: Number(node.dataset.turnSeq), top: bandTop });
     });
 
     const nextMarkers: Marker[] = [];
@@ -123,21 +113,6 @@
     anchors = nextAnchors;
     bands = nextBands;
     markers = nextMarkers;
-    updateViewport();
-  }
-
-  function updateViewport(): void {
-    const scroller = container;
-    const rail = railEl;
-    if (scroller === null || rail === null) return;
-    const railHeight = rail.clientHeight;
-    const height = scroller.scrollHeight;
-    if (railHeight <= 0 || height <= 0) return;
-    const cap = capHeight();
-    const scale = Math.max(1, railHeight - cap) / height;
-    const top = cap + scroller.scrollTop * scale;
-    viewTop = top;
-    viewHeight = Math.max(8, Math.min(railHeight - top, scroller.clientHeight * scale));
   }
 
   function updateActive(): void {
@@ -295,7 +270,6 @@
     };
     const runScroll = (): void => {
       frame = 0;
-      updateViewport();
       updateActive();
     };
     const schedule = (): void => {
@@ -326,9 +300,7 @@
   });
 </script>
 
-<div
-  class="absolute top-3 right-1.5 bottom-3 z-10 w-5 md:right-[max(1.25rem,calc(50%_-_25.75rem))]"
->
+<div class="absolute top-3 right-1.5 bottom-3 z-10 w-3 md:right-[max(1rem,calc(50%_-_25.25rem))]">
   <div
     bind:this={railEl}
     class="group relative h-full w-full touch-none cursor-pointer rounded-md outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring/40"
@@ -355,7 +327,7 @@
     {#if hasOlder}
       <button
         type="button"
-        class="text-muted-foreground/70 hover:text-signal absolute top-0 left-1/2 flex size-3.5 -translate-x-1/2 items-center justify-center rounded-full"
+        class="text-muted-foreground/50 hover:text-signal absolute top-0 left-1/2 flex size-3.5 -translate-x-1/2 items-center justify-center rounded-full"
         title={m.chat_turns_load_earlier()}
         aria-label={m.chat_turns_load_earlier()}
         onpointerdown={(event) => event.stopPropagation()}
@@ -368,32 +340,22 @@
     <div class="pointer-events-none absolute inset-0">
       {#each bands as band (band.seq)}
         <div
-          class="bg-ink/15 absolute left-1/2 w-[3px] -translate-x-1/2 rounded-full"
+          class={band.seq === activeTurn?.seq
+            ? "bg-signal absolute left-1/2 h-[2.5px] w-[9px] -translate-x-1/2 rounded-full"
+            : "bg-ink/40 absolute left-1/2 h-[2px] w-[7px] -translate-x-1/2 rounded-full"}
           style:top="{band.top}px"
-          style:height="{band.height}px"
-        ></div>
-        <div
-          class="bg-ink/55 absolute left-1/2 w-[6px] -translate-x-1/2 rounded-full"
-          style:top="{band.top}px"
-          style:height="{band.prompt}px"
         ></div>
       {/each}
 
       {#each markers as marker (marker.id)}
         <div
-          class="ring-background absolute left-1/2 size-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 {marker.tone ===
+          class="ring-background absolute left-1/2 size-[6px] -translate-x-1/2 -translate-y-1/2 rounded-full ring-[1.5px] {marker.tone ===
           'danger'
             ? 'bg-danger'
             : 'bg-warn'}"
           style:top="{marker.top}px"
         ></div>
       {/each}
-
-      <div
-        class="border-signal bg-signal/10 absolute -inset-x-1 rounded-[4px] border-[1.5px]"
-        style:top="{viewTop}px"
-        style:height="{viewHeight}px"
-      ></div>
     </div>
 
     {#if hover !== null && hoverTurn !== null}
