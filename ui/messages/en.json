@@ -294,6 +294,7 @@
   "external_sessions_no_unimported": "No unimported sessions.",
   "external_sessions_node": "Node",
   "external_sessions_open": "Open",
+  "external_sessions_other_folders": "Other folders",
   "external_sessions_page_title": "External sessions - FlexAgent",
   "external_sessions_refresh": "Refresh from agent",
   "external_sessions_refresh_confirm_description": "The current conversation is imported into a new session, and the current session is archived.",

@@ -570,6 +570,7 @@ impl SessionManager {
             if archived_old {
                 self.unarchive_after_failed_import(replace_session_id).await;
             }
+            self.inner.invalidate_external();
             return Err(err);
         }
 
@@ -613,8 +614,10 @@ impl SessionManager {
             if archived_old {
                 self.unarchive_after_failed_import(replace_session_id).await;
             }
+            self.inner.invalidate_external();
             return Err(err);
         }
+        self.inner.invalidate_external();
         Ok(session_id)
     }
 
@@ -915,6 +918,7 @@ impl SessionManager {
                 UnifiedEventPayload::SessionArchived { archived },
             )
             .await?;
+        self.inner.invalidate_external();
         Ok(archived.then_some(envelope.created_at))
     }
 
@@ -978,6 +982,7 @@ impl SessionManager {
             .bus
             .record(session_id, UnifiedEventPayload::SessionDeleted {})
             .await?;
+        self.inner.invalidate_external();
         Ok(())
     }
 }

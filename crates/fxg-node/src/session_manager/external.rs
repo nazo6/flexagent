@@ -61,6 +61,15 @@ impl Inner {
             cached_at: Instant::now(),
         });
     }
+
+    /// Drops the cached discovery result after a binding change.
+    pub(super) fn invalidate_external(&self) {
+        let mut cache = self
+            .external_cache
+            .lock()
+            .expect("external session cache poisoned");
+        *cache = None;
+    }
 }
 
 impl SessionManager {

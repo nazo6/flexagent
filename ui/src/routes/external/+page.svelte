@@ -60,17 +60,6 @@
   );
 
   const sessions = $derived(response?.sessions ?? []);
-  const counts = $derived.by(() => {
-    let imported = 0;
-    for (const session of sessions) {
-      if (session.imported_session_id) imported += 1;
-    }
-    return {
-      all: sessions.length,
-      imported,
-      unimported: sessions.length - imported,
-    };
-  });
 
   interface ProjectPath {
     projectId: string;
@@ -149,13 +138,12 @@
     return errorCodeMessage(agent.error.code, agent.error.params) ?? agent.error.message;
   }
 
-  const filteredSessions = $derived.by(() => {
+  /** Sessions matching the search and agent filter, before the tab filter. */
+  const baseSessions = $derived.by(() => {
     const needle = query.trim().toLowerCase();
     return sessions
+      .filter((session) => agentFilter === "" || session.agent_id === agentFilter)
       .filter((session) => {
-        if (tab === "unimported" && session.imported_session_id) return false;
-        if (tab === "imported" && !session.imported_session_id) return false;
-        if (agentFilter !== "" && session.agent_id !== agentFilter) return false;
         if (needle === "") return true;
         const haystack = [
           session.title,
@@ -169,6 +157,26 @@
       .toSorted((a, b) => sortTimestamp(b) - sortTimestamp(a));
   });
 
+  const counts = $derived.by(() => {
+    let imported = 0;
+    for (const session of baseSessions) {
+      if (session.imported_session_id) imported += 1;
+    }
+    return {
+      all: baseSessions.length,
+      imported,
+      unimported: baseSessions.length - imported,
+    };
+  });
+
+  const filteredSessions = $derived(
+    baseSessions.filter((session) => {
+      if (tab === "unimported") return session.imported_session_id === null;
+      if (tab === "imported") return session.imported_session_id !== null;
+      return true;
+    }),
+  );
+
   interface SessionGroup {
     key: string;
     name: string;
@@ -179,9 +187,9 @@
     const groups = new Map<string, SessionGroup>();
     for (const session of filteredSessions) {
       const project = projectFor(session);
-      const folder = pathBasename(session.cwd) || session.cwd;
-      const key = project?.projectId ?? `path:${folder}`;
-      const name = project?.name ?? folder;
+      const key = project?.projectId ?? `agent:${session.agent_id}`;
+      const name =
+        project?.name ?? `${agentName(session.agent_id)} · ${m.external_sessions_other_folders()}`;
       const group = groups.get(key);
       if (group) {
         group.sessions.push(session);
