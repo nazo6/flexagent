@@ -373,6 +373,36 @@
       pointer-events: auto;
     }
   }
+  /*
+   * Sidebar session row actions (pin / archive / …).
+   *
+   * Touch screens have no hover, so hiding these behind `group-hover` made
+   * pinning and archiving unreachable on phones: tapping the row navigated
+   * away instead. They stay visible there, while pointer devices reveal them
+   * on hover / focus so the title keeps its width at rest.
+   */
+  .session-row-actions {
+    width: auto;
+    margin-inline-start: 0.375rem;
+    opacity: 1;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .session-row-actions {
+      width: 0;
+      margin-inline-start: 0;
+      opacity: 0;
+    }
+    .session-row:hover .session-row-actions,
+    .session-row:focus-within .session-row-actions {
+      width: auto;
+      margin-inline-start: 0.375rem;
+      opacity: 1;
+    }
+    .session-row:hover .session-row-meta,
+    .session-row:focus-within .session-row-meta {
+      display: none;
+    }
+  }
 }
 
 /*

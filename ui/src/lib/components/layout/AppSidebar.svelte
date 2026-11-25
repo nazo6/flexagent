@@ -488,7 +488,7 @@
               href={`/sessions/${session.session_id}`}
               onclick={handleLinkClick}
               class={cn(
-                "group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors",
+                "session-row group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors",
                 isActive
                   ? "bg-signal-soft text-foreground font-medium"
                   : isWaiting
@@ -550,11 +550,10 @@
               {/if}
 
               <div class="flex shrink-0 items-center text-muted-foreground text-[11px]">
-                <!-- Resting metadata. Hidden while the actions are open so the
-                     two clusters never take horizontal space at the same time. -->
-                <span
-                  class="flex items-center gap-1.5 group-hover:hidden group-focus-within:hidden"
-                >
+                <!-- Resting metadata. Hidden while the actions are open on
+                     pointer devices so the two clusters never take horizontal
+                     space at the same time; touch screens show both. -->
+                <span class="session-row-meta flex items-center gap-1.5">
                   {#if isPinned}
                     <PinIcon
                       class="text-signal size-3 shrink-0"
@@ -567,10 +566,11 @@
                   </span>
                 </span>
 
-                <!-- Actions. Zero-width until hover/focus: they stay focusable
-                     from the keyboard but do not truncate the title at rest. -->
+                <!-- Actions. Collapsed until hover/focus on pointer devices so
+                     they do not truncate the title at rest; always visible on
+                     touch screens (see `.session-row-actions` in app.css). -->
                 <div
-                  class="flex w-0 shrink-0 items-center gap-1 overflow-hidden opacity-0 transition-opacity group-hover:ml-1.5 group-hover:w-auto group-hover:opacity-100 group-focus-within:ml-1.5 group-focus-within:w-auto group-focus-within:opacity-100"
+                  class="session-row-actions flex shrink-0 items-center gap-1 overflow-hidden transition-opacity"
                 >
                   <!-- Archive / delete menu -->
                   <SessionActionsMenu {session} align="end" iconClass="size-3.5" />
