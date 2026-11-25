@@ -29,8 +29,8 @@ ACP に存在しない機能（独自 API によるモデル一覧の取得な�
 拡張を `agent_id` 分岐なしで追加できるよう、実装を次の3層に分ける。
 現在は `AgentCatalog`、Tier 2 (`AcpDriver` + `AgentExtension`)、
 Tier 3 (`impl AgentDriver`) を持ち、`opencode` は Tier 3
-(`OpenCodeNativeDriver`) で実装している。ACP 経路は `opencode-acp` として
-フォールバック用に残す。
+(`OpenCodeNativeDriver`) のみで実装している。OpenCode の ACP 経路
+(`opencode acp`) は提供しない。
 
 クレート直下は共通契約 (`driver` / `management` / `auth`)、カタログ
 (`catalog/`)、実装ディレクトリ (`acp/` / `opencode/`) に分ける。ACP 固有の
@@ -66,9 +66,10 @@ Tier 3 (`impl AgentDriver`) を持ち、`opencode` は Tier 3
   これを `ConfigOptionChoice` として保持する。モデル名や説明を extension で
   再生成せず、`value` だけを `set_config` に送る。表示名の provider prefix 除去
   などは UI の汎用処理で行う。
-- 組み込みの `opencode` extension は `opencode-acp` の ACP 経路で使う。
-  ACP では扱えない vendor 差分 (`opencode/session/child_update` の子セッション
-  更新と、権限要求への子 ID 付与) を `transform_event` で担当する。
+- OpenCode の子セッションは native ドライバが `/api/event` の
+  `session.created` / `session.renamed` / `session.execution.*` から
+  `SubagentUpdated` に正規化する。子の権限要求・フォーム・ツール呼び出しには
+  `subagent_id` を付ける。ACP 経路の vendor 通知は使わない。
 - 利用上限 (`AgentExtension::usage_limits`) はセッション外の best-effort
   読み取りで、上限を持たないエージェントは `None` を返す。組み込みの
   `antigravity` extension は `agy -p /usage --output-format json` の
@@ -81,10 +82,11 @@ Tier 3 (`impl AgentDriver`) を持ち、`opencode` は Tier 3
   読む。キーはリクエスト内だけで使い、ログや DB には残さない。
 - `opencode` (Tier 3) は OpenCode v2 の HTTP + SSE を一次インターフェースとし、
   ACP では表現できない revert、メッセージ境界 fork、実行中入力 (steer)、
-  compact、provider / MCP / skill / command の管理を提供する。ACP 経路との
-  パリティとして、`todowrite` を `PlanUpdate` に、`finish` / `provider.auth`
-  を `TurnEnded` / ログイン案内に変換し、ターン終了時にコマンドカタログを
-  再取得する。実装は `crates/fxg-agent/src/opencode/`。セッションは
+  compact、provider / MCP / skill / command の管理を提供する。ACP で
+  提供していた表示に合わせて、`todowrite` を `PlanUpdate` に、
+  `finish` / `provider.auth` を `TurnEnded` / ログイン案内に変換し、
+  ターン終了時にコマンドカタログを再取得する。実装は
+  `crates/fxg-agent/src/opencode/`。セッションは
   OpenCode 側のストアを一次ソースとし、fxg は正規化イベントを `node.db` に
   記録する。
 - ネイティブドライバの認証は `BuiltinAgent::auth()` が terminal の
@@ -108,7 +110,7 @@ Tier 3 (`impl AgentDriver`) を持ち、`opencode` は Tier 3
   bot アイコンにフォールバックする。
   `AgentSummary.backend` はエージェント一覧にバッジ
   (`ACP` / `ACP + extension` / `Custom driver`) として表示する。
-- ビルトイン agent は `opencode`（Tier 3）と `opencode-acp`（Tier 2）に加え、
+- ビルトイン agent は `opencode`（Tier 3）に加え、
   `agy` / `github-copilot-cli` / `qwen-code` / `cline` / `auggie` /
   `kimi-code` のネイティブ CLI preset を持つ。一覧・起動は
   ビルトインの表示名・アイコン・preset を使う。opencode は v2 の CLI 名が
@@ -122,9 +124,10 @@ Tier 3 (`impl AgentDriver`) を持ち、`opencode` は Tier 3
   `clientCapabilities._meta`、受信する独自通知の method、有効にする ACP
   capability の集合）は、`AgentExtension` が純データ
   (`AcpExtensionOptions`) として返す。`AcpDriver` は通知の受信・順序・
-  子セッションのコンテキスト管理・正規化だけを行い、opencode 固有の
-  解釈は `OpenCodeExtension` に閉じる。`AcpDriver` にはエージェント別の分岐を
-  入れず、汎用の ACP seam だけをコアに置く。
+  子セッションのコンテキスト管理・正規化だけを行い、vendor 固有の解釈は
+  extension に閉じる。`AcpDriver` にはエージェント別の分岐を入れず、汎用の
+  ACP seam だけをコアに置く。現在の組み込み extension は `antigravity`
+  （利用上限）だけである。
 - ビルトイン agent は拡張を `BuiltinAgent::with_extension(<extension ID>, <instance>)`
   で明示する。extension ID はエージェント ID から暗黙導出しない。カスタム定義は
   この ID を `CustomAgentConfig.extension` に保存し、一覧
@@ -163,8 +166,7 @@ Tier 3 (`impl AgentDriver`) を持ち、`opencode` は Tier 3
    - Registry のエージェントを直接起動することはない。`npx` / `uvx` で
      使いたい場合は、先に import して custom 定義にする。
    - 代表例: `fxg session new opencode` は OpenCode v2 のネイティブドライバ
-     （`opencode serve`）を使い、`fxg session new opencode-acp` は
-     `opencode acp`、`fxg session new agy` は `agy acp` として起動する。
+     （`opencode serve`）を使い、`fxg session new agy` は `agy acp` として起動する。
 3. **import 時のコマンド変換**:
    - `binary`: `PATH` 上の CLI が見つかればそのコマンドを使う。`PATH` に無く
      npx / uvx 配布があれば、その配布形態で起動する。binary のみで `PATH` に
@@ -272,9 +274,9 @@ ACP のセッション更新は `sessionId` を持つが、`agent-client-protoco
 - 子セッション宛の `session/update` は、`subagent_update` で子を知った時点で
   子ごとの dynamic handler を登録して受ける。ハンドラは子の ID 以外を
   `Handled::No` にして root の経路を壊さない。
-- opencode の `opencode/session/child_update` のような独自通知は、extension が
-  宣言した method だけを method handler で受ける。builder の catch-all は
-  root の `session/update` を奪うため使わない。
+- ACP エージェント独自の通知は、extension が宣言した method だけを method
+  handler で受ける。builder の catch-all は root の `session/update` を奪う
+  ため使わない。
 - 受けた子イベントは親と同じ accumulation（ストリーミング結合）に合流させ、
   `subagent_id` を付けて正規化する。子の状態は `SubagentUpdated` で表し、
   親の `StatusChanged` や `sessions` 投影を書き換えない。
@@ -336,9 +338,9 @@ ACP Registry に載っていないエージェントや自前の ACP 実装は�
      反映しない。
 4. **Tier 2 extension の再利用**:
    - `CustomAgentConfig.extension` で builtin extension を参照できる（§1.1）。
-     指定時は `DriverKind::AcpExtended` となり、custom の起動定義に extension の
-     `prepare_launch` を適用する。組み込みの `opencode` extension は子セッション
-     更新と権限のタグ付けを追加する。
+     指定時は `DriverKind::AcpExtended` となり、extension の
+     `AcpExtensionOptions` を起動に適用する。現在の builtin extension は
+     `antigravity`（利用上限）のみである。
    - 未知の extension ID は保存時と起動時に拒否する。
 5. **一覧表示と優先順位**:
    - カスタム定義は常に「利用可能」として扱い、`sources: ["custom"]` で返す。

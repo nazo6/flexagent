@@ -301,10 +301,18 @@ impl DriverInner {
 
     /// Records a child lifecycle change without downgrading a terminal failure
     /// to `completed` when a later `session.idle` arrives.
-    pub(super) fn update_child_status(&self, child_session_id: &str, status: SubagentStatus) {
+    ///
+    /// Returns `false` when the status did not change, so callers can suppress
+    /// duplicate `SubagentUpdated` events (OpenCode sends both
+    /// `session.execution.succeeded` and `session.idle` for one child run).
+    pub(super) fn update_child_status(
+        &self,
+        child_session_id: &str,
+        status: SubagentStatus,
+    ) -> bool {
         let mut children = self.children.lock().expect("children poisoned");
         let Some(child) = children.get_mut(child_session_id) else {
-            return;
+            return false;
         };
         if status == SubagentStatus::Completed
             && matches!(
@@ -312,9 +320,27 @@ impl DriverInner {
                 SubagentStatus::Failed | SubagentStatus::Cancelled
             )
         {
-            return;
+            return false;
+        }
+        if child.status == status {
+            return false;
         }
         child.status = status;
+        true
+    }
+
+    /// Records a child title change. Returns `false` when the child is unknown
+    /// or already has the same title.
+    pub(super) fn update_child_title(&self, child_session_id: &str, title: &str) -> bool {
+        let mut children = self.children.lock().expect("children poisoned");
+        let Some(child) = children.get_mut(child_session_id) else {
+            return false;
+        };
+        if child.title.as_deref() == Some(title) {
+            return false;
+        }
+        child.title = Some(title.to_owned());
+        true
     }
 
     pub(super) fn note_stderr(&self, line: String) {

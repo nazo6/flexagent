@@ -18,7 +18,6 @@ use fxg_protocol::events::SubagentStatus;
 use crate::driver::{AgentLaunchSpec, DriverEvent};
 
 pub mod antigravity;
-pub mod opencode;
 
 /// Display metadata that an extension may override.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -188,8 +187,7 @@ pub trait AgentExtension: Send + Sync {
     /// The returned value is stored in [`crate::driver::AgentLaunchSpec`] so the
     /// ACP driver can apply it without knowing the extension. `capabilities` is
     /// the effective per-agent selection, so a vendor feature can follow a
-    /// capability toggle (for example, OpenCode's child-session updates follow
-    /// `subagents`).
+    /// capability toggle.
     fn acp_options(
         &self,
         _capabilities: &fxg_protocol::settings::AgentAcpCapabilities,

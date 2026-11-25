@@ -1,7 +1,8 @@
 # OpenCode v2 ネイティブドライバ (Tier 3)
 
 - **日付**: 2026-11-14
-- **状態**: 実装済み
+- **状態**: 実装済み（ACP 経路 `opencode-acp` は 2026-11-25 に削除され、
+  native driver のみになった。`docs/changelog/2026-11/2026-11-25-opencode-native-only.md`）
 - **対象パッケージ**: `fxg-protocol`, `fxg-acp`, `fxg-hub`, `fxg-node`, `ui`,
   `docs`
 - **対象スクリプト**: `mise run fmt`, `mise run lint:errors`,

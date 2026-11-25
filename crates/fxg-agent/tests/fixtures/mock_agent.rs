@@ -62,8 +62,7 @@ fn main() {
             continue;
         }
 
-        if method == "session/prompt" && matches!(mode.as_str(), "subagents" | "opencode-subagents")
-        {
+        if method == "session/prompt" && mode == "subagents" {
             send_child_updates(&mut stdout, &mode);
             std::thread::sleep(std::time::Duration::from_millis(150));
             write_line(
@@ -260,7 +259,7 @@ fn main() {
                     }
                 })
             }
-            ("subagents" | "opencode-subagents", "initialize") => json!({
+            ("subagents", "initialize") => json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {
@@ -270,11 +269,7 @@ fn main() {
                 }
             }),
             (
-                "subagents"
-                | "opencode-subagents"
-                | "late-updates"
-                | "thought-before-requests"
-                | "terminal",
+                "subagents" | "late-updates" | "thought-before-requests" | "terminal",
                 "session/new",
             ) => json!({
                 "jsonrpc": "2.0",
@@ -361,100 +356,60 @@ fn send_list_replay(stdout: &mut io::Stdout) {
 
 /// Sends the child-session notifications used by the subagent integration tests.
 fn send_child_updates(stdout: &mut io::Stdout, mode: &str) {
-    match mode {
-        "subagents" => {
-            write_line(
-                stdout,
-                &json!({
-                    "jsonrpc": "2.0",
-                    "method": "session/update",
-                    "params": {
-                        "sessionId": "root-session",
-                        "update": {
-                            "sessionUpdate": "subagent_update",
-                            "sessionId": "child-rfd",
-                            "title": "Explore",
-                            "description": "RFD child",
-                            "state": { "state": "running" }
-                        }
-                    }
-                }),
-            );
-            // Give the client a moment to register the child handler.
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            write_line(
-                stdout,
-                &json!({
-                    "jsonrpc": "2.0",
-                    "method": "session/update",
-                    "params": {
-                        "sessionId": "child-rfd",
-                        "update": {
-                            "sessionUpdate": "agent_message_chunk",
-                            "messageId": "child-rfd-m1",
-                            "content": { "type": "text", "text": "hello from the child" }
-                        }
-                    }
-                }),
-            );
-            write_line(
-                stdout,
-                &json!({
-                    "jsonrpc": "2.0",
-                    "method": "session/update",
-                    "params": {
-                        "sessionId": "child-rfd",
-                        "update": {
-                            "sessionUpdate": "tool_call",
-                            "toolCallId": "child-rfd-t1",
-                            "title": "Read file",
-                            "kind": "read",
-                            "status": "pending"
-                        }
-                    }
-                }),
-            );
-        }
-        "opencode-subagents" => {
-            write_line(
-                stdout,
-                &json!({
-                    "jsonrpc": "2.0",
-                    "method": "opencode/session/child_update",
-                    "params": {
-                        "rootSessionId": "root-session",
-                        "childSessionId": "child-open",
-                        "parentSessionId": "root-session",
-                        "depth": 1,
-                        "title": "Explore",
-                        "type": "status",
-                        "status": "running"
-                    }
-                }),
-            );
-            write_line(
-                stdout,
-                &json!({
-                    "jsonrpc": "2.0",
-                    "method": "opencode/session/child_update",
-                    "params": {
-                        "rootSessionId": "root-session",
-                        "childSessionId": "child-open",
-                        "parentSessionId": "root-session",
-                        "depth": 1,
-                        "title": "Explore",
-                        "type": "update",
-                        "update": {
-                            "sessionUpdate": "agent_message_chunk",
-                            "messageId": "child-open-m1",
-                            "content": { "type": "text", "text": "child says hi" }
-                        }
-                    }
-                }),
-            );
-        }
-        _ => {}
+    if mode != "subagents" {
+        return;
     }
+    write_line(
+        stdout,
+        &json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "root-session",
+                "update": {
+                    "sessionUpdate": "subagent_update",
+                    "sessionId": "child-rfd",
+                    "title": "Explore",
+                    "description": "RFD child",
+                    "state": { "state": "running" }
+                }
+            }
+        }),
+    );
+    // Give the client a moment to register the child handler.
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    write_line(
+        stdout,
+        &json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "child-rfd",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "messageId": "child-rfd-m1",
+                    "content": { "type": "text", "text": "hello from the child" }
+                }
+            }
+        }),
+    );
+    write_line(
+        stdout,
+        &json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "child-rfd",
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "child-rfd-t1",
+                    "title": "Read file",
+                    "kind": "read",
+                    "status": "pending"
+                }
+            }
+        }),
+    );
 }
 
 /// Sends background updates for the idle-update integration tests.

@@ -273,62 +273,6 @@ fn agents_declare_their_extension_id_explicitly() {
 }
 
 #[test]
-fn subagents_toggle_gates_vendor_child_notifications() {
-    use crate::acp::extensions::opencode::OpenCodeExtension;
-
-    let dir = tempfile::tempdir().expect("tempdir");
-    let agent = demo_agent(builtin::OPENCODE_ACP, "OpenCode", "opencode")
-        .with_extension(builtin::OPENCODE_EXTENSION, Arc::new(OpenCodeExtension));
-    let on_custom = BTreeMap::from([(
-        "opencode".to_owned(),
-        CustomAgentConfig {
-            command: "opencode".to_owned(),
-            extension: Some(builtin::OPENCODE_EXTENSION.to_owned()),
-            capabilities: AgentAcpCapabilities { subagents: true },
-            ..Default::default()
-        },
-    )]);
-    let mut on = AgentCatalog::with_agents(paths(dir.path()), &settings(), on_custom, vec![agent]);
-    on.preset_lookup = |_| Some(PathBuf::from("/fake/bin/opencode"));
-    let spec = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(on.launch_spec("opencode", Path::new("."), &[]))
-        .expect("spec");
-    let options = spec.acp_options().expect("acp options");
-    assert!(options.capabilities.contains(&AcpCapability::Subagents));
-    assert!(options.client_meta.is_some());
-    assert!(
-        options
-            .notifications
-            .iter()
-            .any(|method| method == "opencode/session/child_update")
-    );
-
-    let off_custom = BTreeMap::from([(
-        "opencode".to_owned(),
-        CustomAgentConfig {
-            command: "opencode".to_owned(),
-            extension: Some(builtin::OPENCODE_EXTENSION.to_owned()),
-            capabilities: AgentAcpCapabilities { subagents: false },
-            ..Default::default()
-        },
-    )]);
-    let agent = demo_agent(builtin::OPENCODE_ACP, "OpenCode", "opencode")
-        .with_extension(builtin::OPENCODE_EXTENSION, Arc::new(OpenCodeExtension));
-    let mut off =
-        AgentCatalog::with_agents(paths(dir.path()), &settings(), off_custom, vec![agent]);
-    off.preset_lookup = |_| Some(PathBuf::from("/fake/bin/opencode"));
-    let spec = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(off.launch_spec("opencode", Path::new("."), &[]))
-        .expect("spec");
-    let options = spec.acp_options().expect("acp options");
-    assert!(!options.capabilities.contains(&AcpCapability::Subagents));
-    assert!(options.client_meta.is_none());
-    assert!(options.notifications.is_empty());
-}
-
-#[test]
 fn custom_definition_shadows_a_builtin_preset() {
     let dir = tempfile::tempdir().expect("tempdir");
     let custom = BTreeMap::from([(
@@ -482,28 +426,30 @@ fn custom_backend_uses_its_preset_when_installed() {
 }
 
 #[test]
-fn custom_definition_can_reuse_a_builtin_extension() {
+fn custom_definition_can_reuse_a_registered_extension() {
     let dir = tempfile::tempdir().expect("tempdir");
+    let agent = demo_agent("extended", "Extended", "extended")
+        .with_extension("dummy-extension", Arc::new(DummyExtension));
     let custom = BTreeMap::from([(
-        "my-opencode".to_owned(),
+        "my-extended".to_owned(),
         CustomAgentConfig {
-            name: Some("My OpenCode".to_owned()),
-            command: "opencode".to_owned(),
+            name: Some("My Extended".to_owned()),
+            command: "my-extended".to_owned(),
             args: vec!["acp".to_owned()],
             env: BTreeMap::new(),
             env_secrets: BTreeMap::new(),
-            extension: Some(builtin::OPENCODE_EXTENSION.to_owned()),
+            extension: Some("dummy-extension".to_owned()),
             ..Default::default()
         },
     )]);
-    let catalog = AgentCatalog::new(paths(dir.path()), &settings(), custom);
+    let catalog = AgentCatalog::with_agents(paths(dir.path()), &settings(), custom, vec![agent]);
 
     let spec = tokio::runtime::Runtime::new()
         .unwrap()
-        .block_on(catalog.launch_spec("my-opencode", Path::new("."), &[]))
+        .block_on(catalog.launch_spec("my-extended", Path::new("."), &[]))
         .expect("custom + extension");
-    assert_eq!(spec.extension_id(), Some(builtin::OPENCODE_EXTENSION));
-    assert_eq!(spec.display_name, "My OpenCode");
+    assert_eq!(spec.extension_id(), Some("dummy-extension"));
+    assert_eq!(spec.display_name, "My Extended");
 
     let driver = catalog.driver_for(&spec).expect("extended driver");
     assert_eq!(driver.driver_kind(), DriverKind::AcpExtended);
@@ -511,11 +457,11 @@ fn custom_definition_can_reuse_a_builtin_extension() {
     let entry = catalog
         .list()
         .into_iter()
-        .find(|entry| entry.id == "my-opencode")
+        .find(|entry| entry.id == "my-extended")
         .expect("custom entry");
     assert_eq!(entry.backend, AgentBackendKind::AcpExtended);
-    assert_eq!(entry.name, "My OpenCode");
-    assert_eq!(entry.icon.as_deref(), Some("builtin:opencode"));
+    assert_eq!(entry.name, "My Extended");
+    assert_eq!(entry.icon.as_deref(), Some("builtin:extended"));
 }
 
 #[test]
@@ -564,8 +510,8 @@ fn native_management_is_registered_only_for_the_native_agent() {
         .expect("native management");
     assert_eq!(management.agent_id(), builtin::OPENCODE);
     assert!(
-        catalog.management(builtin::OPENCODE_ACP).is_none(),
-        "the ACP fallback has no out-of-session management"
+        catalog.management(builtin::AGY).is_none(),
+        "ACP agents have no out-of-session management"
     );
     assert!(catalog.management("unknown").is_none());
 }
@@ -578,8 +524,8 @@ fn native_auth_is_available_only_for_the_builtin_driver() {
     assert_eq!(auth.methods.len(), 1);
     assert_eq!(auth.methods[0].id, "opencode-login");
     assert!(
-        catalog.native_auth(builtin::OPENCODE_ACP).is_none(),
-        "the ACP fallback discovers auth through initialize"
+        catalog.native_auth(builtin::AGY).is_none(),
+        "ACP agents discover auth through initialize"
     );
 
     // A custom definition shadows the builtin and must keep using ACP.

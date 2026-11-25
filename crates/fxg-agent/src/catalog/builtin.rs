@@ -13,17 +13,12 @@ use fxg_protocol::common::AgentAuthMethodInfo;
 
 use crate::acp::extensions::AgentExtension;
 use crate::acp::extensions::antigravity::AntigravityExtension;
-use crate::acp::extensions::opencode::OpenCodeExtension;
 use crate::driver::AgentDriver;
 use crate::management::AgentManagement;
 use crate::opencode::{OpenCodeNativeDriver, auth as opencode_auth};
 
 /// OpenCode native driver (Tier 3, OpenCode v2 HTTP + SSE).
 pub const OPENCODE: &str = "opencode";
-/// OpenCode through ACP, kept as a fallback for older CLI builds.
-pub const OPENCODE_ACP: &str = "opencode-acp";
-/// Extension ID applied to [`OPENCODE_ACP`].
-pub const OPENCODE_EXTENSION: &str = "opencode";
 /// ACP-only Antigravity CLI (`agy acp`).
 pub const AGY: &str = "agy";
 /// Extension ID applied to [`AGY`].
@@ -219,19 +214,6 @@ pub fn agents() -> Vec<BuiltinAgent> {
         )
         .with_backend(AgentBackend::Custom(opencode))
         .with_auth(opencode_auth()),
-        BuiltinAgent::new(
-            AgentDefinition {
-                id: OPENCODE_ACP.to_owned(),
-                name: "OpenCode (ACP)".to_owned(),
-                description: Some("OpenCode through ACP (fallback)".to_owned()),
-                icon: Some("builtin:opencode".to_owned()),
-            },
-            Some(LaunchPreset {
-                program: OPENCODE,
-                args: &["acp"],
-            }),
-        )
-        .with_extension(OPENCODE_EXTENSION, Arc::new(OpenCodeExtension)),
         acp_agent(
             AGY,
             "Antigravity",
@@ -333,8 +315,8 @@ mod tests {
         let agents = agents();
         let acp = agents
             .iter()
-            .find(|agent| agent.definition().id == OPENCODE_ACP)
-            .expect("opencode-acp agent");
+            .find(|agent| agent.definition().id == AGY)
+            .expect("agy agent");
         assert!(acp.auth().is_none());
     }
 }

@@ -173,7 +173,10 @@ async fn native_driver_uses_the_http_and_sse_contract() {
     let mut elicitation = None;
     let mut child_announced = false;
     let mut child_text = false;
-    let mut child_completed = false;
+    let mut child_completed = 0;
+    let mut child_title = None;
+    let mut child_permission = false;
+    let mut child_tool = false;
     let mut plan = None;
     let mut turn_ended = None;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
@@ -186,8 +189,17 @@ async fn native_driver_uses_the_http_and_sse_contract() {
             DriverEvent::Delta(StreamDeltaPayload::AgentMessageDelta { text_delta, .. }) => {
                 text.push_str(&text_delta);
             }
-            DriverEvent::Event(UnifiedEventPayload::PermissionRequest { request_id, .. }) => {
-                permission = Some(request_id);
+            DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
+                request_id,
+                subagent_id,
+                ..
+            }) => {
+                if request_id == "perm_1" {
+                    permission = Some(request_id.clone());
+                }
+                if request_id == "perm_child" {
+                    child_permission = subagent_id.as_deref() == Some("ses_child");
+                }
             }
             DriverEvent::Event(UnifiedEventPayload::ElicitationRequest {
                 elicitation_id, ..
@@ -196,13 +208,25 @@ async fn native_driver_uses_the_http_and_sse_contract() {
             }
             DriverEvent::Event(UnifiedEventPayload::SubagentUpdated {
                 child_session_id,
+                title,
                 status,
                 ..
             }) => {
                 if child_session_id == "ses_child" {
                     child_announced = true;
-                    child_completed = status == fxg_protocol::events::SubagentStatus::Completed;
+                    if status == fxg_protocol::events::SubagentStatus::Completed {
+                        child_completed += 1;
+                        child_title = title;
+                    }
                 }
+            }
+            DriverEvent::Event(UnifiedEventPayload::ToolCall {
+                tool_call_id,
+                status: fxg_protocol::common::ToolCallStatus::Completed,
+                subagent_id,
+                ..
+            }) if tool_call_id == "tool_child" => {
+                child_tool = subagent_id.as_deref() == Some("ses_child");
             }
             DriverEvent::Event(UnifiedEventPayload::AgentMessage {
                 text: message,
@@ -232,7 +256,16 @@ async fn native_driver_uses_the_http_and_sse_contract() {
     assert_eq!(elicitation.as_deref(), Some("frm_1"));
     assert!(child_announced, "the child session must be announced");
     assert!(child_text, "child text must carry the subagent id");
-    assert!(child_completed, "the child completion must be reported");
+    assert_eq!(
+        child_completed, 1,
+        "a completed child must be announced exactly once"
+    );
+    assert_eq!(child_title.as_deref(), Some("Explore subtask"));
+    assert!(
+        child_permission,
+        "a child permission request must carry the subagent id"
+    );
+    assert!(child_tool, "a child tool call must carry the subagent id");
     let plan = plan.expect("todowrite must produce a plan update");
     assert_eq!(plan.len(), 2);
     assert_eq!(plan[0].title, "Write code");
@@ -557,6 +590,34 @@ async fn prompt(State(state): State<Mock>, Json(body): Json<Value>) -> Json<Valu
             .to_string(),
         );
         let _ = tx.send(
+            json!({"type": "session.renamed", "id": "evt_child_renamed",
+                   "data": {"sessionID": "ses_child", "title": "Explore subtask"}})
+            .to_string(),
+        );
+        let _ = tx.send(
+            json!({"type": "permission.asked", "id": "evt_child_perm",
+                   "data": {"sessionID": "ses_child", "id": "perm_child", "action": "bash",
+                            "resources": ["cargo test"], "message": "Run tests"}})
+            .to_string(),
+        );
+        let _ = tx.send(
+            json!({"type": "session.tool.input.started", "id": "evt_child_tool_start",
+                   "data": {"sessionID": "ses_child", "id": "tool_child", "name": "bash"}})
+            .to_string(),
+        );
+        let _ = tx.send(
+            json!({"type": "session.tool.called", "id": "evt_child_tool_called",
+                   "data": {"sessionID": "ses_child", "id": "tool_child",
+                            "input": {"command": "cargo test"}}})
+            .to_string(),
+        );
+        let _ = tx.send(
+            json!({"type": "session.tool.success", "id": "evt_child_tool_done",
+                   "data": {"sessionID": "ses_child", "id": "tool_child",
+                            "content": "ok"}})
+            .to_string(),
+        );
+        let _ = tx.send(
             json!({"type": "session.text.ended", "id": "evt_child_text",
                    "durable": {"aggregateID": "ses_child", "seq": 1, "version": 1},
                    "data": {"sessionID": "ses_child", "assistantMessageID": "msg_child",
@@ -565,6 +626,11 @@ async fn prompt(State(state): State<Mock>, Json(body): Json<Value>) -> Json<Valu
         );
         let _ = tx.send(
             json!({"type": "session.execution.succeeded", "id": "evt_child_done",
+                   "data": {"sessionID": "ses_child"}})
+            .to_string(),
+        );
+        let _ = tx.send(
+            json!({"type": "session.idle", "id": "evt_child_idle",
                    "data": {"sessionID": "ses_child"}})
             .to_string(),
         );

@@ -457,6 +457,7 @@ pub(super) async fn apply_raw_event(inner: &Arc<DriverInner>, value: &Value) {
             return;
         }
         if let Some((runtime, subagent_id)) = inner.runtime_for(session_id) {
+            let mut skip = false;
             if let Some(child) = subagent_id.as_deref() {
                 let status = match kind {
                     "session.execution.started" => Some(SubagentStatus::Running),
@@ -467,9 +468,26 @@ pub(super) async fn apply_raw_event(inner: &Arc<DriverInner>, value: &Value) {
                     "session.execution.failed" | "session.error" => Some(SubagentStatus::Failed),
                     _ => None,
                 };
-                if let Some(status) = status {
-                    inner.update_child_status(child, status);
+                if let Some(status) = status
+                    && !inner.update_child_status(child, status)
+                {
+                    // OpenCode reports completion twice (`session.execution.succeeded`
+                    // and `session.idle`); only announce a real state change.
+                    skip = true;
                 }
+                if !skip
+                    && matches!(kind, "session.renamed" | "session.title.updated")
+                    && let Some(title) = data
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|title| !title.is_empty())
+                {
+                    inner.update_child_title(child, title);
+                }
+            }
+            if skip {
+                return;
             }
             let child_info = subagent_id
                 .as_deref()

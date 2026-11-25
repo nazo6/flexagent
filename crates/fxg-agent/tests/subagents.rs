@@ -1,11 +1,9 @@
-//! Subagent event routing (ACP RFD + opencode vendor extension).
+//! Subagent event routing for ACP.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use fxg_agent::acp::extensions::AgentExtension;
-use fxg_agent::acp::extensions::opencode::OpenCodeExtension;
 use fxg_agent::{
     AcpDriver, AcpLaunchOptions, AgentDriver, AgentLaunchSpec, DriverEvent, LaunchBackend,
     StartSessionRequest,
@@ -34,15 +32,12 @@ fn request(mode: &str, mut launch: AgentLaunchSpec, cwd: &Path) -> StartSessionR
     }
 }
 
-fn launch(
-    extension: Option<&str>,
-    options: fxg_agent::acp::extensions::AcpExtensionOptions,
-) -> AgentLaunchSpec {
+fn launch(options: fxg_agent::acp::extensions::AcpExtensionOptions) -> AgentLaunchSpec {
     AgentLaunchSpec {
-        agent_id: extension.unwrap_or("mock").to_owned(),
+        agent_id: "mock".to_owned(),
         display_name: "Mock".to_owned(),
         backend: LaunchBackend::Acp(AcpLaunchOptions {
-            extension: extension.map(str::to_owned),
+            extension: None,
             options,
         }),
         program: Some(mock_agent_bin()),
@@ -112,7 +107,7 @@ async fn acp_child_updates_are_tagged_and_announced() {
     let events = run(
         "subagents",
         Arc::new(AcpDriver::without_pool()),
-        launch(None, Default::default()),
+        launch(Default::default()),
     )
     .await;
 
@@ -153,57 +148,4 @@ async fn acp_child_updates_are_tagged_and_announced() {
         )),
         "child tool call was not tagged: {events:#?}"
     );
-}
-
-#[tokio::test]
-async fn opencode_child_notifications_are_parsed() {
-    let extension = Arc::new(OpenCodeExtension);
-    let options = extension.acp_options(&Default::default());
-    let driver = Arc::new(AcpDriver::without_pool_with_extension(extension));
-    let events = run(
-        "opencode-subagents",
-        driver,
-        launch(Some("opencode"), options),
-    )
-    .await;
-
-    let updates = subagent_updates(&events);
-    assert!(
-        updates.iter().any(|payload| matches!(
-            payload,
-            UnifiedEventPayload::SubagentUpdated {
-                child_session_id,
-                depth: 1,
-                title: Some(title),
-                ..
-            } if child_session_id == "child-open" && title == "Explore"
-        )),
-        "missing opencode child announcement: {updates:#?}"
-    );
-
-    assert!(
-        events.iter().any(|event| matches!(
-            event,
-            DriverEvent::Event(UnifiedEventPayload::AgentMessage {
-                subagent_id: Some(child),
-                text,
-                ..
-            }) if child == "child-open" && text == "child says hi"
-        )),
-        "opencode child message was not parsed: {events:#?}"
-    );
-
-    // The vendor resends the same status with each update; unchanged state must
-    // not produce another announcement.
-    let announcements = updates
-        .iter()
-        .filter(|payload| {
-            matches!(
-                payload,
-                UnifiedEventPayload::SubagentUpdated { child_session_id, .. }
-                    if child_session_id == "child-open"
-            )
-        })
-        .count();
-    assert_eq!(announcements, 1, "duplicate announcements: {updates:#?}");
 }

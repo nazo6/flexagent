@@ -107,7 +107,7 @@ REST 応答には `x-request-id` ヘッダが付与され、ログ相関に使�
 
 サブエージェントは fxg の独立セッションではありません。親セッションの
 イベントストリームに、子セッション由来のイベントとしてタグ付きで混在させます。
-ACP 標準の subagents RFD と opencode の独自拡張（child session updates）は
+ACP 標準の subagents RFD と OpenCode native の子セッションは
 どちらも同じ正規化イベントへ変換し、UI は発生元を意識しません。
 
 不変条件:
@@ -137,9 +137,12 @@ ACP 標準の subagents RFD と opencode の独自拡張（child session updates
 - ACP 標準の `subagents` RFD: 親セッション宛の `subagent_update`、
   子セッション宛の `session/update`、`session_message` /
   `session_message_chunk`。
-- opencode: `opencode/session/child_update` 拡張通知。
+- OpenCode native: `/api/event` の `session.created` / `session.renamed` /
+  `session.execution.*` から子を登録・更新し、子セッションのイベントを
+  `subagent_id` 付きで正規化する。
 
-どちらも `crates/fxg-agent/src/acp/mapping.rs` で同じイベントへ変換します。
+ACP は `crates/fxg-agent/src/acp/mapping/`、OpenCode native は
+`crates/fxg-agent/src/opencode/mapping.rs` で同じイベントへ変換します。
 型の正は `crates/fxg-protocol/src/events.rs`、UI の型は生成済み
 `ui/src/lib/generated/bindings.ts` です。
 
