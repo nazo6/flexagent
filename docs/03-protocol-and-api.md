@@ -55,29 +55,29 @@ Client ⇔ Hub / Local Node（HTTP / WebSocket）で共有する型を定義し�
 `crates/fxg-protocol/src/common/audit.rs` の `EventType` です。主なイベントは
 次のとおりです。
 
-| イベント                                     | 用途 / ハブ側の投影                                           |
-| :------------------------------------------- | :------------------------------------------------------------ |
-| `SessionCreated`                             | セッション生成（`node_seq = 1`）。`sessions` 行の生成源。     |
-| `SessionTitleChanged`                        | タイトル変更。`sessions.title`。                              |
-| `SessionPermissionPolicyChanged`             | 承認ポリシー変更。`sessions.permission_policy`。              |
-| `SessionAgentBound`                          | ACP セッション確立。`sessions.agent_session_id`。             |
-| `UserMessage`                                | ユーザーのプロンプト（添付・`client_source` を含む）。        |
+| イベント                                     | 用途 / ハブ側の投影                                                                                     |
+| :------------------------------------------- | :------------------------------------------------------------------------------------------------------ |
+| `SessionCreated`                             | セッション生成（`node_seq = 1`）。`sessions` 行の生成源。                                               |
+| `SessionTitleChanged`                        | タイトル変更。`sessions.title`。                                                                        |
+| `SessionPermissionPolicyChanged`             | 承認ポリシー変更。`sessions.permission_policy`。                                                        |
+| `SessionAgentBound`                          | ACP セッション確立。`sessions.agent_session_id`。                                                       |
+| `UserMessage`                                | ユーザーのプロンプト（添付・`client_source` を含む）。                                                  |
 | `AgentMessage` / `AgentThought`              | エージェントの返答 / 思考。完成イベントだけを永続化し、画像などの非 Text ブロックは添付として同梱する。 |
-| `ToolCall`                                   | ツール呼び出しと Diff。同一 `tool_call_id` の追記で状態更新。 |
-| `PlanUpdate`                                 | 実行計画（ACP Plan）。                                        |
-| `PermissionRequest` / `PermissionResolved`   | 承認リクエストと解決。`permission_requests` の投影。          |
-| `ElicitationRequest` / `ElicitationResolved` | 構造化入力と解決。`elicitation_requests` の投影。             |
-| `TerminalOutput`                             | ターミナル出力。FTS の `searchable_text` からは除外。         |
-| `CapabilitiesUpdated`                        | モード・コマンド・設定。`sessions.current_mode` などの投影。  |
-| `ProvisioningLog`                            | 一時VMのプロビジョニングログ。                                |
-| `UsageUpdated`                               | コンテキスト使用量・コスト。`sessions.usage_json`（最新値）。 |
-| `SubagentUpdated`                            | 子セッションの作成・状態更新。`sessions` 行は作らない。       |
-| `SubagentMessage`                            | 親子間メッセージ。送信元 / 宛先で方向を保持する。             |
-| `TurnEnded`                                  | 正常終了以外のターン終了理由。                                |
-| `CompactionUpdated`                          | コンテキスト圧縮の進行状況。                                  |
-| `StatusChanged`                              | セッション状態。`sessions.status`。                           |
-| `SessionArchived`                            | アーカイブ / 復元。`sessions.archived_at`。                   |
-| `SessionDeleted`                             | 削除 tombstone。本文イベントと承認 / 質問をパージする。       |
+| `ToolCall`                                   | ツール呼び出しと Diff。同一 `tool_call_id` の追記で状態更新。                                           |
+| `PlanUpdate`                                 | 実行計画（ACP Plan）。                                                                                  |
+| `PermissionRequest` / `PermissionResolved`   | 承認リクエストと解決。`permission_requests` の投影。                                                    |
+| `ElicitationRequest` / `ElicitationResolved` | 構造化入力と解決。`elicitation_requests` の投影。                                                       |
+| `TerminalOutput`                             | ターミナル出力。FTS の `searchable_text` からは除外。                                                   |
+| `CapabilitiesUpdated`                        | モード・コマンド・設定。`sessions.current_mode` などの投影。                                            |
+| `ProvisioningLog`                            | 一時VMのプロビジョニングログ。                                                                          |
+| `UsageUpdated`                               | コンテキスト使用量・コスト。`sessions.usage_json`（最新値）。                                           |
+| `SubagentUpdated`                            | 子セッションの作成・状態更新。`sessions` 行は作らない。                                                 |
+| `SubagentMessage`                            | 親子間メッセージ。送信元 / 宛先で方向を保持する。                                                       |
+| `TurnEnded`                                  | 正常終了以外のターン終了理由。                                                                          |
+| `CompactionUpdated`                          | コンテキスト圧縮の進行状況。                                                                            |
+| `StatusChanged`                              | セッション状態。`sessions.status`。                                                                     |
+| `SessionArchived`                            | アーカイブ / 復元。`sessions.archived_at`。                                                             |
+| `SessionDeleted`                             | 削除 tombstone。本文イベントと承認 / 質問をパージする。                                                 |
 
 ### 1.4 制御アクション
 

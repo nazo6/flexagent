@@ -207,11 +207,7 @@ describe("groupActivitySections", () => {
 
   it("keeps a linked finished command outside the fold", () => {
     const entries = groupActivitySections(
-      groupTimelineItems([
-        tool("t1", "term-1"),
-        terminal("term-1", false),
-        message("done"),
-      ]),
+      groupTimelineItems([tool("t1", "term-1"), terminal("term-1", false), message("done")]),
     );
     expect(entries.map((entry) => entry.kind)).toEqual(["tools", "single", "single"]);
     expect(entries[1]).toMatchObject({ kind: "single", item: { terminalId: "term-1" } });
