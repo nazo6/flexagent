@@ -371,11 +371,11 @@ driver 側のキャッシュを無視する（UI の明示的な Refresh 用）�
 
 #### 検索 / Push / 監査
 
-| Method / Path                        | 内容                                       |
-| :----------------------------------- | :----------------------------------------- |
-| `GET /api/v1/search?q=...&limit=...` | FTS5 全文検索。                            |
-| `POST /api/v1/push/subscribe`        | Web Push 購読（ハブ / ノード双方で有効）。 |
-| `GET /api/v1/audit/logs?limit=...`   | 監査ログ。                                 |
+| Method / Path                                       | 内容                                                             |
+| :-------------------------------------------------- | :--------------------------------------------------------------- |
+| `GET /api/v1/search?q=...&limit=...&session_id=...` | FTS5 全文検索。`session_id` を付けるとその会話内だけを検索する。 |
+| `POST /api/v1/push/subscribe`                       | Web Push 購読（ハブ / ノード双方で有効）。                       |
+| `GET /api/v1/audit/logs?limit=...`                  | 監査ログ。                                                       |
 
 ### 3.2 Client WebSocket (`/api/v1/client/ws`)
 

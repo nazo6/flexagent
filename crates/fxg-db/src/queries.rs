@@ -917,8 +917,14 @@ pub async fn find_elicitation_request(
 /// FTS5 full-text search. Search terms shorter than 3 characters fall back to LIKE.
 ///
 /// The trigram tokenizer does not match search terms shorter than 3 characters
-/// (design: `docs/02-database-schema.md` §3).
-pub async fn search(pool: &SqlitePool, query: &str, limit: u32) -> Result<Vec<SearchHit>, DbError> {
+/// (design: `docs/02-database-schema.md` §3). `session_id` limits the search to
+/// one conversation (in-session search); `None` searches every session.
+pub async fn search(
+    pool: &SqlitePool,
+    query: &str,
+    limit: u32,
+    session_id: Option<&str>,
+) -> Result<Vec<SearchHit>, DbError> {
     let needle = query.trim();
     if needle.is_empty() {
         return Err(DbError::EmptySearchQuery);
@@ -926,7 +932,7 @@ pub async fn search(pool: &SqlitePool, query: &str, limit: u32) -> Result<Vec<Se
     let limit = i64::from(limit.clamp(1, 500));
 
     if needle.chars().count() < 3 {
-        return search_like(pool, needle, limit).await;
+        return search_like(pool, needle, limit, session_id).await;
     }
 
     // FTS5 MATCH requires embedding phrase quotes into the SQL string, which cannot be
@@ -945,11 +951,14 @@ pub async fn search(pool: &SqlitePool, query: &str, limit: u32) -> Result<Vec<Se
           FROM session_events_fts
           JOIN session_events e ON e.cursor = session_events_fts.rowid
          WHERE session_events_fts MATCH ?
+           AND (? IS NULL OR e.session_id = ?)
          ORDER BY e.created_at DESC
          LIMIT ?
         "#,
     )
     .bind(match_query)
+    .bind(session_id)
+    .bind(session_id)
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -962,6 +971,7 @@ async fn search_like(
     pool: &SqlitePool,
     needle: &str,
     limit: i64,
+    session_id: Option<&str>,
 ) -> Result<Vec<SearchHit>, DbError> {
     // The LIKE pattern also cannot be expressed with placeholders (wildcards must be
     // concatenated).
@@ -972,11 +982,14 @@ async fn search_like(
                searchable_text AS snippet
           FROM session_events
          WHERE searchable_text LIKE ? ESCAPE '\'
+           AND (? IS NULL OR session_id = ?)
          ORDER BY created_at DESC
          LIMIT ?
         "#,
     )
     .bind(pattern)
+    .bind(session_id)
+    .bind(session_id)
     .bind(limit)
     .fetch_all(pool)
     .await?;

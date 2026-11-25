@@ -4,6 +4,7 @@
   import { formatRelativeTime } from "#lib/format.ts";
   import type { SearchHit } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
+  import { snippetSegments } from "#lib/search.ts";
   import { shortId } from "#lib/session-status.ts";
   import { connection, sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
@@ -42,24 +43,6 @@
   /** Deep link to the matched event (the session page loads and flashes it). */
   function hitHref(hit: SearchHit): string {
     return `/sessions/${hit.session_id}?seq=${hit.node_seq}`;
-  }
-
-  /** Split an FTS5 snippet into segments around its `[match]` markers. */
-  function segments(snippet: string): { text: string; match: boolean }[] {
-    const parts: { text: string; match: boolean }[] = [];
-    let rest = snippet;
-    while (rest !== "") {
-      const start = rest.indexOf("[");
-      const end = start >= 0 ? rest.indexOf("]", start + 1) : -1;
-      if (start < 0 || end < 0) {
-        parts.push({ text: rest, match: false });
-        break;
-      }
-      if (start > 0) parts.push({ text: rest.slice(0, start), match: false });
-      parts.push({ text: rest.slice(start + 1, end), match: true });
-      rest = rest.slice(end + 1);
-    }
-    return parts;
   }
 </script>
 
@@ -112,7 +95,7 @@
           </div>
           <a href={hitHref(hit)} class="block transition-opacity hover:opacity-80">
             <p class="text-[13px] break-words whitespace-pre-wrap">
-              {#each segments(hit.snippet) as segment}
+              {#each snippetSegments(hit.snippet) as segment}
                 {#if segment.match}
                   <mark class="bg-signal-soft text-ink rounded-sm px-0.5">{segment.text}</mark>
                 {:else}{segment.text}{/if}

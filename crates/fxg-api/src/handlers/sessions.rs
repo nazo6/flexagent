@@ -202,6 +202,8 @@ pub(crate) async fn session_diff<B: ClientApiBackend>(
 pub(crate) struct SearchQuery {
     q: Option<String>,
     limit: Option<u32>,
+    /// Restrict the search to one session (in-session search).
+    session_id: Option<String>,
 }
 
 pub(crate) async fn search<B: ClientApiBackend>(
@@ -211,7 +213,12 @@ pub(crate) async fn search<B: ClientApiBackend>(
     let query = params.q.unwrap_or_default();
     let limit = params.limit.unwrap_or(50);
 
-    match state.backend.db().search(&query, limit).await {
+    match state
+        .backend
+        .db()
+        .search(&query, limit, params.session_id.as_deref())
+        .await
+    {
         Ok(hits) => Json(SearchResponse { hits }).into_response(),
         Err(fxg_db::DbError::EmptySearchQuery) => {
             ApiError::bad_request("search query must not be empty").into_response()

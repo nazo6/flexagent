@@ -468,8 +468,15 @@ impl Db {
     }
 
     /// FTS5 full-text search (falls back to LIKE for queries shorter than 3 characters).
-    pub async fn search(&self, query: &str, limit: u32) -> Result<Vec<SearchHit>, DbError> {
-        queries::search(&self.pool, query, limit).await
+    ///
+    /// `session_id` limits the search to one conversation; `None` searches all.
+    pub async fn search(
+        &self,
+        query: &str,
+        limit: u32,
+        session_id: Option<&str>,
+    ) -> Result<Vec<SearchHit>, DbError> {
+        queries::search(&self.pool, query, limit, session_id).await
     }
 
     /// Audit log list (newest first).

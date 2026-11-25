@@ -746,8 +746,10 @@
         {#if turnsOpen && turns.length > 0}
           <TurnOutline
             {turns}
+            {sessionId}
             activeSeq={activeTurnSeq}
             onjump={jumpToTurn}
+            onjumpseq={(seq) => void focusDeepLink(sessionId, seq)}
             onclose={() => (turnsOpen = false)}
           />
         {/if}

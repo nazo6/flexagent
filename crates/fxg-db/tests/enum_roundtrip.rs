@@ -406,7 +406,7 @@ async fn event_type_roundtrips_all_variants() {
     }
     // A 2-character query hits the LIKE fallback, which returns every row.
     let found: HashSet<String> = db
-        .search("ab", 500)
+        .search("ab", 500, None)
         .await
         .expect("search")
         .into_iter()

@@ -8,23 +8,76 @@
    */
   import type { ChatTurn } from "#lib/chat-turns.ts";
   import { turnToolLabel } from "#lib/chat-turns.ts";
+  import { formatRelativeTime } from "#lib/format.ts";
+  import type { SearchHit } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
+  import { snippetSegments } from "#lib/search.ts";
+  import { sync } from "#lib/stores/app.svelte.ts";
   import { cn } from "#lib/utils.ts";
   import ListIcon from "@lucide/svelte/icons/list";
+  import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
+  import SearchIcon from "@lucide/svelte/icons/search";
   import XIcon from "@lucide/svelte/icons/x";
 
   interface Props {
     turns: readonly ChatTurn[];
+    /** Session to search (in-session search runs on the full event log). */
+    sessionId: string;
     /** Turn currently on screen (scroll spy, owned by the rail). */
     activeSeq?: number | null;
     onjump: (turn: ChatTurn) => void;
+    /** Jump to a search hit (`node_seq`); the session page owns the scroll. */
+    onjumpseq: (seq: number) => void;
     onclose: () => void;
   }
 
-  let { turns, activeSeq = null, onjump, onclose }: Props = $props();
+  let { turns, sessionId, activeSeq = null, onjump, onjumpseq, onclose }: Props = $props();
 
   let listEl = $state<HTMLDivElement | null>(null);
   let panelEl = $state<HTMLDivElement | null>(null);
+
+  let query = $state("");
+  let hits = $state<SearchHit[]>([]);
+  let searching = $state(false);
+  /** Query the current results belong to (null before the first search). */
+  let searchedFor = $state<string | null>(null);
+  let searchError = $state<string | null>(null);
+  /** Drops out-of-order responses when the query changes while a search runs. */
+  let searchToken = 0;
+
+  $effect(() => {
+    const needle = query.trim();
+    if (needle === "") {
+      searchToken += 1;
+      hits = [];
+      searchedFor = null;
+      searchError = null;
+      searching = false;
+      return;
+    }
+    const token = ++searchToken;
+    // Typing should not fire a request per keystroke.
+    const timer = setTimeout(() => {
+      void (async () => {
+        searching = true;
+        searchError = null;
+        try {
+          const result = await sync.connection.client.search(needle, 50, sessionId);
+          if (token !== searchToken) return;
+          hits = result;
+          searchedFor = needle;
+        } catch (error) {
+          if (token !== searchToken) return;
+          hits = [];
+          searchedFor = needle;
+          searchError = error instanceof Error ? error.message : String(error);
+        } finally {
+          if (token === searchToken) searching = false;
+        }
+      })();
+    }, 250);
+    return () => clearTimeout(timer);
+  });
 
   interface Badge {
     label: string;
@@ -88,7 +141,9 @@
     <div class="border-border flex shrink-0 items-center gap-2 border-b px-3 py-2">
       <ListIcon class="text-muted-foreground size-4 shrink-0" />
       <span class="text-[13px] font-semibold">{m.chat_turns_title()}</span>
-      <span class="text-muted-foreground desk-mono ml-auto text-[11px]">{turns.length}</span>
+      <span class="text-muted-foreground desk-mono ml-auto text-[11px]">
+        {query.trim() === "" ? turns.length : hits.length}
+      </span>
       <button
         type="button"
         class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-6 items-center justify-center rounded-md"
@@ -100,46 +155,123 @@
       </button>
     </div>
 
+    <div class="border-border flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5">
+      <SearchIcon class="text-muted-foreground size-3.5 shrink-0" />
+      <input
+        type="search"
+        bind:value={query}
+        placeholder={m.chat_turns_search_placeholder()}
+        aria-label={m.chat_turns_search_placeholder()}
+        class="placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-[12px] outline-none"
+      />
+      {#if query !== ""}
+        <button
+          type="button"
+          class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-5 shrink-0 items-center justify-center rounded-md"
+          title={m.chat_turns_search_clear()}
+          aria-label={m.chat_turns_search_clear()}
+          onclick={() => (query = "")}
+        >
+          <XIcon class="size-3" />
+        </button>
+      {/if}
+    </div>
+
     <div bind:this={listEl} class="min-h-0 flex-1 overflow-y-auto p-1">
-      <ul class="m-0 flex list-none flex-col gap-0.5 p-0">
-        {#each turns as turn, index (turn.seq)}
-          {@const badges = badgesOf(turn)}
-          <li>
-            <button
-              type="button"
-              data-turn-row={turn.seq}
-              aria-current={turn.seq === activeSeq ? "true" : undefined}
-              class={cn(
-                "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
-                turn.seq === activeSeq ? "bg-signal-soft" : "hover:bg-accent",
-              )}
-              onclick={() => onjump(turn)}
-            >
-              <span
-                class="text-muted-foreground desk-mono mt-0.5 w-4 shrink-0 text-right text-[10px]"
-              >
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              <span class="min-w-0 flex-1">
-                <span class="line-clamp-2 block text-[12px] leading-snug">
-                  {turn.title === "" ? m.chat_turns_untitled() : turn.title}
-                </span>
-                {#if badges.length > 0}
-                  <span class="mt-1 flex flex-wrap items-center gap-1">
-                    {#each badges as badge (badge.label)}
-                      <span
-                        class={cn("rounded-full border px-1.5 text-[10px]", badgeClass[badge.tone])}
-                      >
-                        {badge.label}
-                      </span>
-                    {/each}
+      {#if query.trim() !== ""}
+        {#if searching}
+          <p class="text-muted-foreground flex items-center gap-2 p-2 text-[12px]">
+            <LoaderCircleIcon class="size-3.5 animate-spin" />
+            {m.chat_turns_search_loading()}
+          </p>
+        {:else if searchError !== null}
+          <p class="text-destructive p-2 text-[12px]">{m.chat_turns_search_failed()}</p>
+        {:else if searchedFor !== null && hits.length === 0}
+          <p class="text-muted-foreground p-2 text-[12px]">{m.chat_turns_search_empty()}</p>
+        {:else}
+          <ul class="m-0 flex list-none flex-col gap-0.5 p-0">
+            {#each hits as hit (hit.event_id)}
+              <li>
+                <button
+                  type="button"
+                  data-search-hit={hit.node_seq}
+                  class="hover:bg-accent flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors"
+                  onclick={() => {
+                    onjumpseq(hit.node_seq);
+                    onclose();
+                  }}
+                >
+                  <span
+                    class="text-muted-foreground desk-mono mt-0.5 w-8 shrink-0 text-right text-[10px]"
+                  >
+                    #{hit.node_seq}
                   </span>
-                {/if}
-              </span>
-            </button>
-          </li>
-        {/each}
-      </ul>
+                  <span class="min-w-0 flex-1">
+                    <span class="line-clamp-2 block text-[12px] leading-snug">
+                      {#each snippetSegments(hit.snippet) as segment, segmentIndex (segmentIndex)}
+                        {#if segment.match}
+                          <mark class="bg-signal-soft text-ink rounded-sm px-0.5"
+                            >{segment.text}</mark
+                          >
+                        {:else}{segment.text}{/if}
+                      {/each}
+                    </span>
+                    <span
+                      class="text-muted-foreground mt-0.5 flex items-center gap-1.5 text-[10px]"
+                    >
+                      <span class="desk-mono">{hit.event_type}</span>
+                      <span class="ml-auto">{formatRelativeTime(hit.created_at)}</span>
+                    </span>
+                  </span>
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      {:else}
+        <ul class="m-0 flex list-none flex-col gap-0.5 p-0">
+          {#each turns as turn, index (turn.seq)}
+            {@const badges = badgesOf(turn)}
+            <li>
+              <button
+                type="button"
+                data-turn-row={turn.seq}
+                aria-current={turn.seq === activeSeq ? "true" : undefined}
+                class={cn(
+                  "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
+                  turn.seq === activeSeq ? "bg-signal-soft" : "hover:bg-accent",
+                )}
+                onclick={() => onjump(turn)}
+              >
+                <span
+                  class="text-muted-foreground desk-mono mt-0.5 w-4 shrink-0 text-right text-[10px]"
+                >
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <span class="min-w-0 flex-1">
+                  <span class="line-clamp-2 block text-[12px] leading-snug">
+                    {turn.title === "" ? m.chat_turns_untitled() : turn.title}
+                  </span>
+                  {#if badges.length > 0}
+                    <span class="mt-1 flex flex-wrap items-center gap-1">
+                      {#each badges as badge (badge.label)}
+                        <span
+                          class={cn(
+                            "rounded-full border px-1.5 text-[10px]",
+                            badgeClass[badge.tone],
+                          )}
+                        >
+                          {badge.label}
+                        </span>
+                      {/each}
+                    </span>
+                  {/if}
+                </span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
     </div>
   </div>
 </div>

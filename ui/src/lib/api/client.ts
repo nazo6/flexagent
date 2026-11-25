@@ -652,10 +652,10 @@ export class ApiClient {
     return this.#request("DELETE", `/api/v1/sessions/${encodeURIComponent(sessionId)}`);
   }
 
-  /** `POST /api/v1/search` (FTS5 full-text search). */
-  async search(query: string, limit?: number): Promise<SearchHit[]> {
+  /** `GET /api/v1/search` (FTS5 full-text search). */
+  async search(query: string, limit?: number, sessionId?: string | null): Promise<SearchHit[]> {
     const response = await this.#request<SearchResponse>("GET", "/api/v1/search", {
-      query: { q: query, limit },
+      query: { q: query, limit, session_id: sessionId ?? undefined },
     });
     return response.hits;
   }

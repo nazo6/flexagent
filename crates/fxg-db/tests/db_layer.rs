@@ -986,7 +986,7 @@ async fn fts_search_matches_text_and_excludes_binary_events() {
     // Japanese text can be searched through FTS (search index synced by triggers)
     let hits = fixture
         .db
-        .search("認証エラー", 10) // allow-japanese: CJK full-text search test
+        .search("認証エラー", 10, None) // allow-japanese: CJK full-text search test
         .await
         .expect("search japanese");
     assert_eq!(hits.len(), 1);
@@ -997,10 +997,25 @@ async fn fts_search_matches_text_and_excludes_binary_events() {
     assert!(hits[0].snippet.contains("認証エラー")); // allow-japanese: CJK full-text search test
     assert!(hits[0].snippet.contains('['));
 
+    // Scoping to one session keeps the hit and excludes every other session.
+    let hits = fixture
+        .db
+        .search("認証エラー", 10, Some(&fixture.session_id)) // allow-japanese: CJK full-text search test
+        .await
+        .expect("search in session");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].session_id.as_str(), fixture.session_id);
+    let hits = fixture
+        .db
+        .search("認証エラー", 10, Some("another-session")) // allow-japanese: CJK full-text search test
+        .await
+        .expect("search in another session");
+    assert!(hits.is_empty(), "other sessions must not match");
+
     // Partial match on a code identifier
     let hits = fixture
         .db
-        .search("OpenCode2Driver", 10)
+        .search("OpenCode2Driver", 10, None)
         .await
         .expect("search identifier");
     assert_eq!(hits.len(), 1);
@@ -1012,7 +1027,7 @@ async fn fts_search_matches_text_and_excludes_binary_events() {
     // TerminalOutput (binary) is excluded from FTS
     let hits = fixture
         .db
-        .search("c2VjcmV0LXRva2VuLXZhbHVl", 10)
+        .search("c2VjcmV0LXRva2VuLXZhbHVl", 10, None)
         .await
         .expect("search base64");
     assert!(hits.is_empty(), "terminal output must be excluded from FTS");
@@ -1020,24 +1035,32 @@ async fn fts_search_matches_text_and_excludes_binary_events() {
     // A term that does not hit
     let hits = fixture
         .db
-        .search("存在しない検索語", 10) // allow-japanese: CJK full-text search test
+        .search("存在しない検索語", 10, None) // allow-japanese: CJK full-text search test
         .await
         .expect("search missing");
     assert!(hits.is_empty());
 
     // Queries shorter than 3 characters use the LIKE fallback
-    let hits = fixture.db.search("認証", 10).await.expect("short query"); // allow-japanese: CJK short-query test
+    let hits = fixture
+        .db
+        .search("認証", 10, None)
+        .await
+        .expect("short query"); // allow-japanese: CJK short-query test
     assert_eq!(hits.len(), 1);
     assert!(hits[0].snippet.contains("認証")); // allow-japanese: CJK short-query test
 
     // An empty query is an error
     assert!(matches!(
-        fixture.db.search("   ", 10).await.expect_err("empty"),
+        fixture.db.search("   ", 10, None).await.expect_err("empty"),
         DbError::EmptySearchQuery
     ));
 
     // Search terms containing LIKE metacharacters do not error
-    let hits = fixture.db.search("100%", 10).await.expect("like meta");
+    let hits = fixture
+        .db
+        .search("100%", 10, None)
+        .await
+        .expect("like meta");
     assert!(hits.is_empty());
 }
 
@@ -1065,7 +1088,7 @@ async fn fts_index_stays_in_sync_on_regenerate_and_delete() {
         .expect("corrupt searchable text");
     let hits = fixture
         .db
-        .search("migration", 10)
+        .search("migration", 10, None)
         .await
         .expect("search after corrupt");
     assert!(hits.is_empty());
@@ -1078,7 +1101,7 @@ async fn fts_index_stays_in_sync_on_regenerate_and_delete() {
     assert_eq!(updated, 2);
     let hits = fixture
         .db
-        .search("migration", 10)
+        .search("migration", 10, None)
         .await
         .expect("search after regenerate");
     assert_eq!(hits.len(), 1);
@@ -1087,7 +1110,7 @@ async fn fts_index_stays_in_sync_on_regenerate_and_delete() {
     fixture.db.rebuild_fts_index().await.expect("rebuild fts");
     let hits = fixture
         .db
-        .search("migration", 10)
+        .search("migration", 10, None)
         .await
         .expect("search after rebuild");
     assert_eq!(hits.len(), 1);
@@ -1101,7 +1124,7 @@ async fn fts_index_stays_in_sync_on_regenerate_and_delete() {
         .expect("delete session");
     let hits = fixture
         .db
-        .search("migration", 10)
+        .search("migration", 10, None)
         .await
         .expect("search after delete");
     assert!(hits.is_empty(), "FTS index must follow cascade deletes");
@@ -1264,12 +1287,12 @@ async fn node_and_hub_return_identical_client_responses() {
     assert_eq!(
         node_fixture
             .db
-            .search("cargo test", 10)
+            .search("cargo test", 10, None)
             .await
             .expect("node search"),
         hub_fixture
             .db
-            .search("cargo test", 10)
+            .search("cargo test", 10, None)
             .await
             .expect("hub search")
     );
