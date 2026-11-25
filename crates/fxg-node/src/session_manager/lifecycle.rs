@@ -617,6 +617,31 @@ impl SessionManager {
             self.inner.invalidate_external();
             return Err(err);
         }
+
+        // `SessionAgentBound` is applied by the event pump. Wait briefly so an
+        // immediate discovery or retry sees the new owner instead of starting a
+        // duplicate import.
+        let binding_deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < binding_deadline {
+            match self
+                .inner
+                .bus
+                .db()
+                .find_session_by_agent_session(agent_id, agent_session_id)
+                .await
+            {
+                Ok(Some(found)) if found == session_id => break,
+                Ok(_) => {}
+                Err(err) => {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        "failed to verify the imported agent binding: {err}"
+                    );
+                    break;
+                }
+            }
+            tokio::time::sleep(RESUME_WAIT_INTERVAL).await;
+        }
         self.inner.invalidate_external();
         Ok(session_id)
     }
