@@ -15,7 +15,7 @@ describe("enhanceCodeBlocks", () => {
   });
 
   it("wraps a fenced block and copies its source", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText },

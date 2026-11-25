@@ -31,8 +31,8 @@ describe("TurnOutline in-session search", () => {
     const searchSpy = vi
       .spyOn(sync.connection.client, "search")
       .mockResolvedValue([hit(7, "before [term] after")]);
-    const onjumpseq = vi.fn();
-    const onclose = vi.fn();
+    const onjumpseq = vi.fn<(seq: number) => void>();
+    const onclose = vi.fn<() => void>();
     const target = document.createElement("div");
     document.body.appendChild(target);
     const component = mount(TurnOutline, {
