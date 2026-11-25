@@ -11,12 +11,15 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use futures_util::stream::{self, StreamExt};
 use fxg_agent::{AgentAuthRequired, ExternalSessionsUnsupported};
-use fxg_protocol::SessionId;
+use fxg_db::queries::AgentSessionBinding;
 use fxg_protocol::client_api::{
     ExternalSessionAgentInfo, ExternalSessionListResponse, ExternalSessionSummary,
 };
 use fxg_protocol::common::{ErrorCode, ErrorInfo};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use super::{Inner, NodeError, SessionManager};
 
@@ -26,6 +29,13 @@ const AGENT_TIMEOUT: Duration = Duration::from_secs(20);
 const TOTAL_BUDGET: Duration = Duration::from_secs(100);
 /// Cached discovery result stays valid for this long.
 const CACHE_TTL: Duration = Duration::from_secs(60);
+/// Number of agents inspected concurrently.
+const DISCOVERY_CONCURRENCY: usize = 3;
+/// Clock difference tolerated before an agent timestamp is treated as newer.
+///
+/// Local prompts also bump the agent's timestamp, while fxg records the event
+/// with its own clock; this margin avoids flagging those as external changes.
+const SYNC_CLOCK_TOLERANCE_MS: i64 = 60_000;
 
 impl Inner {
     /// Returns the cached discovery result when it is still fresh.
@@ -51,6 +61,15 @@ impl Inner {
             cached_at: Instant::now(),
         });
     }
+
+    /// Drops the cached discovery result after a binding change.
+    pub(super) fn invalidate_external(&self) {
+        let mut cache = self
+            .external_cache
+            .lock()
+            .expect("external session cache poisoned");
+        *cache = None;
+    }
 }
 
 impl SessionManager {
@@ -66,7 +85,8 @@ impl SessionManager {
         let wanted = normalize_filter(agents);
 
         // Reuse the probe lock: both operations cold-start an agent and must not
-        // spawn duplicate processes for the same selection.
+        // spawn duplicate processes for the same selection. Discovery itself
+        // inspects multiple agents concurrently inside this lock.
         let _guard = self.inner.probe_lock.lock().await;
 
         // Only the unfiltered response is cached, so a per-agent request never
@@ -97,40 +117,51 @@ impl SessionManager {
     ) -> Result<ExternalSessionListResponse, NodeError> {
         let imported = self.imported_sessions().await?;
         let process_cwd = discovery_cwd();
+        let process_cwd = &process_cwd;
+        let imported = &imported;
         let deadline = Instant::now() + TOTAL_BUDGET;
 
-        let mut sessions = Vec::new();
-        let mut agents = Vec::new();
         let mut seen_agents = BTreeSet::new();
+        let entries: Vec<_> = self
+            .inner
+            .catalog
+            .list()
+            .into_iter()
+            .filter(|entry| wanted.is_empty() || wanted.contains(&entry.id))
+            .filter(|entry| entry.is_available())
+            .filter(|entry| seen_agents.insert(entry.id.clone()))
+            .collect();
+        let considered = seen_agents.clone();
 
-        for entry in self.inner.catalog.list() {
-            if !wanted.is_empty() && !wanted.contains(&entry.id) {
-                continue;
-            }
-            if !entry.is_available() || !seen_agents.insert(entry.id.clone()) {
-                continue;
-            }
-            if Instant::now() >= deadline {
-                agents.push(agent_error(
-                    &entry.id,
-                    &entry.name,
-                    ErrorInfo::new(
-                        ErrorCode::Timeout,
-                        "external session discovery ran out of time",
-                    ),
-                ));
-                continue;
-            }
+        let outcomes = stream::iter(entries)
+            .map(|entry| async move {
+                if Instant::now() >= deadline {
+                    return AgentOutcome::error(
+                        &entry.id,
+                        &entry.name,
+                        ErrorInfo::new(
+                            ErrorCode::Timeout,
+                            "external session discovery ran out of time",
+                        ),
+                        false,
+                    );
+                }
+                self.discover_agent(&entry.id, &entry.name, process_cwd, imported)
+                    .await
+            })
+            .buffer_unordered(DISCOVERY_CONCURRENCY)
+            .collect::<Vec<_>>()
+            .await;
 
-            let outcome = self
-                .discover_agent(&entry.id, &entry.name, &process_cwd, &imported)
-                .await;
+        let mut sessions = Vec::new();
+        let mut agents = Vec::with_capacity(outcomes.len());
+        for outcome in outcomes {
             sessions.extend(outcome.sessions);
             agents.push(outcome.info);
         }
 
         // Report explicitly requested agents that are not available on this node.
-        for missing in wanted.iter().filter(|id| !seen_agents.contains(*id)) {
+        for missing in wanted.iter().filter(|id| !considered.contains(*id)) {
             agents.push(agent_error(
                 missing,
                 missing,
@@ -150,7 +181,11 @@ impl SessionManager {
         });
         agents.sort_by(|a, b| a.agent_id.cmp(&b.agent_id));
 
-        Ok(ExternalSessionListResponse { sessions, agents })
+        Ok(ExternalSessionListResponse {
+            sessions,
+            agents,
+            scanned_at: fxg_protocol::util::now_ms(),
+        })
     }
 
     /// Lists one agent and maps its sessions into the client shape.
@@ -159,7 +194,7 @@ impl SessionManager {
         agent_id: &str,
         name: &str,
         process_cwd: &Path,
-        imported: &HashMap<(String, String), SessionId>,
+        imported: &HashMap<(String, String), AgentSessionBinding>,
     ) -> AgentOutcome {
         let spec = match self.resolve_launch_spec(agent_id, process_cwd, &[]).await {
             Ok(spec) => spec,
@@ -236,15 +271,22 @@ impl SessionManager {
         let sessions = list
             .sessions
             .into_iter()
-            .map(|session| ExternalSessionSummary {
-                agent_id: agent_id.to_owned(),
-                imported_session_id: imported
-                    .get(&(agent_id.to_owned(), session.session_id.clone()))
-                    .cloned(),
-                agent_session_id: session.session_id,
-                cwd: session.cwd.to_string_lossy().into_owned(),
-                title: session.title,
-                updated_at: session.updated_at,
+            .map(|session| {
+                let binding = imported.get(&(agent_id.to_owned(), session.session_id.clone()));
+                ExternalSessionSummary {
+                    agent_id: agent_id.to_owned(),
+                    imported_session_id: binding.map(|binding| binding.session_id.clone()),
+                    imported_title: binding.map(|binding| binding.title.clone()),
+                    imported_updated_at: binding.map(|binding| binding.updated_at),
+                    imported_status: binding.map(|binding| binding.status),
+                    needs_sync: binding.is_some_and(|binding| {
+                        agent_is_newer(session.updated_at.as_deref(), binding.updated_at)
+                    }),
+                    agent_session_id: session.session_id,
+                    cwd: session.cwd.to_string_lossy().into_owned(),
+                    title: session.title,
+                    updated_at: session.updated_at,
+                }
             })
             .collect();
 
@@ -260,16 +302,35 @@ impl SessionManager {
         }
     }
 
-    /// Maps every live fxg session to its agent-side session ID.
-    async fn imported_sessions(&self) -> Result<HashMap<(String, String), SessionId>, NodeError> {
+    /// Maps every live, non-archived fxg session to its agent-side session ID.
+    async fn imported_sessions(
+        &self,
+    ) -> Result<HashMap<(String, String), AgentSessionBinding>, NodeError> {
         let bindings = self.inner.bus.db().list_agent_session_bindings().await?;
         Ok(bindings
             .into_iter()
-            .map(|(agent_id, agent_session_id, session_id)| {
-                ((agent_id, agent_session_id), session_id)
+            .map(|binding| {
+                (
+                    (binding.agent_id.clone(), binding.agent_session_id.clone()),
+                    binding,
+                )
             })
             .collect())
     }
+}
+
+/// Whether the agent reports activity newer than the fxg session's last event.
+fn agent_is_newer(agent_updated_at: Option<&str>, fxg_updated_at: i64) -> bool {
+    let Some(agent_updated_at) = agent_updated_at else {
+        return false;
+    };
+    let Ok(parsed) = OffsetDateTime::parse(agent_updated_at, &Rfc3339) else {
+        return false;
+    };
+    let Ok(agent_ms) = i64::try_from(parsed.unix_timestamp_nanos() / 1_000_000) else {
+        return false;
+    };
+    agent_ms > fxg_updated_at.saturating_add(SYNC_CLOCK_TOLERANCE_MS)
 }
 
 /// Discovery result for one agent.

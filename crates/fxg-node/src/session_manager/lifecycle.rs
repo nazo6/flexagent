@@ -459,6 +459,16 @@ impl SessionManager {
     }
     /// Imports an existing agent session by recording its agent-side ID and
     /// resuming it natively (`session/resume` / `session/load`).
+    ///
+    /// The import is idempotent: when a live, non-archived fxg session already
+    /// owns the agent session, its ID is returned instead of creating a second
+    /// binding. `replace_session_id` refreshes an existing import: the current
+    /// agent state is imported into a new session and the old session is
+    /// archived (and unarchived again when the import fails).
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "mirrors the REST / RPC import fields so callers share one entry point"
+    )]
     pub async fn import_session(
         &self,
         command_id: &CommandId,
@@ -467,10 +477,64 @@ impl SessionManager {
         cwd: &Path,
         title: Option<&str>,
         mirror_history: bool,
+        replace_session_id: Option<&fxg_protocol::SessionId>,
     ) -> Result<String, NodeError> {
         if !self.begin_command(command_id) {
             return Err(NodeError::CommandDuplicate(command_id.to_string()));
         }
+        if replace_session_id.is_some() && !mirror_history {
+            return Err(NodeError::InvalidState(
+                "refreshing an external session requires mirror_history".to_owned(),
+            ));
+        }
+        // Serialize the check + create so two concurrent clients cannot bind the
+        // same agent session twice.
+        let _import_guard = self.inner.import_lock.lock().await;
+
+        let existing = self
+            .inner
+            .bus
+            .db()
+            .find_session_by_agent_session(agent_id, agent_session_id)
+            .await?;
+        if let Some(existing) = &existing {
+            match replace_session_id {
+                None => return Ok(existing.clone()),
+                Some(replace) if replace.as_str() == existing => {}
+                Some(replace) => {
+                    return Err(NodeError::InvalidState(format!(
+                        "agent session {agent_session_id} is already bound to {existing}, not {replace}"
+                    )));
+                }
+            }
+        }
+
+        let mut archived_old = false;
+        let mut old_title = None;
+        if let Some(replace_id) = replace_session_id {
+            let old = self
+                .inner
+                .bus
+                .db()
+                .get_session(replace_id.as_str())
+                .await?
+                .ok_or_else(|| NodeError::InvalidSession(replace_id.to_string()))?;
+            if old.agent_id != agent_id || old.agent_session_id.as_deref() != Some(agent_session_id)
+            {
+                return Err(NodeError::InvalidState(format!(
+                    "session {} is not bound to agent session {agent_session_id}",
+                    replace_id
+                )));
+            }
+            old_title = Some(old.title);
+            self.stop_if_active(replace_id.as_str()).await?;
+            if old.archived_at.is_none() {
+                self.set_archived(&CommandId::from(uuid_v7()), replace_id.as_str(), true)
+                    .await?;
+                archived_old = true;
+            }
+        }
+
         let resolved =
             project::resolve_project(cwd, &self.inner.node_id, self.inner.bus.db()).await?;
         let spec = self
@@ -482,8 +546,10 @@ impl SessionManager {
         let title = title
             .filter(|title| !title.trim().is_empty())
             .map(str::to_owned)
+            .or(old_title)
             .unwrap_or_else(|| format!("{} (imported)", spec.display_name));
-        self.inner
+        let created = self
+            .inner
             .bus
             .create_session(
                 &session_id,
@@ -499,7 +565,15 @@ impl SessionManager {
                     title: title.clone(),
                 },
             )
-            .await?;
+            .await;
+        if let Err(err) = created {
+            if archived_old {
+                self.unarchive_after_failed_import(replace_session_id).await;
+            }
+            self.inner.invalidate_external();
+            return Err(err);
+        }
+
         if let Err(err) = self
             .start_driver_session(StartDriverParams {
                 session_id: &session_id,
@@ -537,9 +611,58 @@ impl SessionManager {
                     "failed to roll back the imported session: {cleanup:#}"
                 );
             }
+            if archived_old {
+                self.unarchive_after_failed_import(replace_session_id).await;
+            }
+            self.inner.invalidate_external();
             return Err(err);
         }
+
+        // `SessionAgentBound` is applied by the event pump. Wait briefly so an
+        // immediate discovery or retry sees the new owner instead of starting a
+        // duplicate import.
+        let binding_deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < binding_deadline {
+            match self
+                .inner
+                .bus
+                .db()
+                .find_session_by_agent_session(agent_id, agent_session_id)
+                .await
+            {
+                Ok(Some(found)) if found == session_id => break,
+                Ok(_) => {}
+                Err(err) => {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        "failed to verify the imported agent binding: {err}"
+                    );
+                    break;
+                }
+            }
+            tokio::time::sleep(RESUME_WAIT_INTERVAL).await;
+        }
+        self.inner.invalidate_external();
         Ok(session_id)
+    }
+
+    /// Restores the archived session when replacing it with a new import fails.
+    async fn unarchive_after_failed_import(
+        &self,
+        replace_session_id: Option<&fxg_protocol::SessionId>,
+    ) {
+        let Some(replace_id) = replace_session_id else {
+            return;
+        };
+        if let Err(err) = self
+            .set_archived(&CommandId::from(uuid_v7()), replace_id.as_str(), false)
+            .await
+        {
+            tracing::warn!(
+                session_id = %replace_id,
+                "failed to unarchive the old session after a failed refresh: {err}"
+            );
+        }
     }
 
     /// Branches the session with the ACP-native `session/fork` + `session/load`
@@ -820,6 +943,7 @@ impl SessionManager {
                 UnifiedEventPayload::SessionArchived { archived },
             )
             .await?;
+        self.inner.invalidate_external();
         Ok(archived.then_some(envelope.created_at))
     }
 
@@ -883,6 +1007,7 @@ impl SessionManager {
             .bus
             .record(session_id, UnifiedEventPayload::SessionDeleted {})
             .await?;
+        self.inner.invalidate_external();
         Ok(())
     }
 }

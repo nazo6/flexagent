@@ -679,7 +679,14 @@ fn resource_links_keep_the_node_local_path() {
         .expect("resource link message completes");
     assert_eq!(attachments.len(), 1);
     assert_eq!(attachments[0].file_name, "notes.md");
-    assert_eq!(attachments[0].local_path.as_deref(), Some("/repo/notes.md"));
+    // `file_path_from_uri` drops the leading slash on Windows so that
+    // `file:///C:/...` becomes a usable drive path.
+    let expected_path = if cfg!(windows) {
+        "repo/notes.md"
+    } else {
+        "/repo/notes.md"
+    };
+    assert_eq!(attachments[0].local_path.as_deref(), Some(expected_path));
     assert!(attachments[0].data_b64.is_none());
 }
 

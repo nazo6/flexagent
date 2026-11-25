@@ -595,6 +595,7 @@ async fn execute_inner(
             cwd,
             title,
             mirror_history,
+            replace_session_id,
         } => {
             let session_id = state
                 .import_session(
@@ -604,6 +605,7 @@ async fn execute_inner(
                     Path::new(&cwd),
                     title.as_deref(),
                     mirror_history,
+                    replace_session_id.as_ref(),
                     source,
                 )
                 .await?;

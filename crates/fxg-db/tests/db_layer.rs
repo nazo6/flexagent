@@ -1802,14 +1802,10 @@ async fn lightweight_session_queries_match_the_session_list() {
         .list_agent_session_bindings()
         .await
         .expect("agent bindings");
-    assert_eq!(
-        bindings,
-        vec![(
-            "opencode2".to_owned(),
-            "agent-session-1".to_owned(),
-            running_session
-        )]
-    );
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].agent_id, "opencode2");
+    assert_eq!(bindings[0].agent_session_id, "agent-session-1");
+    assert_eq!(bindings[0].session_id, running_session);
 }
 
 #[tokio::test]

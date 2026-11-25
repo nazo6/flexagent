@@ -13,7 +13,7 @@ use crate::common::{
     AgentAuthMethodInfo, AuditLogEntry, ClientSource, CommandResult, ConfigOptionInfo, DiffScope,
     ElicitationAction, ElicitationContent, ElicitationRequestEntry, ErrorInfo, ModeInfo,
     NodeSummary, PermissionRequestEntry, ProjectSummary, PromptInput, ResolvedBy, SearchHit,
-    SessionControlAction, SessionSummary, StreamDeltaPayload, SystemStatus,
+    SessionControlAction, SessionStatus, SessionSummary, StreamDeltaPayload, SystemStatus,
 };
 use crate::events::{SessionEventBatch, SessionEventEnvelope};
 use crate::settings::{CustomAgentConfig, ProjectIdentity};
@@ -728,6 +728,20 @@ pub struct ExternalSessionSummary {
     pub updated_at: Option<String>,
     /// fxg session that already owns this agent session (`None` = not imported)
     pub imported_session_id: Option<SessionId>,
+    /// Title of the existing fxg session (`None` when not imported)
+    #[serde(default)]
+    pub imported_title: Option<String>,
+    /// Last update time of the existing fxg session (Unix epoch ms)
+    #[serde(default)]
+    pub imported_updated_at: Option<i64>,
+    /// Status of the existing fxg session (`None` when not imported)
+    #[serde(default)]
+    pub imported_status: Option<SessionStatus>,
+    /// Whether the agent-side session has activity the fxg session has not
+    /// recorded yet. A best-effort comparison of the agent timestamp with the
+    /// fxg session timestamp (the agent clock may differ slightly).
+    #[serde(default)]
+    pub needs_sync: bool,
 }
 
 /// Discovery state for one agent (capabilities and listing failure).
@@ -750,10 +764,15 @@ pub struct ExternalSessionAgentInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ExternalSessionListResponse {
-    /// Agent sessions that are not managed by fxg yet
+    /// Agent sessions discovered on the node (including sessions fxg already
+    /// owns; see `imported_session_id`)
     pub sessions: Vec<ExternalSessionSummary>,
     /// Per-agent discovery results (including unsupported / failed agents)
     pub agents: Vec<ExternalSessionAgentInfo>,
+    /// Time this scan completed (Unix epoch ms). Cached responses keep the
+    /// original scan time.
+    #[serde(default)]
+    pub scanned_at: i64,
 }
 
 /// `POST /api/v1/sessions/import` request.
@@ -781,6 +800,14 @@ pub struct SessionImportRequest {
     /// import behavior.
     #[serde(default)]
     pub mirror_history: bool,
+    /// Existing fxg session to replace when refreshing an external session.
+    ///
+    /// When set, the node imports the current agent state into a new session and
+    /// archives this session after a successful import. The old session is
+    /// unarchived again when the import fails. `None` keeps the normal
+    /// idempotent import behavior.
+    #[serde(default)]
+    pub replace_session_id: Option<SessionId>,
 }
 
 /// `POST /api/v1/sessions/import` response.

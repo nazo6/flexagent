@@ -646,6 +646,7 @@ impl ClientApiBackend for HubState {
                     cwd: request.cwd.clone(),
                     title: request.title.clone(),
                     mirror_history: request.mirror_history,
+                    replace_session_id: request.replace_session_id.clone(),
                 },
             )
             .await?;

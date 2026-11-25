@@ -258,6 +258,9 @@ pub enum NodeRpcRequest {
         /// Mirror the history replayed by `session/load`
         #[serde(default)]
         mirror_history: bool,
+        /// Existing fxg session to archive after the new import succeeds
+        #[serde(default)]
+        replace_session_id: Option<SessionId>,
     },
     /// List sessions that exist on the agent side (ACP `session/list`).
     ListExternalSessions {
@@ -1039,6 +1042,7 @@ mod tests {
                         cwd: "/tmp/repo".into(),
                         title: Some("Imported".into()),
                         mirror_history: true,
+                        replace_session_id: None,
                     },
                 },
             ),
@@ -1180,6 +1184,7 @@ mod tests {
                 cwd: "/tmp/repo".into(),
                 title: None,
                 mirror_history: false,
+                replace_session_id: None,
             }
             .timeout(),
             Duration::from_secs(120)
