@@ -2,6 +2,7 @@ use super::mapping::*;
 use super::session::*;
 use super::terminal::*;
 use super::*;
+use crate::acp::extensions::AcpExtensionOptions;
 use agent_client_protocol::v1::schema::{
     AuthMethodAgent, AuthMethodTerminal, Plan, PlanEntry as AcpPlanEntry, PlanEntryPriority,
 };
@@ -1004,6 +1005,18 @@ fn mode_config_option(current: &str, modes: &[(&str, &str)]) -> SessionConfigOpt
             .collect::<Vec<_>>(),
     )
     .category(agent_client_protocol::v1::schema::SessionConfigOptionCategory::Mode)
+}
+
+#[test]
+fn advertises_boolean_config_options() {
+    let capabilities = client_capabilities(&AcpExtensionOptions::default());
+    let value = serde_json::to_value(capabilities).expect("client capabilities serialize");
+
+    assert_eq!(
+        value.pointer("/session/configOptions/boolean"),
+        Some(&serde_json::json!({})),
+        "boolean config options must be advertised: {value}"
+    );
 }
 
 #[test]

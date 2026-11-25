@@ -34,7 +34,8 @@ incidents とサポートバンドルは 2026-11-17 に削除済み
 出典: [`docs/proposals/2026-10-02-acp-enhancement-plan.md`](./proposals/2026-10-02-acp-enhancement-plan.md)
 
 - [ ] `ToolCallContent::Terminal` の `terminal_id` を `ToolCall` に保持し、UI のツールカードからターミナル出力へリンクする
-- [ ] `session.config_options.boolean` capability 広告・`terminal/output` の `truncated` 対応・`NewSessionRequest.additional_directories`（`session/close` は送信済み）
+- [x] `session.config_options.boolean` capability 広告
+- [ ] `terminal/output` の `truncated` 対応・`NewSessionRequest.additional_directories`（`session/close` は送信済み）
 - [ ] `AgentMessageChunk` / `AgentThoughtChunk` の Text 以外のコンテンツ対応
 
 ## 5. Web ターミナル（workspace スコープ化の残項目）

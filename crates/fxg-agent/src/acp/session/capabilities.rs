@@ -19,7 +19,12 @@ pub(crate) fn client_capabilities(acp: &AcpExtensionOptions) -> ClientCapabiliti
             .write_text_file(true))
         .terminal(true)
         .auth(AuthCapabilities::new().terminal(true))
-        .elicitation(ElicitationCapabilities::new().form(ElicitationFormCapabilities::new()));
+        .elicitation(ElicitationCapabilities::new().form(ElicitationFormCapabilities::new()))
+        // Boolean config options are rendered and written back by the UI, so
+        // advertise them; without this agents cannot expose `type: "boolean"`.
+        .session(ClientSessionCapabilities::new().config_options(
+            SessionConfigOptionsCapabilities::new().boolean(BooleanConfigOptionCapabilities::new()),
+        ));
 
     if let Some(meta) = &acp.client_meta
         && let serde_json::Value::Object(map) = meta.as_value()
