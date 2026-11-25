@@ -28,8 +28,8 @@ use fxg_agent::driver::{
 };
 use fxg_agent::opencode::OpenCodeNativeDriver;
 use fxg_protocol::common::{
-    ElicitationAction, ElicitationContent, ElicitationValue, PlanEntryStatus, PromptInput,
-    StreamDeltaPayload, TurnStopReason,
+    ClientSource, ElicitationAction, ElicitationContent, ElicitationValue, PlanEntryStatus,
+    PromptInput, StreamDeltaPayload, TurnStopReason,
 };
 use fxg_protocol::events::UnifiedEventPayload;
 use serde_json::{Value, json};
@@ -69,9 +69,10 @@ async fn native_driver_uses_the_http_and_sse_contract() {
         .route("/api/model", get(models))
         .route("/api/model/default", get(default_model))
         .route("/api/command", get(commands))
-        .route("/api/session", post(create_session))
+        .route("/api/session", post(create_session).get(list_sessions))
         .route("/api/session/active", get(active_sessions))
         .route("/api/session/{session_id}", get(get_session))
+        .route("/api/session/{session_id}/message", get(messages))
         .route("/api/session/{session_id}/permission", get(empty_list))
         .route("/api/session/{session_id}/form", get(empty_list))
         .route("/api/session/{session_id}/prompt", post(prompt))
@@ -133,6 +134,18 @@ async fn native_driver_uses_the_http_and_sse_contract() {
             .any(|call| call == "POST /api/session"),
         "probe must not create an OpenCode session"
     );
+
+    // External-session discovery lists root sessions and keeps each row's
+    // working directory; child sessions are not import candidates.
+    let listed = driver
+        .list_sessions(&launch, dir.path())
+        .await
+        .expect("list sessions");
+    assert!(listed.supports_history);
+    assert_eq!(listed.sessions.len(), 1);
+    assert_eq!(listed.sessions[0].session_id, "ses_mock1");
+    assert_eq!(listed.sessions[0].title.as_deref(), Some("Mock session"));
+    assert_eq!(listed.sessions[0].cwd, PathBuf::from("/tmp/mock-project"));
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let started = driver
@@ -357,6 +370,7 @@ async fn native_driver_uses_the_http_and_sse_contract() {
 
     // Importing an existing OpenCode session is a new fxg session, so the
     // binding must be emitted even though the agent-side context is restored.
+    // `capture_history` mirrors the agent-side conversation into fxg events.
     let (resume_tx, mut resume_rx) = mpsc::unbounded_channel();
     let resumed = driver
         .start_session(
@@ -370,7 +384,7 @@ async fn native_driver_uses_the_http_and_sse_contract() {
                 resume: Some(ResumeRequest {
                     agent_session_id: Some("ses_mock1".to_owned()),
                     allow_fresh: false,
-                    capture_history: false,
+                    capture_history: true,
                 }),
                 fork_from: None,
                 fork_before_message_id: None,
@@ -382,17 +396,54 @@ async fn native_driver_uses_the_http_and_sse_contract() {
         .expect("import");
     assert!(resumed.context_restored);
     let mut import_bound = None;
+    let mut import_events = Vec::new();
     while let Ok(event) = resume_rx.try_recv() {
         if let DriverEvent::Event(UnifiedEventPayload::SessionAgentBound { agent_session_id }) =
-            event
+            &event
         {
-            import_bound = Some(agent_session_id);
+            import_bound = Some(agent_session_id.clone());
         }
+        import_events.push(event);
     }
     assert_eq!(
         import_bound.as_deref(),
         Some("ses_mock1"),
         "imported sessions must emit SessionAgentBound"
+    );
+    assert!(
+        import_events.iter().any(|event| matches!(
+            event,
+            DriverEvent::Event(UnifiedEventPayload::UserMessage {
+                text,
+                client_source: ClientSource::Import,
+                ..
+            }) if text == "previous question"
+        )),
+        "imported user messages must be mirrored as import events: {import_events:#?}"
+    );
+    assert!(
+        import_events.iter().any(|event| matches!(
+            event,
+            DriverEvent::Event(UnifiedEventPayload::AgentMessage { text, .. })
+                if text == "previous answer"
+        )),
+        "imported assistant messages must be mirrored: {import_events:#?}"
+    );
+    assert!(
+        import_events.iter().any(|event| matches!(
+            event,
+            DriverEvent::Event(UnifiedEventPayload::AgentThought { text, .. })
+                if text == "previous thought"
+        )),
+        "imported reasoning must be mirrored: {import_events:#?}"
+    );
+    assert!(
+        import_events.iter().any(|event| matches!(
+            event,
+            DriverEvent::Event(UnifiedEventPayload::ToolCall { tool_call_id, .. })
+                if tool_call_id == "tool_old"
+        )),
+        "imported tool calls must be mirrored: {import_events:#?}"
     );
 
     let calls = state.calls.lock().expect("calls").clone();
@@ -526,6 +577,30 @@ async fn empty_list() -> Json<Value> {
 async fn get_session() -> Json<Value> {
     Json(json!({"data": {"id": "ses_mock1", "agent": "build",
         "model": {"id": "model-a", "providerID": "mock", "variant": "high"}}}))
+}
+
+async fn list_sessions() -> Json<Value> {
+    Json(json!({"data": [
+        {"id": "ses_mock1", "title": "Mock session", "parentID": null,
+         "location": {"directory": "/tmp/mock-project"},
+         "time": {"updated": 1763000000000_u64}},
+        {"id": "ses_mock_child", "title": "Child session", "parentID": "ses_mock1",
+         "location": {"directory": "/tmp/mock-project"},
+         "time": {"updated": 1763000000001_u64}}
+    ]}))
+}
+
+async fn messages() -> Json<Value> {
+    Json(json!({"data": [
+        {"id": "msg_old_user", "type": "user", "text": "previous question"},
+        {"id": "msg_old_assistant", "type": "assistant", "content": [
+            {"type": "text", "text": "previous answer"},
+            {"type": "reasoning", "text": "previous thought"},
+            {"type": "tool", "id": "tool_old", "name": "bash",
+             "state": {"status": "completed", "input": {"command": "ls"},
+                       "output": "README.md"}}
+        ]}
+    ]}))
 }
 
 async fn prompt(State(state): State<Mock>, Json(body): Json<Value>) -> Json<Value> {

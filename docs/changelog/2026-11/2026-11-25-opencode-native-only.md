@@ -16,6 +16,10 @@ native driver (`OpenCodeNativeDriver` / `opencode serve`) に一本化した。
 - `CustomAgentConfig.extension = "opencode"` を参照する既存の custom 定義は
   未知の extension として起動時に拒否される。OpenCode は builtin `opencode`
   （native）を使う。
+- 外部セッションの発見と取り込みは native の `list_sessions` と
+  `capture_history` 経路で継続する。`mirror_history` は `/api/session/{id}/message`
+  からユーザー / アシスタント / reasoning / ツール呼び出しを `Import` として
+  記録する。
 - native driver の子セッション処理を ACP extension と同等にした。
   - `session.execution.succeeded` と `session.idle` の二重通知で
     `SubagentUpdated(Completed)` を重複して出さない。
