@@ -7,6 +7,10 @@
  * text).
  */
 
+import { copyText } from "./clipboard.ts";
+import { m } from "./paraglide/messages.js";
+import { toast } from "svelte-sonner";
+
 type ShikiModule = typeof import("shiki");
 
 interface SharedHighlighter {
@@ -112,13 +116,52 @@ const CODE_CACHE_LIMIT = 128;
 const codeHtmlCache = new Map<string, string>();
 
 /**
- * Replace each `pre > code.language-*` under `root` with shiki-highlighted HTML.
+ * Wrap a code block with a copy button.
+ *
+ * Markdown is re-rendered on every stream update, so the wrapper is created
+ * after each render instead of being part of the sanitized HTML.
+ */
+function attachCopyButton(pre: HTMLElement, source: string): void {
+  const parent = pre.parentElement;
+  if (parent === null || parent.classList.contains("fxg-code")) return;
+  const wrapper = document.createElement("div");
+  wrapper.className = "fxg-code";
+  parent.insertBefore(wrapper, pre);
+  wrapper.appendChild(pre);
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "fxg-copy";
+  button.textContent = m.chat_action_copy();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  button.addEventListener("click", () => {
+    void (async () => {
+      try {
+        await copyText(source);
+      } catch {
+        toast.error(m.settings_copy_failed());
+        return;
+      }
+      button.textContent = m.chat_action_copied();
+      button.dataset.copied = "true";
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(() => {
+        button.textContent = m.chat_action_copy();
+        delete button.dataset.copied;
+      }, 1500);
+    })();
+  });
+  wrapper.appendChild(button);
+}
+
+/**
+ * Highlight each `pre > code` under `root` and add a copy button.
  * Called every time `{@html}` re-renders and recreates the DOM, so blocks with
  * identical content are reused from the cache.
  */
 export async function enhanceCodeBlocks(root: ParentNode): Promise<void> {
   const dark = prefersDarkMode();
-  const blocks = Array.from(root.querySelectorAll<HTMLElement>("pre > code[class*='language-']"));
+  const blocks = Array.from(root.querySelectorAll<HTMLElement>("pre > code"));
   for (const code of blocks) {
     const pre = code.parentElement;
     if (pre === null) continue;
@@ -132,10 +175,18 @@ export async function enhanceCodeBlocks(root: ParentNode): Promise<void> {
       codeHtmlCache.set(key, html);
     }
     // Keep marked's (escaped) output when highlighting is impossible, e.g. unknown languages
-    if (html === "") continue;
+    if (html === "") {
+      attachCopyButton(pre, source);
+      continue;
+    }
     const template = document.createElement("template");
     template.innerHTML = html.trim();
     const replacement = template.content.firstElementChild;
-    if (replacement !== null) pre.replaceWith(replacement);
+    if (replacement instanceof HTMLElement) {
+      pre.replaceWith(replacement);
+      attachCopyButton(replacement, source);
+    } else {
+      attachCopyButton(pre, source);
+    }
   }
 }

@@ -77,13 +77,14 @@
 
   const html = $derived(renderMarkdown(renderedText));
 
-  // Re-apply shiki every time `{@html}` re-renders and rebuilds the DOM.
-  // During streaming the DOM changes with each delta, so insert a short debounce
-  // (unchanged code blocks are reused from the highlight.ts cache).
+  // Re-apply shiki and the copy button every time `{@html}` re-renders and
+  // rebuilds the DOM. During streaming the DOM changes with each delta, so
+  // insert a short debounce (unchanged code blocks are reused from the
+  // highlight.ts cache).
   $effect(() => {
     const node = root;
     const current = html;
-    if (node === undefined || !current.includes("language-")) return;
+    if (node === undefined || !current.includes("<pre")) return;
     const highlightTimer = setTimeout(() => {
       void enhanceCodeBlocks(node);
     }, 150);
@@ -207,6 +208,50 @@
     padding: 0;
     font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
     font-size: inherit;
+  }
+  /*
+   * Fenced code blocks get a copy button (added after sanitization by
+   * `highlight.ts`). The button sits outside the scroll container so it stays
+   * in place while long lines scroll horizontally.
+   */
+  :global(.fxg-md .fxg-code) {
+    position: relative;
+    margin-block: 0.6em;
+  }
+  :global(.fxg-md .fxg-code pre) {
+    margin-block: 0;
+  }
+  :global(.fxg-md .fxg-copy) {
+    position: absolute;
+    top: 0.3em;
+    right: 0.3em;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    padding: 0.05em 0.45em;
+    color: var(--muted-foreground);
+    font-family: var(--font-sans, system-ui, sans-serif);
+    font-size: 11px;
+    line-height: 1.6;
+    opacity: 0;
+    transition:
+      opacity 120ms ease,
+      color 120ms ease;
+  }
+  :global(.fxg-md .fxg-copy:hover) {
+    color: var(--foreground);
+  }
+  :global(.fxg-md .fxg-copy[data-copied="true"]) {
+    color: var(--ok);
+  }
+  :global(.fxg-md .fxg-code:hover .fxg-copy),
+  :global(.fxg-md .fxg-copy:focus-visible) {
+    opacity: 1;
+  }
+  @media (hover: none) {
+    :global(.fxg-md .fxg-copy) {
+      opacity: 1;
+    }
   }
   :global(.fxg-md blockquote) {
     margin-block: 0.6em;
