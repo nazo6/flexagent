@@ -27,6 +27,7 @@ Markdown のコードフェンスは shiki でハイライトしていたが、�
 ## 検証
 
 - `pnpm --dir ui run check`
-- `pnpm --dir ui run test`
+- `pnpm --dir ui run test` (`highlight.test.ts`: コピーボタンの付与と
+  クリップボードへの転送、言語不明のフェンス)
 - 手動: コードブロックの Copy でクリップボードに入ること、言語指定なしの
   フェンスでもボタンが出ること。
