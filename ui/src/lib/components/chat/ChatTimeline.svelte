@@ -42,6 +42,7 @@
     forkFromTitle = null,
     forkAfterSeq = null,
     onfork,
+    highlightSeq = null,
     canRevert = false,
     onrevert,
     onstopterminal,
@@ -65,6 +66,11 @@
     forkAfterSeq?: number | null;
     /** Called when the user chooses "Fork from here" on a message. */
     onfork?: (item: TimelineItem) => void;
+    /**
+     * `node_seq` to highlight after a deep link (for example a global search
+     * hit). The matching row flashes once; the session page owns the scroll.
+     */
+    highlightSeq?: number | null;
     /** Whether the agent supports reverting the conversation. */
     canRevert?: boolean;
     /** Called when the user chooses "Revert to here" on a message. */
@@ -143,6 +149,22 @@
       default:
         return group.item.seq;
     }
+  }
+
+  function groupMinSeq(group: TimelineGroup): number {
+    switch (group.kind) {
+      case "subagent":
+        return Math.min(group.subagent.seq, ...group.items.map((item) => item.seq));
+      case "tools":
+        return Math.min(...group.tools.map((tool) => tool.seq));
+      default:
+        return group.item.seq;
+    }
+  }
+
+  /** Whether a `node_seq` falls inside a rendered group (inclusive). */
+  function rangeContains(seq: number | null, start: number, end: number): boolean {
+    return seq !== null && seq >= start && seq <= end;
   }
 
   /** Group after which the fork origin marker is rendered. */
@@ -406,12 +428,28 @@
 -->
 <ul class="timeline-list list-none p-0">
   {#each timelineEntries as entry (entry.key)}
-    <li>
+    {@const rowStart = entry.kind === "activity" ? null : groupMinSeq(entry)}
+    {@const rowEnd = entry.kind === "activity" ? null : groupMaxSeq(entry)}
+    <li
+      data-seq={rowStart ?? undefined}
+      data-seq-end={rowEnd ?? undefined}
+      class:seq-focus={rowStart !== null && rowEnd !== null
+        ? rangeContains(highlightSeq, rowStart, rowEnd)
+        : false}
+    >
       {#if entry.kind === "activity"}
         <ActivityBlock section={entry} live={entry.key === liveEntryKey}>
           <ul class="timeline-list list-none p-0">
             {#each entry.groups as inner (inner.key)}
-              <li>{@render groupContent(inner)}</li>
+              {@const innerStart = groupMinSeq(inner)}
+              {@const innerEnd = groupMaxSeq(inner)}
+              <li
+                data-seq={innerStart}
+                data-seq-end={innerEnd}
+                class:seq-focus={rangeContains(highlightSeq, innerStart, innerEnd)}
+              >
+                {@render groupContent(inner)}
+              </li>
             {/each}
           </ul>
         </ActivityBlock>

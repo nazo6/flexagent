@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import ProvisioningLogCard from "#lib/components/ProvisioningLogCard.svelte";
   import ChatTimeline from "#lib/components/chat/ChatTimeline.svelte";
@@ -39,6 +39,16 @@
   import SkullIcon from "@lucide/svelte/icons/skull";
 
   const sessionId = $derived(page.params.id ?? "");
+  /**
+   * `node_seq` from a deep link (for example a global search hit). The page
+   * loads older history until the matching row is rendered, then scrolls to it.
+   */
+  const deepLinkSeq = $derived.by(() => {
+    const raw = page.url.searchParams.get("seq");
+    if (raw === null) return null;
+    const value = Number(raw);
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+  });
   /**
    * Session aggregate for the header.
    *
@@ -131,6 +141,12 @@
   let activeTurnSeq = $state<number | null>(null);
   let loadedFor = $state<string | null>(null);
   let showScrollBottom = $state(false);
+  /** Row flashed after a deep-link jump (cleared when the animation ends). */
+  let highlightSeq = $state<number | null>(null);
+  /** Plain guard: the effect re-runs as history arrives, but a jump happens once. */
+  let handledDeepLink: string | null = null;
+  let deepLinkToken = 0;
+  let highlightTimer: ReturnType<typeof setTimeout> | null = null;
   /** Whether new output should pull the view along (true while reading the tail). */
   let followOutput = $state(true);
   let scrollFrame: number | null = null;
@@ -316,6 +332,92 @@
     });
     showScrollBottom = false;
   }
+
+  /** The rendered row that contains `seq` (groups expose a seq range). */
+  function findSeqRow(container: HTMLElement, seq: number): HTMLElement | null {
+    const rows = container.querySelectorAll<HTMLElement>("[data-seq]");
+    for (const row of rows) {
+      const start = Number(row.dataset.seq);
+      const end = Number(row.dataset.seqEnd ?? row.dataset.seq);
+      if (Number.isFinite(start) && Number.isFinite(end) && seq >= start && seq <= end) {
+        return row;
+      }
+    }
+    return null;
+  }
+
+  function clearHighlight(): void {
+    if (highlightTimer !== null) {
+      clearTimeout(highlightTimer);
+      highlightTimer = null;
+    }
+    highlightSeq = null;
+  }
+
+  /**
+   * Scroll to a deep-linked event and flash its row.
+   *
+   * Global search can hit messages far older than the loaded page. Older pages
+   * are prepended until the row exists, or until the loaded history already
+   * covers the target (the event may be folded into a group or not rendered).
+   */
+  async function focusDeepLink(id: string, seq: number): Promise<void> {
+    const token = ++deepLinkToken;
+    followOutput = false;
+    clearHighlight();
+    try {
+      // A long session may need several pages; cap the work per navigation.
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        await tick();
+        if (token !== deepLinkToken || sessionId !== id) return;
+        const container = chatContainer;
+        const row = container === null ? null : findSeqRow(container, seq);
+        if (container !== null && row !== null) {
+          const top =
+            row.getBoundingClientRect().top -
+            container.getBoundingClientRect().top +
+            container.scrollTop -
+            12;
+          container.scrollTo({ top: Math.max(0, top), behavior: "auto" });
+          highlightSeq = seq;
+          highlightTimer = setTimeout(() => {
+            if (token === deepLinkToken) highlightSeq = null;
+            highlightTimer = null;
+          }, 2600);
+          return;
+        }
+        const history = sync.timelineFor(id);
+        const oldest = history.events.at(0)?.node_seq ?? null;
+        // The target is already inside the loaded range, so older pages cannot
+        // add a row for it.
+        if (oldest !== null && oldest <= seq) return;
+        if (!history.hasOlder) return;
+        if (!(await sync.loadOlderSessionEvents(id))) return;
+      }
+    } catch {
+      /* Reported through the sync store's problem banner. */
+    }
+  }
+
+  $effect(() => {
+    const id = sessionId;
+    const seq = deepLinkSeq;
+    if (id === "" || seq === null) {
+      handledDeepLink = null;
+      clearHighlight();
+      return;
+    }
+    // Wait for the newest page so the first attempt sees the timeline.
+    if (!sync.timelineFor(id).historyLoaded) return;
+    const key = `${id}:${seq}`;
+    if (handledDeepLink === key) return;
+    handledDeepLink = key;
+    untrack(() => void focusDeepLink(id, seq));
+    return () => {
+      deepLinkToken += 1;
+      clearHighlight();
+    };
+  });
 
   /** Scroll to the start of a turn (rail and outline navigation). */
   function jumpToTurn(turn: ChatTurn): void {
@@ -598,6 +700,7 @@
               forkFrom={session?.parent_session_id ?? null}
               {forkFromTitle}
               {forkAfterSeq}
+              {highlightSeq}
               onfork={handleForkItem}
               {canRevert}
               onrevert={handleRevertItem}

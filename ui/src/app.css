@@ -403,6 +403,24 @@
       display: none;
     }
   }
+  /*
+   * Deep-link focus flash: a timeline row reached from search flashes once so
+   * the reader can spot it after the jump. Nothing stays applied afterwards.
+   */
+  @keyframes seq-focus-flash {
+    from {
+      box-shadow: 0 0 0 2px var(--signal);
+      background-color: var(--signal-soft);
+    }
+    to {
+      box-shadow: 0 0 0 2px transparent;
+      background-color: transparent;
+    }
+  }
+  .seq-focus {
+    border-radius: var(--radius-md);
+    animation: seq-focus-flash 2.4s ease-out 1;
+  }
 }
 
 /*

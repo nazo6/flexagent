@@ -39,6 +39,11 @@
     );
   }
 
+  /** Deep link to the matched event (the session page loads and flashes it). */
+  function hitHref(hit: SearchHit): string {
+    return `/sessions/${hit.session_id}?seq=${hit.node_seq}`;
+  }
+
   /** Split an FTS5 snippet into segments around its `[match]` markers. */
   function segments(snippet: string): { text: string; match: boolean }[] {
     const parts: { text: string; match: boolean }[] = [];
@@ -96,7 +101,7 @@
       {#each hits as hit (hit.event_id)}
         <li class="border-border flex flex-col gap-1 border-b py-3">
           <div class="flex flex-wrap items-center gap-2 text-[11px]">
-            <a class="text-[13px] font-medium hover:underline" href={`/sessions/${hit.session_id}`}>
+            <a class="text-[13px] font-medium hover:underline" href={hitHref(hit)}>
               {sessionTitle(hit.session_id)}
             </a>
             <span class="text-muted-foreground desk-mono">#{hit.node_seq}</span>
@@ -105,13 +110,15 @@
               {formatRelativeTime(hit.created_at)}
             </span>
           </div>
-          <p class="text-[13px] break-words whitespace-pre-wrap">
-            {#each segments(hit.snippet) as segment}
-              {#if segment.match}
-                <mark class="bg-signal-soft text-ink rounded-sm px-0.5">{segment.text}</mark>
-              {:else}{segment.text}{/if}
-            {/each}
-          </p>
+          <a href={hitHref(hit)} class="block transition-opacity hover:opacity-80">
+            <p class="text-[13px] break-words whitespace-pre-wrap">
+              {#each segments(hit.snippet) as segment}
+                {#if segment.match}
+                  <mark class="bg-signal-soft text-ink rounded-sm px-0.5">{segment.text}</mark>
+                {:else}{segment.text}{/if}
+              {/each}
+            </p>
+          </a>
         </li>
       {/each}
     </ul>
