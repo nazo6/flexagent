@@ -292,8 +292,8 @@
       `agentCapabilities.auth.logout` 広告時のみ `fxg agents logout`
 - [x] `session/new` の `auth_required` エラーを判別してログイン導線を案内
       （`ErrorCode::AuthRequired` + `RecoveryAction::LoginAgent`）
-- [ ] `ui`: エラー時のログイン案内（現状は設定 > エージェント管理への
-      導線。対話ログインを Web UI に埋め込むのは次段階）
+- [x] `ui`: エラー時のログイン案内と agent 型のログイン実行（設定 >
+      エージェント管理のダイアログ。terminal 型は CLI のコマンドを案内）
 - [x] テスト: 擬似認証エージェント (`auth_required` を返す shell mock) で
       `AUTH_REQUIRED` + methods の伝播を検証 (`fxg-acp/tests/auth_required.rs`)
 

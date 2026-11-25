@@ -342,6 +342,65 @@ impl ClientApiBackend for HubState {
         }
     }
 
+    async fn agent_auth_methods(
+        &self,
+        node_id: &str,
+        agent_id: &str,
+    ) -> Result<fxg_protocol::client_api::AgentAuthMethodsResponse, ApiError> {
+        let response = self
+            .execute_node_rpc(
+                &fxg_protocol::NodeId::from(node_id),
+                NodeRpcRequest::AgentAuthMethods {
+                    agent_id: agent_id.to_owned(),
+                },
+                None,
+            )
+            .await?;
+        match response {
+            NodeRpcResponse::AgentAuthMethods { methods } => {
+                Ok(fxg_protocol::client_api::AgentAuthMethodsResponse { methods })
+            }
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
+    }
+
+    async fn agent_login(
+        &self,
+        node_id: &str,
+        agent_id: &str,
+        request: fxg_protocol::client_api::AgentLoginRequest,
+        client: ClientInfo,
+    ) -> Result<fxg_protocol::client_api::AgentLoginResponse, ApiError> {
+        let response = self
+            .execute_node_rpc(
+                &fxg_protocol::NodeId::from(node_id),
+                NodeRpcRequest::AgentLogin {
+                    agent_id: agent_id.to_owned(),
+                    method_id: request.method_id.clone(),
+                },
+                None,
+            )
+            .await?;
+        match response {
+            NodeRpcResponse::AgentLogin { agent_id } => {
+                self.record_audit(
+                    fxg_db::audit::actions::AGENT_MANAGE,
+                    &client,
+                    None,
+                    serde_json::json!({
+                        "node_id": node_id,
+                        "action": "login",
+                        "agent_id": agent_id,
+                        "method_id": request.method_id,
+                    }),
+                )
+                .await;
+                Ok(fxg_protocol::client_api::AgentLoginResponse { agent_id })
+            }
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
+    }
+
     async fn agent_management(
         &self,
         node_id: &str,

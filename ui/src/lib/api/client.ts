@@ -1,5 +1,7 @@
 import type {
+  AgentAuthMethodsResponse,
   AgentCapabilitiesPreview,
+  AgentLoginResponse,
   AgentOpResponse,
   AgentSummary,
   AgentUsageResponse,
@@ -271,6 +273,23 @@ export class ApiClient {
   /** `POST /api/v1/nodes/:nodeId/shutdown` (graceful stop of the node process). */
   nodeShutdown(nodeId: string): Promise<ShutdownResponse> {
     return this.#request("POST", `/api/v1/nodes/${encodeURIComponent(nodeId)}/shutdown`);
+  }
+
+  /** `GET /api/v1/nodes/:nodeId/agents/:agentId/auth-methods` (relayed by the hub). */
+  agentAuthMethods(nodeId: string, agentId: string): Promise<AgentAuthMethodsResponse> {
+    return this.#request(
+      "GET",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/auth-methods`,
+    );
+  }
+
+  /** `POST /api/v1/nodes/:nodeId/agents/:agentId/login` (agent-managed methods only). */
+  agentLogin(nodeId: string, agentId: string, methodId: string): Promise<AgentLoginResponse> {
+    return this.#request(
+      "POST",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/login`,
+      { body: { method_id: methodId } },
+    );
   }
 
   /** `GET /api/v1/nodes/:nodeId/agents/:agentId/management` (relayed by the hub). */

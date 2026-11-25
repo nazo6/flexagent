@@ -69,8 +69,8 @@ use handlers::agent_management::{
 };
 use handlers::agent_usage::usage as agent_usage;
 use handlers::agents::{
-    import_registry_agent, list_agents, probe_agent_config, refresh_catalog, remove_custom_agent,
-    upsert_custom_agent,
+    agent_auth_methods, agent_login, import_registry_agent, list_agents, probe_agent_config,
+    refresh_catalog, remove_custom_agent, upsert_custom_agent,
 };
 use handlers::nodes::{node_audit_logs, node_diagnostics, node_shutdown};
 use handlers::projects::{
@@ -206,6 +206,14 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route(
             "/api/v1/nodes/{node_id}/agents/{agent_id}/probe",
             post(probe_agent_config::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/agents/{agent_id}/auth-methods",
+            get(agent_auth_methods::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/agents/{agent_id}/login",
+            post(agent_login::<B>),
         )
         .route(
             "/api/v1/nodes/tokens",

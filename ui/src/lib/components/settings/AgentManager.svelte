@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
+  import { page } from "$app/state";
   import { errorMessage } from "#lib/api/error-messages.ts";
   import AgentIcon from "#lib/components/agent/AgentIcon.svelte";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
@@ -25,12 +26,14 @@
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
+  import LogInIcon from "@lucide/svelte/icons/log-in";
   import PencilIcon from "@lucide/svelte/icons/pencil";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
   import SearchIcon from "@lucide/svelte/icons/search";
   import Settings2Icon from "@lucide/svelte/icons/settings-2";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
+  import AgentLoginDialog from "./AgentLoginDialog.svelte";
   import AgentManagementPanel from "./AgentManagementPanel.svelte";
 
   /** Target node passed by the settings page (catalog source and operation target). */
@@ -46,6 +49,11 @@
   let importingId = $state<string | null>(null);
   /** Pending removal target. */
   let removeTarget = $state<AgentSummary | null>(null);
+  /** Agent whose authentication dialog is open. */
+  let loginTarget = $state<AgentSummary | null>(null);
+  let loginOpen = $state(false);
+  /** A `?login=<agent>` deep link is handled once per mount. */
+  let loginQueryHandled = false;
 
   // Agent dialog: registry import and the manual definition share one dialog.
   let agentOpen = $state(false);
@@ -128,6 +136,12 @@
       const catalog = await sync.connection.client.nodeAgentCatalog(target);
       agents = catalog.agents;
       registryAgents = catalog.registry;
+      if (!loginQueryHandled) {
+        loginQueryHandled = true;
+        const requested = page.url.searchParams.get("login");
+        const agent = catalog.agents.find((candidate) => candidate.id === requested);
+        if (agent !== undefined) openLogin(agent);
+      }
     } catch (error) {
       toast.error(errorMessage(error));
     } finally {
@@ -162,6 +176,11 @@
     } finally {
       busyLabel = null;
     }
+  }
+
+  function openLogin(agent: AgentSummary): void {
+    loginTarget = agent;
+    loginOpen = true;
   }
 
   async function confirmRemove(): Promise<void> {
@@ -362,6 +381,18 @@
           </div>
 
           <div class="flex shrink-0 items-center gap-1.5">
+            {#if agent.backend !== "custom"}
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                disabled={busy || nodeId === ""}
+                onclick={() => openLogin(agent)}
+                title={m.settings_agent_login()}
+              >
+                <LogInIcon />
+                <span class="sr-only">{m.settings_agent_login_title({ name: agent.name })}</span>
+              </Button>
+            {/if}
             {#if agent.has_management}
               <Button
                 variant={managedAgent?.id === agent.id ? "secondary" : "ghost"}
@@ -434,6 +465,9 @@
     {/if}
   </Dialog.Content>
 </Dialog.Root>
+
+<!-- Agent authentication dialog -->
+<AgentLoginDialog {nodeId} agent={loginTarget} bind:open={loginOpen} />
 
 <!-- Agent removal confirmation -->
 <AlertDialog.Root

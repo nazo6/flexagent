@@ -4,7 +4,7 @@ use axum::Extension;
 use axum::Json;
 use axum::extract::{Path as UrlPath, State};
 use axum::response::{IntoResponse, Response};
-use fxg_protocol::client_api::{ImportRegistryAgentRequest, ProbeAgentRequest};
+use fxg_protocol::client_api::{AgentLoginRequest, ImportRegistryAgentRequest, ProbeAgentRequest};
 use fxg_protocol::common::AgentAction;
 use fxg_protocol::settings::CustomAgentConfig;
 
@@ -14,6 +14,32 @@ pub(crate) async fn list_agents<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
 ) -> Response {
     match state.backend.list_agents().await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+pub(crate) async fn agent_auth_methods<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath((node_id, agent_id)): UrlPath<(String, String)>,
+) -> Response {
+    match state.backend.agent_auth_methods(&node_id, &agent_id).await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+pub(crate) async fn agent_login<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath((node_id, agent_id)): UrlPath<(String, String)>,
+    Json(request): Json<AgentLoginRequest>,
+) -> Response {
+    match state
+        .backend
+        .agent_login(&node_id, &agent_id, request, client)
+        .await
+    {
         Ok(response) => Json(response).into_response(),
         Err(err) => err.into_response(),
     }

@@ -1018,5 +1018,13 @@
   "chat_subagent_title": "Subagent",
   "settings_agent_capabilities_subagents": "Subagents",
   "settings_agent_capabilities_subagents_hint": "Advertise the ACP subagents RFD so the agent can expose child sessions in this timeline.",
-  "settings_agent_capabilities_subagents_off": "Subagents off"
+  "settings_agent_capabilities_subagents_off": "Subagents off",
+  "settings_agent_login": "Sign in",
+  "settings_agent_login_title": "Sign in to {name}",
+  "settings_agent_login_description": "Authenticate this agent on the selected node. Agent-managed methods run here; terminal methods need a shell on the node.",
+  "settings_agent_login_loading": "Reading authentication methods…",
+  "settings_agent_login_none": "This agent does not advertise authentication methods. It may already be signed in.",
+  "settings_agent_login_terminal_hint": "Run this in the node's terminal:",
+  "settings_agent_login_unknown": "Unsupported authentication method.",
+  "settings_agent_login_success": "Signed in to {name}"
 }

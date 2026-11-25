@@ -20,9 +20,9 @@ use crate::client_api::{
     WorkspaceGitSyncResponse, WorktreeInfo,
 };
 use crate::common::{
-    AgentAction, AgentUsageLimits, AuditLogEntry, ClientSource, DataSafety, DiffScope,
-    ElicitationContent, ErrorCode, ErrorInfo, NodeProjectReport, PromptInput, ResolvedBy,
-    SessionControlAction, WarningInfo, WorkspaceDiffResponse, WorktreeAction,
+    AgentAction, AgentAuthMethodInfo, AgentUsageLimits, AuditLogEntry, ClientSource, DataSafety,
+    DiffScope, ElicitationContent, ErrorCode, ErrorInfo, NodeProjectReport, PromptInput,
+    ResolvedBy, SessionControlAction, WarningInfo, WorkspaceDiffResponse, WorktreeAction,
 };
 use crate::events::SessionEventEnvelope;
 use crate::settings::{
@@ -137,6 +137,18 @@ pub enum NodeRpcRequest {
         /// Configuration applied before capabilities are read
         #[serde(default)]
         initial_config: Vec<crate::common::InitialConfig>,
+    },
+    /// Read the authentication methods advertised by an agent.
+    AgentAuthMethods {
+        /// Agent ID
+        agent_id: String,
+    },
+    /// Run an agent-managed authentication method (`agent` kind only).
+    AgentLogin {
+        /// Agent ID
+        agent_id: String,
+        /// Method ID passed to ACP `authenticate`
+        method_id: String,
     },
     /// Read the agent's plan / account usage limits.
     AgentUsage {
@@ -337,6 +349,8 @@ impl NodeRpcRequest {
             Self::ProjectScan { .. }
             | Self::ListAgents
             | Self::ProbeAgentConfig { .. }
+            | Self::AgentAuthMethods { .. }
+            | Self::AgentLogin { .. }
             | Self::AgentUsage { .. }
             | Self::AgentManagement { .. }
             | Self::AgentMcpAction { .. }
@@ -445,6 +459,16 @@ pub enum NodeRpcResponse {
     AgentCapabilities {
         /// Modes and configuration entries reported by the agent
         preview: AgentCapabilitiesPreview,
+    },
+    /// Authentication methods advertised by an agent (`AgentAuthMethods`).
+    AgentAuthMethods {
+        /// Agent / terminal methods
+        methods: Vec<AgentAuthMethodInfo>,
+    },
+    /// Agent authenticated (`AgentLogin`).
+    AgentLogin {
+        /// Agent ID that was authenticated
+        agent_id: String,
     },
     /// Agent usage limits (`AgentUsage`; `None` when not exposed).
     AgentUsage {

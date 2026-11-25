@@ -48,6 +48,18 @@ export type AgentAuthMethodInfo = {
 	env?: { [key in string]: string },
 };
 
+/**
+ *  `GET /api/v1/nodes/{node_id}/agents/{agent_id}/auth-methods` response.
+ *
+ *  The list comes from the agent's ACP `initialize` response (or the built-in
+ *  definition for native agents). An empty list means the agent does not
+ *  advertise any authentication method.
+ */
+export type AgentAuthMethodsResponse = {
+	/**  Advertised methods (`agent` / `terminal`). */
+	methods: AgentAuthMethodInfo[],
+};
+
 /**  How the agent runtime is implemented. */
 export type AgentBackendKind =
 /**  ACP only (`AcpDriver`) */
@@ -78,6 +90,21 @@ export type AgentDiagnostics = {
 	agent_id: string,
 	/**  Recent stderr lines (oldest first, bounded) */
 	stderr_tail: string[],
+};
+
+/**  `POST /api/v1/nodes/{node_id}/agents/{agent_id}/login` request. */
+export type AgentLoginRequest = {
+	/**
+	 *  Method to run. Must be an `agent`-managed method; `terminal` methods
+	 *  need an interactive shell and are rejected.
+	 */
+	method_id: string,
+};
+
+/**  `POST /api/v1/nodes/{node_id}/agents/{agent_id}/login` response. */
+export type AgentLoginResponse = {
+	/**  Agent that was authenticated */
+	agent_id: string,
 };
 
 /**  One primary agent / mode reported by the integration. */

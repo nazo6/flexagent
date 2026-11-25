@@ -13,7 +13,8 @@ use fxg_api::{
 };
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
-    AgentDiagnostics, AgentManagementSnapshot, AgentMcpAction, AgentMcpDefinition, AgentOpResponse,
+    AgentAuthMethodsResponse, AgentDiagnostics, AgentLoginRequest, AgentLoginResponse,
+    AgentManagementSnapshot, AgentMcpAction, AgentMcpDefinition, AgentOpResponse,
     AgentUsageResponse, AgentsResponse, ConnectionRole, CreateSessionRequest,
     CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse, ExternalSessionListResponse,
     HubLinkState, KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
@@ -64,6 +65,22 @@ fn agent_usage_error(err: anyhow::Error) -> ApiError {
     ApiError::from_code(
         fxg_protocol::common::ErrorCode::InvalidState,
         format!("agent usage request failed: {err:#}"),
+    )
+}
+
+/// Converts an authentication-method discovery failure into an API error.
+fn agent_auth_discovery_error(err: anyhow::Error) -> ApiError {
+    ApiError::from_code(
+        fxg_protocol::common::ErrorCode::AgentLaunchFailed,
+        format!("failed to discover agent authentication methods: {err:#}"),
+    )
+}
+
+/// Converts an agent-managed login failure into an API error.
+fn agent_auth_login_error(err: anyhow::Error) -> ApiError {
+    ApiError::from_code(
+        fxg_protocol::common::ErrorCode::AgentProtocolError,
+        format!("agent login failed: {err:#}"),
     )
 }
 
@@ -968,6 +985,49 @@ impl ClientApiBackend for DaemonState {
             return Ok(AgentManagementSnapshot::unavailable(agent_id, agent_id));
         };
         management.snapshot().await.map_err(agent_management_error)
+    }
+
+    async fn agent_auth_methods(
+        &self,
+        node_id: &str,
+        agent_id: &str,
+    ) -> Result<AgentAuthMethodsResponse, ApiError> {
+        self.ensure_local_node(node_id)?;
+        let methods = crate::agent_auth::discover(self.session_manager().catalog(), agent_id)
+            .await
+            .map_err(agent_auth_discovery_error)?;
+        Ok(AgentAuthMethodsResponse { methods })
+    }
+
+    async fn agent_login(
+        &self,
+        node_id: &str,
+        agent_id: &str,
+        request: AgentLoginRequest,
+        client: ClientInfo,
+    ) -> Result<AgentLoginResponse, ApiError> {
+        self.ensure_local_node(node_id)?;
+        crate::agent_auth::login(
+            self.session_manager().catalog(),
+            agent_id,
+            &request.method_id,
+        )
+        .await
+        .map_err(agent_auth_login_error)?;
+        self.record_audit(
+            fxg_db::audit::actions::AGENT_MANAGE,
+            &audit_source(&client),
+            None,
+            serde_json::json!({
+                "action": "login",
+                "agent_id": agent_id,
+                "method_id": request.method_id,
+            }),
+        )
+        .await;
+        Ok(AgentLoginResponse {
+            agent_id: agent_id.to_owned(),
+        })
     }
 
     async fn agent_usage(

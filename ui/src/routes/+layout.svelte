@@ -85,7 +85,9 @@
         void goto(nodeSettingsPath("agents", action.node_id));
         break;
       case "login_agent":
-        void goto(nodeSettingsPath("agents", defaultNodeId));
+        void goto(
+          `${nodeSettingsPath("agents", defaultNodeId)}?login=${encodeURIComponent(action.agent_id)}`,
+        );
         break;
       case "select_online_node":
         void goto(nodeSettingsPath("general", defaultNodeId));

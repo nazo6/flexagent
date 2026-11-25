@@ -335,6 +335,37 @@ async fn execute_inner(
                 .await?;
             Ok(NodeRpcResponse::AgentCapabilities { preview })
         }
+        NodeRpcRequest::AgentAuthMethods { agent_id } => {
+            let methods = crate::agent_auth::discover(state.session_manager().catalog(), &agent_id)
+                .await
+                .map_err(|err| {
+                    NodeError::Agent(format!(
+                        "failed to discover authentication methods: {err:#}"
+                    ))
+                })?;
+            Ok(NodeRpcResponse::AgentAuthMethods { methods })
+        }
+        NodeRpcRequest::AgentLogin {
+            agent_id,
+            method_id,
+        } => {
+            crate::agent_auth::login(state.session_manager().catalog(), &agent_id, &method_id)
+                .await
+                .map_err(|err| NodeError::Agent(format!("{err:#}")))?;
+            state
+                .record_audit(
+                    fxg_db::audit::actions::AGENT_MANAGE,
+                    source,
+                    None,
+                    serde_json::json!({
+                        "action": "login",
+                        "agent_id": agent_id,
+                        "method_id": method_id,
+                    }),
+                )
+                .await;
+            Ok(NodeRpcResponse::AgentLogin { agent_id })
+        }
         NodeRpcRequest::AgentUsage {
             agent_id,
             local_path,

@@ -289,6 +289,8 @@ prune します。`sessions` は最大 1000 件で、超過時は
 | `GET /api/v1/nodes/:node_id/agents`                            | 指定ノードのカタログ。ハブではこちらを使う。       |
 | `POST /api/v1/nodes/:node_id/agents/refresh`                   | Registry キャッシュを更新。                        |
 | `POST /api/v1/nodes/:node_id/agents/:agent_id/probe`           | 一時 ACP セッションで能力を取得。                  |
+| `GET /api/v1/nodes/:node_id/agents/:agent_id/auth-methods`     | エージェントが広告する認証方法を取得。             |
+| `POST /api/v1/nodes/:node_id/agents/:agent_id/login`           | agent 型の認証方法を実行（terminal 型は拒否）。    |
 | `PUT/DELETE /api/v1/nodes/:node_id/agents/custom/:agent_id`    | カスタム ACP エージェント定義の作成・更新 / 削除。 |
 | `POST /api/v1/nodes/:node_id/agents/registry/:agent_id/import` | Registry エントリを custom 定義として保存。        |
 

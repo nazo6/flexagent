@@ -24,6 +24,7 @@
     reason = "type-safety migration baseline; see docs/06-type-safety.md"
 )]
 
+pub(crate) mod agent_auth;
 pub mod daemon;
 pub mod error;
 pub mod git;

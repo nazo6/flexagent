@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::common::{
-    AuditLogEntry, ClientSource, CommandResult, ConfigOptionInfo, DiffScope, ElicitationAction,
-    ElicitationContent, ElicitationRequestEntry, ErrorInfo, ModeInfo, NodeSummary,
-    PermissionRequestEntry, ProjectSummary, PromptInput, ResolvedBy, SearchHit,
+    AgentAuthMethodInfo, AuditLogEntry, ClientSource, CommandResult, ConfigOptionInfo, DiffScope,
+    ElicitationAction, ElicitationContent, ElicitationRequestEntry, ErrorInfo, ModeInfo,
+    NodeSummary, PermissionRequestEntry, ProjectSummary, PromptInput, ResolvedBy, SearchHit,
     SessionControlAction, SessionSummary, StreamDeltaPayload, SystemStatus,
 };
 use crate::events::{SessionEventBatch, SessionEventEnvelope};
@@ -1549,6 +1549,35 @@ impl AgentManagementSnapshot {
 pub struct AgentUsageResponse {
     /// Current limits, or `None` when the agent does not expose them.
     pub usage: Option<crate::common::AgentUsageLimits>,
+}
+
+/// `GET /api/v1/nodes/{node_id}/agents/{agent_id}/auth-methods` response.
+///
+/// The list comes from the agent's ACP `initialize` response (or the built-in
+/// definition for native agents). An empty list means the agent does not
+/// advertise any authentication method.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct AgentAuthMethodsResponse {
+    /// Advertised methods (`agent` / `terminal`).
+    pub methods: Vec<AgentAuthMethodInfo>,
+}
+
+/// `POST /api/v1/nodes/{node_id}/agents/{agent_id}/login` request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct AgentLoginRequest {
+    /// Method to run. Must be an `agent`-managed method; `terminal` methods
+    /// need an interactive shell and are rejected.
+    pub method_id: String,
+}
+
+/// `POST /api/v1/nodes/{node_id}/agents/{agent_id}/login` response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct AgentLoginResponse {
+    /// Agent that was authenticated
+    pub agent_id: String,
 }
 
 /// Write capabilities of an agent-native management integration.

@@ -6,11 +6,12 @@ use async_trait::async_trait;
 use axum::http::{HeaderMap, header};
 use fxg_db::Db;
 use fxg_protocol::client_api::{
-    AgentCapabilitiesPreview, AgentDiagnostics, AgentManagementSnapshot, AgentMcpAction,
-    AgentMcpDefinition, AgentOpResponse, AgentUsageResponse, AgentsResponse, ConnectionRole,
-    CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse,
-    HubLinkStatus, IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse,
-    NodeTokensResponse, ProbeAgentRequest, ProjectLinkRequest, ProjectLinkResponse, ProjectPreview,
+    AgentAuthMethodsResponse, AgentCapabilitiesPreview, AgentDiagnostics, AgentLoginRequest,
+    AgentLoginResponse, AgentManagementSnapshot, AgentMcpAction, AgentMcpDefinition,
+    AgentOpResponse, AgentUsageResponse, AgentsResponse, ConnectionRole, CreateSessionRequest,
+    CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse, HubLinkStatus,
+    IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse, NodeTokensResponse,
+    ProbeAgentRequest, ProjectLinkRequest, ProjectLinkResponse, ProjectPreview,
     ProjectPreviewRequest, ProjectScanRequest, ProjectScanResponse, ProjectUnlinkRequest,
     ProjectUnlinkResponse, ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest,
     PushSubscribeResponse, RemoveWorktreeRequest, RespondElicitationRequest,
@@ -476,6 +477,39 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         action: AgentAction,
         client: ClientInfo,
     ) -> Result<AgentOpResponse, ApiError>;
+
+    /// `GET /api/v1/nodes/:node_id/agents/:agent_id/auth-methods`.
+    ///
+    /// Discovery only; it starts the agent briefly to read its ACP
+    /// `initialize` response. The default implementation is for endpoints that
+    /// cannot reach a node.
+    async fn agent_auth_methods(
+        &self,
+        _node_id: &str,
+        _agent_id: &str,
+    ) -> Result<AgentAuthMethodsResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "agent authentication is not supported by this endpoint",
+        ))
+    }
+
+    /// `POST /api/v1/nodes/:node_id/agents/:agent_id/login`.
+    ///
+    /// Runs an `agent`-managed ACP authentication method. `terminal` methods are
+    /// rejected because they need an interactive shell (`fxg agents login`).
+    async fn agent_login(
+        &self,
+        _node_id: &str,
+        _agent_id: &str,
+        _request: AgentLoginRequest,
+        _client: ClientInfo,
+    ) -> Result<AgentLoginResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "agent authentication is not supported by this endpoint",
+        ))
+    }
 
     /// `POST /api/v1/nodes/:node_id/agents/:agent_id/probe`
     /// (temporary ACP session to discover models / modes).

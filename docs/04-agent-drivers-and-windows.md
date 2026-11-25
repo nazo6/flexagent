@@ -230,6 +230,9 @@ ACPでは、エディタやオーケストレータ側が **`acp::Client` トレ
   - `clientCapabilities.auth.terminal = true` を広告する。terminal 型は
     `fxg agents login <agent>` で「起動コマンド + method.args」を対話実行する
     (`agy acp --login` など)。agent 型は `authenticate` を送る。
+  - Web UI は agent 型だけを設定画面から実行できる
+    (`GET .../agents/:agent_id/auth-methods` / `POST .../login`)。
+    terminal 型は対話シェルが必要なため CLI の導線を表示する。
   - `auth.logout` を広告しているエージェントは `fxg agents logout` で
     `logout` を送る。
 - **`read_text_file` / `write_text_file`**:
