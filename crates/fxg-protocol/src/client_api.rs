@@ -1294,6 +1294,42 @@ pub struct WorkspaceFsQuery {
     pub path: String,
 }
 
+/// Query of `GET /api/v1/nodes/:id/workspace/fs/search`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct WorkspaceFsSearchQuery {
+    /// Workspace directory to search (its access root is used)
+    pub path: String,
+    /// Case-insensitive substring matched against the relative path
+    pub q: String,
+    /// Maximum number of matches (the node clamps it)
+    pub limit: Option<u32>,
+}
+
+/// One file found by the workspace quick-open search.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct WorkspaceFsMatch {
+    /// Absolute path (openable in the Files tool)
+    pub path: String,
+    /// Path relative to the workspace root (`/` separated)
+    pub relative_path: String,
+}
+
+/// `GET /api/v1/nodes/:id/workspace/fs/search` response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct WorkspaceFsSearchResponse {
+    /// Access root of the workspace (the Git toplevel when inside a repository)
+    pub root_path: String,
+    /// Query that produced the matches
+    pub query: String,
+    /// Files whose relative path contains the query
+    pub matches: Vec<WorkspaceFsMatch>,
+    /// Whether the result was capped at the limit
+    pub truncated: bool,
+}
+
 /// Kind of a file system entry inside a workspace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]

@@ -259,6 +259,7 @@ prune します。`sessions` は最大 1000 件で、超過時は
 | `GET /api/v1/nodes/:node_id/fs/browse`                             | ノードのファイルシステム閲覧（フォルダピッカー用）。                                                                  |
 | `GET /api/v1/nodes/:node_id/workspace/fs/list`                     | 登録済み workspace 内のディレクトリ一覧。                                                                             |
 | `GET /api/v1/nodes/:node_id/workspace/fs/file`                     | workspace 内のファイル内容（テキスト / 画像 / バイナリ / 大きすぎる）。                                               |
+| `GET /api/v1/nodes/:node_id/workspace/fs/search`                   | workspace 内のファイル名クイックオープン（相対パスの部分一致、`q` / `limit`）。                                       |
 | `GET /api/v1/nodes/:node_id/workspace/git/status`                  | workspace の `git status`（branch / ahead / behind / 変更一覧）。                                                     |
 | `GET /api/v1/nodes/:node_id/workspace/git/diff`                    | workspace または 1 ファイルの diff（scope / base / file）。                                                           |
 | `POST /api/v1/nodes/:node_id/workspace/git/commit`                 | worktree の全変更を stage して 1 コミット作成。                                                                       |

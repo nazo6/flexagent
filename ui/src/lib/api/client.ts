@@ -81,6 +81,7 @@ import type {
   WorktreesResponse,
   WorkspaceFileView,
   WorkspaceFsListResponse,
+  WorkspaceFsSearchResponse,
   WorkspaceGitCommitResponse,
   WorkspaceGitStatusResponse,
   WorkspaceGitSyncResponse,
@@ -374,6 +375,20 @@ export class ApiClient {
       "GET",
       `/api/v1/nodes/${encodeURIComponent(nodeId)}/workspace/fs/file`,
       { query: { path } },
+    );
+  }
+
+  /** `GET /api/v1/nodes/:id/workspace/fs/search` (quick open by path). */
+  workspaceFsSearch(
+    nodeId: string,
+    path: string,
+    query: string,
+    limit?: number,
+  ): Promise<WorkspaceFsSearchResponse> {
+    return this.#request<WorkspaceFsSearchResponse>(
+      "GET",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/workspace/fs/search`,
+      { query: { path, q: query, limit } },
     );
   }
 

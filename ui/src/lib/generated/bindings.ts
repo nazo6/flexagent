@@ -3119,6 +3119,14 @@ export type WorkspaceFsListResponse = {
 	truncated: boolean,
 };
 
+/**  One file found by the workspace quick-open search. */
+export type WorkspaceFsMatch = {
+	/**  Absolute path (openable in the Files tool) */
+	path: string,
+	/**  Path relative to the workspace root (`/` separated) */
+	relative_path: string,
+};
+
 /**
  *  Query of `GET /api/v1/nodes/:id/workspace/fs/list` and
  *  `GET /api/v1/nodes/:id/workspace/fs/file`.
@@ -3126,6 +3134,28 @@ export type WorkspaceFsListResponse = {
 export type WorkspaceFsQuery = {
 	/**  Directory or file path inside a registered workspace */
 	path: string,
+};
+
+/**  Query of `GET /api/v1/nodes/:id/workspace/fs/search`. */
+export type WorkspaceFsSearchQuery = {
+	/**  Workspace directory to search (its access root is used) */
+	path: string,
+	/**  Case-insensitive substring matched against the relative path */
+	q: string,
+	/**  Maximum number of matches (the node clamps it) */
+	limit: number | null,
+};
+
+/**  `GET /api/v1/nodes/:id/workspace/fs/search` response. */
+export type WorkspaceFsSearchResponse = {
+	/**  Access root of the workspace (the Git toplevel when inside a repository) */
+	root_path: string,
+	/**  Query that produced the matches */
+	query: string,
+	/**  Files whose relative path contains the query */
+	matches: WorkspaceFsMatch[],
+	/**  Whether the result was capped at the limit */
+	truncated: boolean,
 };
 
 /**  Request body of `POST /api/v1/nodes/:id/workspace/git/commit`. */

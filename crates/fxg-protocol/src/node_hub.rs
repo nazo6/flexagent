@@ -16,8 +16,8 @@ use crate::client_api::{
     AgentCapabilitiesPreview, AgentManagementSnapshot, AgentMcpAction, AgentMcpDefinition,
     AgentsResponse, DiagnosticsResponse, FsBrowseResponse, ProjectLinkResponse, ProjectPreview,
     ProjectScanResponse, ProjectUnlinkResponse, TerminalsResponse, WorkspaceFileView,
-    WorkspaceFsListResponse, WorkspaceGitCommitResponse, WorkspaceGitStatusResponse,
-    WorkspaceGitSyncResponse, WorktreeInfo,
+    WorkspaceFsListResponse, WorkspaceFsSearchResponse, WorkspaceGitCommitResponse,
+    WorkspaceGitStatusResponse, WorkspaceGitSyncResponse, WorktreeInfo,
 };
 use crate::common::{
     AgentAction, AgentAuthMethodInfo, AgentUsageLimits, AuditLogEntry, ClientSource, DataSafety,
@@ -307,6 +307,15 @@ pub enum NodeRpcRequest {
         /// File path
         path: String,
     },
+    /// Search files inside a registered workspace by relative path.
+    WorkspaceFsSearch {
+        /// Workspace directory to search (its access root is used)
+        path: String,
+        /// Case-insensitive substring matched against the relative path
+        query: String,
+        /// Maximum number of matches
+        limit: u32,
+    },
     /// Read the Git status of a registered workspace.
     WorkspaceGitStatus {
         /// Directory inside the workspace
@@ -397,6 +406,11 @@ pub enum NodeRpcResponse {
     WorkspaceFsList {
         /// Listing result
         response: WorkspaceFsListResponse,
+    },
+    /// Workspace file search (`WorkspaceFsSearch`).
+    WorkspaceFsSearch {
+        /// Search result
+        response: WorkspaceFsSearchResponse,
     },
     /// Workspace file content (`WorkspaceFsFile`).
     WorkspaceFile {

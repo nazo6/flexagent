@@ -10,6 +10,7 @@
   import { sync } from "#lib/stores/app.svelte.ts";
   import type {
     WorkspaceFsEntry,
+    WorkspaceFsMatch,
     WorkspaceGitFileStatus,
     WorkspaceGitStatusResponse,
   } from "#lib/generated/bindings.ts";
@@ -28,6 +29,8 @@
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import PanelLeftIcon from "@lucide/svelte/icons/panel-left";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
+  import SearchIcon from "@lucide/svelte/icons/search";
+  import XIcon from "@lucide/svelte/icons/x";
 
   let { ctx, mobile = false }: { ctx: DockContext; mobile?: boolean } = $props();
 
@@ -68,6 +71,58 @@
   let showHidden = $state(false);
   let showIgnored = $state(false);
   let changedOnly = $state(false);
+
+  // Quick open: search the full workspace by relative path. The tree only
+  // holds expanded directories, so file names outside it are found here.
+  let fileFilter = $state("");
+  let fileMatches = $state<WorkspaceFsMatch[]>([]);
+  let fileSearching = $state(false);
+  let fileSearchError = $state<string | null>(null);
+  let fileSearchTruncated = $state(false);
+  /** Drops out-of-order responses while typing. */
+  let fileSearchToken = 0;
+
+  $effect(() => {
+    const needle = fileFilter.trim();
+    if (needle === "") {
+      fileSearchToken += 1;
+      fileMatches = [];
+      fileSearchError = null;
+      fileSearching = false;
+      fileSearchTruncated = false;
+      return;
+    }
+    const token = ++fileSearchToken;
+    const nodeId = ctx.nodeId;
+    const workspace = ctx.localPath;
+    // Typing should not fire a request per keystroke.
+    const timer = setTimeout(() => {
+      void (async () => {
+        fileSearching = true;
+        fileSearchError = null;
+        try {
+          const result = await sync.connection.client.workspaceFsSearch(
+            nodeId,
+            workspace,
+            needle,
+            50,
+          );
+          if (token !== fileSearchToken) return;
+          fileMatches = result.matches;
+          fileSearchTruncated = result.truncated;
+        } catch (cause) {
+          if (token !== fileSearchToken) return;
+          fileMatches = [];
+          fileSearchTruncated = false;
+          fileSearchError = errorMessage(cause);
+        } finally {
+          if (token === fileSearchToken) fileSearching = false;
+        }
+      })();
+    }, 180);
+    return () => clearTimeout(timer);
+  });
+
   let loading = $state(false);
   let error = $state<string | null>(null);
   let statusError = $state<string | null>(null);
@@ -253,6 +308,11 @@
     dock.openFile(entry.path, { preview: false });
   }
 
+  /** Open a quick-open match in the preview (mobile switches to it). */
+  function openMatch(match: WorkspaceFsMatch): void {
+    dock.openFile(match.path);
+  }
+
   function openChanged(entry: { absolute_path: string }): void {
     dock.openFile(entry.absolute_path, { mode: "diff" });
   }
@@ -394,8 +454,58 @@
         )}
         style={mobile ? undefined : `width:${treeWidth}%`}
       >
+        <div class="border-border flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5">
+          <SearchIcon class="text-muted-foreground size-3.5 shrink-0" />
+          <input
+            type="search"
+            bind:value={fileFilter}
+            placeholder={m.dock_files_filter_placeholder()}
+            aria-label={m.dock_files_filter_placeholder()}
+            class="placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-[12px] outline-none"
+          />
+          {#if fileFilter !== ""}
+            <button
+              type="button"
+              class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-5 shrink-0 items-center justify-center rounded-md"
+              title={m.dock_files_filter_clear()}
+              aria-label={m.dock_files_filter_clear()}
+              onclick={() => (fileFilter = "")}
+            >
+              <XIcon class="size-3" />
+            </button>
+          {/if}
+        </div>
         <div class="app-scroll min-h-0 flex-1 overflow-y-auto p-1">
-          {#if error !== null}
+          {#if fileFilter.trim() !== ""}
+            {#if fileSearching}
+              <p class="text-muted-foreground flex items-center gap-2 p-2 text-[12px]">
+                <LoaderCircleIcon class="size-3.5 animate-spin" />
+                {m.dock_files_filter_loading()}
+              </p>
+            {:else if fileSearchError !== null}
+              <p class="text-destructive p-2 text-[12px]">{fileSearchError}</p>
+            {:else if fileMatches.length === 0}
+              <p class="text-muted-foreground p-2 text-[12px]">{m.dock_files_filter_empty()}</p>
+            {:else}
+              {#each fileMatches as match (match.path)}
+                <button
+                  type="button"
+                  data-quick-open={match.relative_path}
+                  class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
+                  title={match.path}
+                  onclick={() => openMatch(match)}
+                >
+                  <FileIcon class="text-muted-foreground size-3.5 shrink-0" />
+                  <span class="min-w-0 flex-1 truncate font-mono">{match.relative_path}</span>
+                </button>
+              {/each}
+              {#if fileSearchTruncated}
+                <p class="text-muted-foreground px-1.5 py-1 text-[11px]">
+                  {m.dock_files_filter_truncated()}
+                </p>
+              {/if}
+            {/if}
+          {:else if error !== null}
             <p class="text-destructive p-2 text-center text-[12px]">{error}</p>
           {:else if loading}
             <div

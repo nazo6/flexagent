@@ -9,8 +9,8 @@ use axum::extract::{Path as UrlPath, Query, State};
 use axum::response::{IntoResponse, Response};
 use fxg_protocol::NodeId;
 use fxg_protocol::client_api::{
-    WorkspaceFsQuery, WorkspaceGitCommitRequest, WorkspaceGitDiffQuery, WorkspaceGitStatusQuery,
-    WorkspaceGitSyncRequest,
+    WorkspaceFsQuery, WorkspaceFsSearchQuery, WorkspaceGitCommitRequest, WorkspaceGitDiffQuery,
+    WorkspaceGitStatusQuery, WorkspaceGitSyncRequest,
 };
 use fxg_protocol::common::DiffScope;
 use fxg_protocol::node_hub::{NodeRpcRequest, NodeRpcResponse};
@@ -33,6 +33,32 @@ pub(crate) async fn workspace_fs_list<B: ClientApiBackend>(
         .await
     {
         Ok(NodeRpcResponse::WorkspaceFsList { response }) => Json(response).into_response(),
+        Ok(_) => ApiError::internal("unexpected node RPC response").into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+pub(crate) async fn workspace_fs_search<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(node_id): UrlPath<String>,
+    Query(query): Query<WorkspaceFsSearchQuery>,
+    Extension(client): Extension<ClientInfo>,
+) -> Response {
+    let limit = query.limit.unwrap_or(50);
+    match state
+        .backend
+        .execute_node_rpc(
+            &NodeId::from(node_id),
+            NodeRpcRequest::WorkspaceFsSearch {
+                path: query.path,
+                query: query.q,
+                limit,
+            },
+            Some(client),
+        )
+        .await
+    {
+        Ok(NodeRpcResponse::WorkspaceFsSearch { response }) => Json(response).into_response(),
         Ok(_) => ApiError::internal("unexpected node RPC response").into_response(),
         Err(err) => err.into_response(),
     }

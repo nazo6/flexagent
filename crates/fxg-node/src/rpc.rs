@@ -112,6 +112,11 @@ async fn execute_inner(
             let file = crate::workspace::read_workspace_file(state, &path).await?;
             Ok(NodeRpcResponse::WorkspaceFile { file })
         }
+        NodeRpcRequest::WorkspaceFsSearch { path, query, limit } => {
+            let response =
+                crate::workspace::search_workspace_files(state, &path, &query, limit).await?;
+            Ok(NodeRpcResponse::WorkspaceFsSearch { response })
+        }
         NodeRpcRequest::WorkspaceGitStatus { path } => {
             let response = crate::workspace::workspace_git_status(state, &path).await?;
             Ok(NodeRpcResponse::WorkspaceGitStatus { response })

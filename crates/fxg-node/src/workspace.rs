@@ -12,7 +12,8 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use fxg_protocol::client_api::{
     WorkspaceEntryKind, WorkspaceFileContent, WorkspaceFileView, WorkspaceFsEntry,
-    WorkspaceFsListResponse, WorkspaceGitCommitResponse, WorkspaceGitEntry, WorkspaceGitFileStatus,
+    WorkspaceFsListResponse, WorkspaceFsMatch, WorkspaceFsSearchResponse,
+    WorkspaceGitCommitResponse, WorkspaceGitEntry, WorkspaceGitFileStatus,
     WorkspaceGitStatusResponse, WorkspaceGitSyncResponse,
 };
 use fxg_protocol::common::{DiffScope, WorkspaceDiffResponse};
@@ -28,6 +29,25 @@ const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_DIR_ENTRIES: usize = 2000;
 /// Maximum changed files in one Git status response.
 const MAX_STATUS_ENTRIES: usize = 5000;
+/// Maximum matches returned by the workspace quick-open search.
+const MAX_SEARCH_MATCHES: u32 = 200;
+/// Maximum files inspected by the non-Git search fallback.
+const MAX_SEARCH_SCAN: usize = 20_000;
+/// Heavy or generated directories skipped by the non-Git search fallback.
+const SEARCH_SKIP_DIRS: &[&str] = &[
+    ".git",
+    ".next",
+    ".nuxt",
+    ".svelte-kit",
+    ".venv",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "target",
+    "vendor",
+    "venv",
+];
 
 struct ResolvedWorkspace {
     /// Access root (Git toplevel or the registered workspace directory).
@@ -65,6 +85,163 @@ pub async fn list_workspace(
         entries,
         truncated,
     })
+}
+
+/// `GET /api/v1/nodes/:id/workspace/fs/search`
+///
+/// Quick-open search over the workspace's file names (the relative path).
+/// Tracked and untracked-but-not-ignored files come from `git ls-files`, so the
+/// result matches what the repository considers source; a non-Git workspace
+/// falls back to a bounded directory walk.
+pub async fn search_workspace_files(
+    state: &DaemonState,
+    requested: &str,
+    query: &str,
+    limit: u32,
+) -> Result<WorkspaceFsSearchResponse, NodeError> {
+    let resolved = resolve_existing(state, requested).await?;
+    let root = resolved.root;
+    let limit = usize::try_from(limit.clamp(1, MAX_SEARCH_MATCHES)).unwrap_or(50);
+    let needle = query.trim().to_lowercase();
+    let root_path = root.to_string_lossy().into_owned();
+    let mut response = WorkspaceFsSearchResponse {
+        root_path,
+        query: query.to_owned(),
+        matches: Vec::new(),
+        truncated: false,
+    };
+    if needle.is_empty() {
+        return Ok(response);
+    }
+
+    let mut ranked: Vec<(u8, String)> = Vec::new();
+    for relative in workspace_file_paths(&root).await? {
+        let Some(score) = match_rank(&relative, &needle) else {
+            continue;
+        };
+        ranked.push((score, relative));
+    }
+    // Best name matches first, then the shortest path, then alphabetical.
+    ranked.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| a.1.len().cmp(&b.1.len()))
+            .then_with(|| a.1.cmp(&b.1))
+    });
+    response.truncated = ranked.len() > limit;
+    response.matches = ranked
+        .into_iter()
+        .take(limit)
+        .map(|(_, relative_path)| WorkspaceFsMatch {
+            path: root.join(&relative_path).to_string_lossy().into_owned(),
+            relative_path,
+        })
+        .collect();
+    Ok(response)
+}
+
+/// Whether a relative path matches the needle and how well (lower is better).
+fn match_rank(relative: &str, needle: &str) -> Option<u8> {
+    let lower = relative.to_lowercase();
+    if !lower.contains(needle) {
+        return None;
+    }
+    let name = lower.rsplit('/').next().unwrap_or(&lower);
+    Some(if name == needle {
+        0
+    } else if name.starts_with(needle) {
+        1
+    } else if name.contains(needle) {
+        2
+    } else {
+        3
+    })
+}
+
+/// File paths relative to the workspace root (`/` separated).
+async fn workspace_file_paths(root: &Path) -> Result<Vec<String>, NodeError> {
+    let args = [
+        "ls-files",
+        "-z",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+    ];
+    match git::capture(root, &args, &[]).await {
+        Ok(output) if output.success => {
+            let mut files = Vec::new();
+            for raw in output.stdout.split(|byte| *byte == 0) {
+                if raw.is_empty() {
+                    continue;
+                }
+                let relative = String::from_utf8_lossy(raw).replace('\\', "/");
+                if is_safe_relative(&relative) {
+                    files.push(relative);
+                }
+            }
+            Ok(files)
+        }
+        // Not a Git repository (or git is unavailable): walk the tree instead.
+        _ => walk_workspace_files(root),
+    }
+}
+
+fn is_safe_relative(relative: &str) -> bool {
+    !relative.starts_with('/')
+        && relative
+            .split('/')
+            .all(|component| component != ".." && component != ".")
+}
+
+/// Bounded directory walk used when the workspace is not a Git repository.
+fn walk_workspace_files(root: &Path) -> Result<Vec<String>, NodeError> {
+    let mut files = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    let mut scanned = 0usize;
+    while let Some(dir) = pending.pop() {
+        let read_dir = match std::fs::read_dir(&dir) {
+            Ok(read_dir) => read_dir,
+            Err(_) => continue,
+        };
+        for item in read_dir {
+            let entry = match item {
+                Ok(entry) => entry,
+                Err(_) => continue,
+            };
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(_) => continue,
+            };
+            if file_type.is_dir() {
+                if SEARCH_SKIP_DIRS
+                    .iter()
+                    .any(|skip| name.eq_ignore_ascii_case(skip))
+                {
+                    continue;
+                }
+                pending.push(entry.path());
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+            if let Ok(relative) = entry.path().strip_prefix(root) {
+                let relative = relative
+                    .components()
+                    .map(|component| component.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                if is_safe_relative(&relative) {
+                    files.push(relative);
+                }
+            }
+            scanned += 1;
+            if scanned >= MAX_SEARCH_SCAN {
+                return Ok(files);
+            }
+        }
+    }
+    Ok(files)
 }
 
 /// `GET /api/v1/nodes/:id/workspace/fs/file`
@@ -910,5 +1087,45 @@ u UU N... 100644 100644 100644 100644 aaa bbb ccc conflict.rs\0";
         );
         assert!(entries[1].is_hidden);
         assert!(!entries.iter().any(|entry| entry.name == ".git"));
+    }
+
+    #[test]
+    fn quick_open_ranking_prefers_file_name_matches() {
+        assert_eq!(match_rank("src/main.rs", "main"), Some(1));
+        assert_eq!(match_rank("docs/domain.md", "main"), Some(2));
+        assert_eq!(match_rank("main/readme.md", "main"), Some(3));
+        assert_eq!(match_rank("src/other.rs", "main"), None);
+        assert!(is_safe_relative("src/main.rs"));
+        assert!(!is_safe_relative("../secrets.txt"));
+        assert!(!is_safe_relative("/etc/passwd"));
+        assert!(!is_safe_relative("src/./main.rs"));
+    }
+
+    #[test]
+    fn fallback_walk_skips_heavy_directories() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        fs::create_dir_all(dir.path().join("src")).expect("create src");
+        fs::create_dir_all(dir.path().join("node_modules/pkg")).expect("create node_modules");
+        fs::write(dir.path().join("src/lib.rs"), b"").expect("write lib");
+        fs::write(dir.path().join("node_modules/pkg/index.js"), b"").expect("write ignored");
+
+        let files = walk_workspace_files(dir.path()).expect("walk");
+
+        assert_eq!(files, vec!["src/lib.rs".to_owned()]);
+    }
+
+    #[tokio::test]
+    async fn workspace_file_paths_follows_gitignore() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        crate::testutil::init_test_repo(dir.path()).await;
+        fs::write(dir.path().join(".gitignore"), b"ignored.log\n").expect("write gitignore");
+        fs::write(dir.path().join("src.rs"), b"fn main() {}\n").expect("write source");
+        fs::write(dir.path().join("ignored.log"), b"x\n").expect("write ignored");
+
+        let files = workspace_file_paths(dir.path()).await.expect("paths");
+
+        assert!(files.contains(&"README.md".to_owned()));
+        assert!(files.contains(&"src.rs".to_owned()));
+        assert!(!files.contains(&"ignored.log".to_owned()));
     }
 }
