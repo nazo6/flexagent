@@ -474,6 +474,7 @@ impl ClientApiBackend for DaemonState {
             Path::new(&request.cwd),
             request.title.as_deref(),
             request.mirror_history,
+            request.replace_session_id.as_ref(),
             &source,
         )
         .await

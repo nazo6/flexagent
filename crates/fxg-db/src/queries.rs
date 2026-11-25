@@ -89,10 +89,27 @@ pub struct ProjectSessionCursor {
 /// Context character count for LIKE search and snippet generation.
 const SNIPPET_CONTEXT_CHARS: usize = 40;
 
-/// Finds the live session that already owns an agent-side session.
+/// A live fxg session bound to an agent-side session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentSessionBinding {
+    /// Agent that owns the session
+    pub agent_id: String,
+    /// Agent-side session ID
+    pub agent_session_id: String,
+    /// fxg session ID
+    pub session_id: SessionId,
+    /// fxg session title
+    pub title: String,
+    /// fxg session status
+    pub status: SessionStatus,
+    /// Last update time of the fxg session (Unix epoch ms)
+    pub updated_at: i64,
+}
+
+/// Finds the live fxg session that already owns an agent-side session.
 ///
-/// Deleted (tombstone) sessions are ignored so a rolled-back / removed import is
-/// offered again on the next discovery.
+/// Deleted (tombstone) and archived sessions are ignored so a rolled-back,
+/// removed or refreshed import is offered again on the next discovery.
 pub async fn find_session_by_agent_session(
     pool: &SqlitePool,
     agent_id: &str,
@@ -102,7 +119,8 @@ pub async fn find_session_by_agent_session(
         r#"
         SELECT session_id AS "session_id!"
           FROM sessions
-         WHERE agent_id = ? AND agent_session_id = ? AND deleted_at IS NULL
+         WHERE agent_id = ? AND agent_session_id = ?
+           AND deleted_at IS NULL AND archived_at IS NULL
          ORDER BY updated_at DESC
          LIMIT 1
         "#,
@@ -366,27 +384,34 @@ pub async fn list_session_local_paths(
         .await?)
 }
 
-/// Lists `(agent_id, agent_session_id, session_id)` of live sessions that are
-/// bound to an agent-side session.
+/// Lists live, non-archived sessions that are bound to an agent-side session.
 ///
-/// Used by external-session discovery to skip sessions that were already
-/// imported.
+/// Used by external-session discovery to mark the sessions fxg already owns.
 pub async fn list_agent_session_bindings(
     pool: &SqlitePool,
-) -> Result<Vec<(String, String, SessionId)>, DbError> {
+) -> Result<Vec<AgentSessionBinding>, DbError> {
     let rows = sqlx::query!(
         r#"
         SELECT agent_id, agent_session_id AS "agent_session_id!",
-               session_id AS "session_id!: SessionId"
+               session_id AS "session_id!: SessionId", title,
+               status AS "status: SessionStatus", updated_at
           FROM sessions
-         WHERE deleted_at IS NULL AND agent_session_id IS NOT NULL
+         WHERE deleted_at IS NULL AND archived_at IS NULL
+           AND agent_session_id IS NOT NULL
         "#,
     )
     .fetch_all(pool)
     .await?;
     Ok(rows
         .into_iter()
-        .map(|row| (row.agent_id, row.agent_session_id, row.session_id))
+        .map(|row| AgentSessionBinding {
+            agent_id: row.agent_id,
+            agent_session_id: row.agent_session_id,
+            session_id: row.session_id,
+            title: row.title,
+            status: row.status,
+            updated_at: row.updated_at,
+        })
         .collect())
 }
 

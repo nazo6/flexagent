@@ -496,6 +496,7 @@ impl NodeClient {
                     cwd: cwd.to_owned(),
                     title: title.map(str::to_owned),
                     mirror_history,
+                    replace_session_id: None,
                 },
             )
             .await?;

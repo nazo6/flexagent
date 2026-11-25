@@ -326,10 +326,10 @@ impl Db {
         queries::list_session_local_paths(&self.pool, filter).await
     }
 
-    /// `(agent_id, agent_session_id, session_id)` of live agent-bound sessions.
+    /// Live, non-archived sessions bound to an agent-side session.
     pub async fn list_agent_session_bindings(
         &self,
-    ) -> Result<Vec<(String, String, fxg_protocol::SessionId)>, DbError> {
+    ) -> Result<Vec<queries::AgentSessionBinding>, DbError> {
         queries::list_agent_session_bindings(&self.pool).await
     }
 

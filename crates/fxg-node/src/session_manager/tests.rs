@@ -1014,6 +1014,7 @@ async fn import_session_records_and_resumes_an_existing_agent_session() {
             dir.path(),
             Some("Imported"),
             false,
+            None,
         )
         .await
         .expect("import");
@@ -1049,6 +1050,7 @@ async fn import_session_fails_when_history_capture_is_empty() {
             dir.path(),
             Some("Empty"),
             true,
+            None,
         )
         .await
         .expect_err("import must not succeed without history");
@@ -1127,6 +1129,7 @@ async fn list_external_sessions_marks_already_imported_sessions() {
             dir.path(),
             Some("External one"),
             false,
+            None,
         )
         .await
         .expect("import");
@@ -1168,6 +1171,279 @@ async fn list_external_sessions_marks_already_imported_sessions() {
             .expect("external-2")
             .imported_session_id
             .is_none()
+    );
+
+    // A newer agent timestamp marks the imported session as changed.
+    mock.set_external_sessions(
+        vec![AgentSessionInfo {
+            session_id: "external-1".to_owned(),
+            cwd: dir.path().to_path_buf(),
+            title: Some("External one".to_owned()),
+            updated_at: Some("2030-01-01T00:00:00Z".to_owned()),
+        }],
+        true,
+    );
+    let response = manager
+        .list_external_sessions(&["mock".to_owned()], true)
+        .await
+        .expect("list external");
+    let changed = response
+        .sessions
+        .iter()
+        .find(|session| session.agent_session_id == "external-1")
+        .expect("external-1");
+    assert_eq!(changed.imported_title.as_deref(), Some("External one"));
+    assert!(changed.imported_updated_at.is_some());
+    assert!(changed.imported_status.is_some());
+    assert!(changed.needs_sync);
+    assert!(response.scanned_at > 0);
+}
+
+#[tokio::test]
+async fn import_session_is_idempotent() {
+    let (manager, mock, dir) = setup().await;
+    mock.set_resume_supported(true);
+
+    let first = manager
+        .import_session(
+            &CommandId::from("c-import-idempotent-1"),
+            "mock",
+            "agent-idempotent-1",
+            dir.path(),
+            Some("Once"),
+            false,
+            None,
+        )
+        .await
+        .expect("first import");
+
+    // The `SessionAgentBound` projection is written by the event pump.
+    for _ in 0..100 {
+        if manager
+            .bus()
+            .db()
+            .find_session_by_agent_session("mock", "agent-idempotent-1")
+            .await
+            .expect("lookup")
+            .is_some()
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    let second = manager
+        .import_session(
+            &CommandId::from("c-import-idempotent-2"),
+            "mock",
+            "agent-idempotent-1",
+            dir.path(),
+            Some("Twice"),
+            false,
+            None,
+        )
+        .await
+        .expect("second import");
+
+    assert_eq!(first, second);
+    let session = manager
+        .bus()
+        .db()
+        .get_session(&first)
+        .await
+        .expect("query")
+        .expect("session");
+    assert_eq!(session.title, "Once");
+    assert_eq!(mock.starts().len(), 1);
+}
+
+#[tokio::test]
+async fn import_session_replace_archives_the_old_session() {
+    let (manager, mock, dir) = setup().await;
+    mock.set_resume_supported(true);
+    mock.set_start_replay_events(vec![UnifiedEventPayload::UserMessage {
+        text: "earlier prompt".to_owned(),
+        attachments: Vec::new(),
+        client_source: ClientSource::Import,
+        agent_message_id: None,
+    }]);
+
+    let old = manager
+        .import_session(
+            &CommandId::from("c-import-replace-old"),
+            "mock",
+            "agent-replace-1",
+            dir.path(),
+            Some("Original title"),
+            false,
+            None,
+        )
+        .await
+        .expect("initial import");
+
+    for _ in 0..100 {
+        if manager
+            .bus()
+            .db()
+            .find_session_by_agent_session("mock", "agent-replace-1")
+            .await
+            .expect("lookup")
+            .is_some()
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    let new = manager
+        .import_session(
+            &CommandId::from("c-import-replace-new"),
+            "mock",
+            "agent-replace-1",
+            dir.path(),
+            None,
+            true,
+            Some(&SessionId::from(old.clone())),
+        )
+        .await
+        .expect("refresh import");
+
+    assert_ne!(old, new);
+    let old_session = manager
+        .bus()
+        .db()
+        .get_session(&old)
+        .await
+        .expect("old query")
+        .expect("old session");
+    assert!(old_session.archived_at.is_some());
+    let new_session = manager
+        .bus()
+        .db()
+        .get_session(&new)
+        .await
+        .expect("new query")
+        .expect("new session");
+    assert_eq!(new_session.title, "Original title");
+    assert!(new_session.archived_at.is_none());
+
+    for _ in 0..100 {
+        if manager
+            .bus()
+            .db()
+            .find_session_by_agent_session("mock", "agent-replace-1")
+            .await
+            .expect("lookup")
+            .as_deref()
+            == Some(new.as_str())
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    // The archived session no longer owns the agent binding.
+    assert_eq!(
+        manager
+            .bus()
+            .db()
+            .find_session_by_agent_session("mock", "agent-replace-1")
+            .await
+            .expect("binding")
+            .as_deref(),
+        Some(new.as_str())
+    );
+}
+
+#[tokio::test]
+async fn import_session_replace_restores_the_old_session_on_failure() {
+    let (manager, mock, dir) = setup().await;
+    mock.set_resume_supported(true);
+
+    let old = manager
+        .import_session(
+            &CommandId::from("c-import-replace-fail-old"),
+            "mock",
+            "agent-replace-fail-1",
+            dir.path(),
+            Some("Keep me"),
+            false,
+            None,
+        )
+        .await
+        .expect("initial import");
+
+    for _ in 0..100 {
+        if manager
+            .bus()
+            .db()
+            .find_session_by_agent_session("mock", "agent-replace-fail-1")
+            .await
+            .expect("lookup")
+            .is_some()
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    mock.set_history_capture_fails(true);
+    let err = manager
+        .import_session(
+            &CommandId::from("c-import-replace-fail-new"),
+            "mock",
+            "agent-replace-fail-1",
+            dir.path(),
+            None,
+            true,
+            Some(&SessionId::from(old.clone())),
+        )
+        .await
+        .expect_err("refresh must fail without history");
+    assert!(
+        matches!(err, NodeError::HistoryUnavailable(_)),
+        "unexpected error: {err}"
+    );
+
+    let old_session = manager
+        .bus()
+        .db()
+        .get_session(&old)
+        .await
+        .expect("old query")
+        .expect("old session");
+    assert!(old_session.archived_at.is_none());
+    assert_eq!(
+        manager
+            .bus()
+            .db()
+            .find_session_by_agent_session("mock", "agent-replace-fail-1")
+            .await
+            .expect("binding")
+            .as_deref(),
+        Some(old.as_str())
+    );
+}
+
+#[tokio::test]
+async fn import_session_replace_requires_history() {
+    let (manager, mock, dir) = setup().await;
+    mock.set_resume_supported(true);
+    let err = manager
+        .import_session(
+            &CommandId::from("c-import-replace-no-history"),
+            "mock",
+            "agent-replace-no-history",
+            dir.path(),
+            None,
+            false,
+            Some(&SessionId::from("missing".to_owned())),
+        )
+        .await
+        .expect_err("refresh without history must be rejected");
+    assert!(
+        matches!(err, NodeError::InvalidState(_)),
+        "unexpected error: {err}"
     );
 }
 
@@ -1981,6 +2257,7 @@ async fn import_session_flushes_replayed_events_before_returning() {
             dir.path(),
             None,
             true,
+            None,
         )
         .await
         .expect("import succeeds");

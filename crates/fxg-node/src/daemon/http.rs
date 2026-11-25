@@ -1091,6 +1091,9 @@ mod tests {
         assert_eq!(sessions[0]["agent_id"], "mock");
         assert_eq!(sessions[0]["agent_session_id"], "external-1");
         assert_eq!(sessions[0]["title"], "External");
+        assert_eq!(sessions[0]["needs_sync"], false);
+        assert!(sessions[0]["imported_session_id"].is_null());
+        assert!(body["scanned_at"].as_i64().is_some_and(|value| value > 0));
         let agents = body["agents"].as_array().expect("agents");
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0]["supports_list"], true);

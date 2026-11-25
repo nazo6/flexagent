@@ -109,6 +109,7 @@ impl DaemonState {
         cwd: &Path,
         title: Option<&str>,
         mirror_history: bool,
+        replace_session_id: Option<&fxg_protocol::SessionId>,
         source: &AuditSource,
     ) -> Result<String, NodeError> {
         self.resolve_and_register_project(cwd).await?;
@@ -121,6 +122,7 @@ impl DaemonState {
                 cwd,
                 title,
                 mirror_history,
+                replace_session_id,
             )
             .await?;
         self.record_audit(
@@ -133,6 +135,7 @@ impl DaemonState {
                 "agent_session_id": agent_session_id,
                 "imported": true,
                 "mirror_history": mirror_history,
+                "replaced_session_id": replace_session_id,
             }),
         )
         .await;

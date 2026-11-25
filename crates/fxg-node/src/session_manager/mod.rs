@@ -211,6 +211,9 @@ struct Inner {
     probe_cache: Mutex<HashMap<ProbeKey, ProbeCacheEntry>>,
     /// Serializes probe startups (the UI probes a single agent at a time).
     probe_lock: tokio::sync::Mutex<()>,
+    /// Serializes session imports so the same agent session cannot be bound
+    /// twice by concurrent requests.
+    import_lock: tokio::sync::Mutex<()>,
     /// Cached external-session discovery (manual refresh bypasses it).
     external_cache: Mutex<Option<ExternalCacheEntry>>,
 }
@@ -345,6 +348,7 @@ impl SessionManager {
                 drivers: Mutex::new(Vec::new()),
                 probe_cache: Mutex::new(HashMap::new()),
                 probe_lock: tokio::sync::Mutex::new(()),
+                import_lock: tokio::sync::Mutex::new(()),
                 external_cache: Mutex::new(None),
             }),
         }

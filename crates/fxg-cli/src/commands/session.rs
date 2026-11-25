@@ -680,9 +680,14 @@ impl usage::RunAsync for SessionExternalArgs {
                 .as_ref()
                 .map(|id| format!(" (imported: {id})"))
                 .unwrap_or_default();
+            let changed = if session.needs_sync {
+                " (agent changed)"
+            } else {
+                ""
+            };
             println!(
-                "{} [{}] {} {}{}",
-                session.agent_id, session.agent_session_id, session.cwd, title, imported
+                "{} [{}] {} {}{}{}",
+                session.agent_id, session.agent_session_id, session.cwd, title, imported, changed
             );
         }
         for agent in &response.agents {
