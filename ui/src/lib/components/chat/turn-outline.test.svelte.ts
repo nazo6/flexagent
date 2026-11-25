@@ -64,6 +64,38 @@ describe("TurnOutline in-session search", () => {
     }
   });
 
+  it("loads more results when the first page is full", async () => {
+    const firstPage = Array.from({ length: 50 }, (_, index) => hit(index + 1, "[term] result"));
+    const searchSpy = vi.spyOn(sync.connection.client, "search").mockResolvedValue(firstPage);
+    const target = document.createElement("div");
+    document.body.appendChild(target);
+    const component = mount(TurnOutline, {
+      target,
+      props: {
+        turns: [],
+        sessionId: "session-1",
+        onjump: () => {},
+        onjumpseq: () => {},
+        onclose: () => {},
+      },
+    });
+    try {
+      await search(target, "term");
+      const more = Array.from(target.querySelectorAll("button")).find(
+        (button) => button.textContent?.trim() === "Show more",
+      );
+      expect(more).toBeDefined();
+      more!.click();
+      await new Promise((resolve) => setTimeout(resolve, 320));
+      flushSync();
+      expect(searchSpy).toHaveBeenLastCalledWith("term", 100, "session-1");
+    } finally {
+      unmount(component);
+      target.remove();
+      searchSpy.mockRestore();
+    }
+  });
+
   it("shows an empty state when the session has no match", async () => {
     const searchSpy = vi.spyOn(sync.connection.client, "search").mockResolvedValue([]);
     const target = document.createElement("div");

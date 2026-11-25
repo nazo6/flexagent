@@ -10,28 +10,51 @@
   import { toast } from "svelte-sonner";
   import SearchIcon from "@lucide/svelte/icons/search";
 
+  /** Results per page; the API clamps the total at 500. */
+  const SEARCH_PAGE_SIZE = 50;
+  const SEARCH_MAX = 500;
+
   let query = $state("");
   let hits = $state<SearchHit[]>([]);
   let searching = $state(false);
   let searched = $state(false);
+  /** Current page size (grows with "Show more"; the API caps at 500). */
+  let limit = $state(SEARCH_PAGE_SIZE);
+  /** Query whose results are on screen (for loading more). */
+  let lastQuery = $state("");
+
+  const canShowMore = $derived(hits.length >= limit && limit < SEARCH_MAX);
 
   const scopeLabel = $derived(
     connection.role === "hub" ? m.search_scope_hub() : m.search_scope_node(),
   );
 
-  async function submit(event: SubmitEvent) {
-    event.preventDefault();
-    const needle = query.trim();
-    if (needle === "" || searching) return;
+  async function runSearch(needle: string, nextLimit: number): Promise<void> {
+    if (searching) return;
     searching = true;
     try {
-      hits = await connection.client.search(needle, 50);
+      hits = await connection.client.search(needle, nextLimit);
       searched = true;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       searching = false;
     }
+  }
+
+  async function submit(event: SubmitEvent) {
+    event.preventDefault();
+    const needle = query.trim();
+    if (needle === "") return;
+    limit = SEARCH_PAGE_SIZE;
+    lastQuery = needle;
+    await runSearch(needle, limit);
+  }
+
+  async function loadMore(): Promise<void> {
+    if (!canShowMore || searching) return;
+    limit += SEARCH_PAGE_SIZE;
+    await runSearch(lastQuery, limit);
   }
 
   function sessionTitle(sessionId: string): string {
@@ -80,6 +103,7 @@
   {#if searched && hits.length === 0}
     <p class="text-muted-foreground text-[13px]">{m.search_empty()}</p>
   {:else if hits.length > 0}
+    <p class="text-muted-foreground text-[12px]">{m.search_result_count({ count: hits.length })}</p>
     <ul class="border-border flex list-none flex-col border-t p-0">
       {#each hits as hit (hit.event_id)}
         <li class="border-border flex flex-col gap-1 border-b py-3">
@@ -105,5 +129,18 @@
         </li>
       {/each}
     </ul>
+    {#if canShowMore}
+      <div class="flex justify-center pt-1">
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-7 px-2 text-[12px]"
+          disabled={searching}
+          onclick={() => void loadMore()}
+        >
+          {searching ? m.search_searching() : m.search_more_results()}
+        </Button>
+      </div>
+    {/if}
   {/if}
 </div>

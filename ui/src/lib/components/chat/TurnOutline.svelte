@@ -14,10 +14,15 @@
   import { snippetSegments } from "#lib/search.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { cn } from "#lib/utils.ts";
+  import { untrack } from "svelte";
   import ListIcon from "@lucide/svelte/icons/list";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import SearchIcon from "@lucide/svelte/icons/search";
   import XIcon from "@lucide/svelte/icons/x";
+
+  /** In-session search page size and the server's upper bound. */
+  const SEARCH_PAGE_SIZE = 50;
+  const SEARCH_MAX = 200;
 
   interface Props {
     turns: readonly ChatTurn[];
@@ -42,11 +47,22 @@
   /** Query the current results belong to (null before the first search). */
   let searchedFor = $state<string | null>(null);
   let searchError = $state<string | null>(null);
+  /** Current page size (grows with "Show more"). */
+  let searchLimit = $state(SEARCH_PAGE_SIZE);
   /** Drops out-of-order responses when the query changes while a search runs. */
   let searchToken = 0;
 
+  // A new query starts from the first page.
+  $effect(() => {
+    const needle = query;
+    untrack(() => {
+      if (needle !== "") searchLimit = SEARCH_PAGE_SIZE;
+    });
+  });
+
   $effect(() => {
     const needle = query.trim();
+    const limit = searchLimit;
     if (needle === "") {
       searchToken += 1;
       hits = [];
@@ -62,7 +78,7 @@
         searching = true;
         searchError = null;
         try {
-          const result = await sync.connection.client.search(needle, 50, sessionId);
+          const result = await sync.connection.client.search(needle, limit, sessionId);
           if (token !== searchToken) return;
           hits = result;
           searchedFor = needle;
@@ -227,6 +243,18 @@
               </li>
             {/each}
           </ul>
+          {#if hits.length >= searchLimit && searchLimit < SEARCH_MAX}
+            <div class="flex justify-center py-1">
+              <button
+                type="button"
+                class="text-muted-foreground hover:bg-accent hover:text-foreground rounded-md px-2 py-1 text-[11px] disabled:opacity-50"
+                disabled={searching}
+                onclick={() => (searchLimit += SEARCH_PAGE_SIZE)}
+              >
+                {m.chat_turns_search_more()}
+              </button>
+            </div>
+          {/if}
         {/if}
       {:else}
         <ul class="m-0 flex list-none flex-col gap-0.5 p-0">
