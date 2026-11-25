@@ -18,7 +18,6 @@
   import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
   import ProblemBadge from "#lib/components/ProblemBadge.svelte";
   import SessionActionsMenu from "#lib/components/session/SessionActionsMenu.svelte";
-  import ExternalSessionsDialog from "#lib/components/session/ExternalSessionsDialog.svelte";
   import type { SessionSummary } from "#lib/generated/bindings.ts";
   import { layoutState } from "#lib/stores/layout.svelte.ts";
   import PanelLeftCloseIcon from "@lucide/svelte/icons/panel-left-close";
@@ -47,7 +46,6 @@
   let collapsedProjects = $state<Record<string, boolean>>({});
   let showAttentionSection = $state(true);
   let showArchivedSection = $state(false);
-  let externalOpen = $state(false);
 
   const currentPath = $derived(page.url.pathname);
   const activeSessionId = $derived(
@@ -226,14 +224,19 @@
       <span>{m.shell_projects()}</span>
     </a>
 
-    <button
-      type="button"
-      onclick={() => (externalOpen = true)}
-      class="text-muted-foreground hover:bg-accent/50 hover:text-foreground flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left font-medium transition-colors"
+    <a
+      href="/external"
+      onclick={handleLinkClick}
+      class={cn(
+        "flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors",
+        currentPath === "/external"
+          ? "bg-signal-soft text-foreground"
+          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+      )}
     >
       <HistoryIcon class="size-4" />
       <span>{m.shell_external_sessions()}</span>
-    </button>
+    </a>
 
     <a
       href="/search"
@@ -439,8 +442,6 @@
     <ConnectionMenu variant="scope" />
   </div>
 </aside>
-
-<ExternalSessionsDialog bind:open={externalOpen} />
 
 {#snippet loadSessionsButton(projectId: string, label: string)}
   <button
