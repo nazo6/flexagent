@@ -1226,6 +1226,24 @@ fn terminal_output_buffer_publishes_each_byte_once() {
 }
 
 #[test]
+fn terminal_output_reports_whether_the_limit_truncated_it() {
+    let mut buffer = TerminalOutputBuffer::new(Some(5));
+    buffer.push(b"abc");
+    assert_eq!(
+        buffer.retained_with_truncation(),
+        (b"abc".to_vec(), false),
+        "output within the limit is not truncated"
+    );
+
+    buffer.push(b"defgh");
+    assert_eq!(
+        buffer.retained_with_truncation(),
+        (b"defgh".to_vec(), true),
+        "dropped bytes make the retained output truncated"
+    );
+}
+
+#[test]
 fn terminal_output_buffer_keeps_the_tail_when_the_limit_is_hit() {
     let mut buffer = TerminalOutputBuffer::new(Some(5));
     buffer.push(b"abcdefgh");

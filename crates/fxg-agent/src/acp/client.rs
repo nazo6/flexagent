@@ -710,7 +710,10 @@ pub(super) async fn run_acp_process(
                     .get(&request.terminal_id.to_string())
                 {
                     Ok((_, _, buffer, exit_rx)) => {
-                        let data = buffer.lock().expect("terminal output poisoned").retained();
+                        let (data, truncated) = buffer
+                            .lock()
+                            .expect("terminal output poisoned")
+                            .retained_with_truncation();
                         let text = String::from_utf8_lossy(&data).into_owned();
                         let exit_status = exit_rx
                             .borrow()
@@ -718,7 +721,7 @@ pub(super) async fn run_acp_process(
                             .copied()
                             .map(|code| exit_status_of(Some(code)));
                         responder.respond(
-                            TerminalOutputResponse::new(text, false).exit_status(exit_status),
+                            TerminalOutputResponse::new(text, truncated).exit_status(exit_status),
                         )
                     }
                     Err(err) => responder.respond_with_internal_error(err),

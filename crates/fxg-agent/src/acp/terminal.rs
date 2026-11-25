@@ -155,6 +155,11 @@ impl TerminalOutputBuffer {
         self.data.clone()
     }
 
+    /// The retained output and whether older bytes were dropped to honor `limit`.
+    pub(super) fn retained_with_truncation(&self) -> (Vec<u8>, bool) {
+        (self.retained(), self.dropped > 0)
+    }
+
     /// Bytes produced since the last published event; advances the cursor.
     pub(super) fn take_unpublished(&mut self) -> Vec<u8> {
         let start = self
