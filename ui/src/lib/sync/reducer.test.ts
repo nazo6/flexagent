@@ -211,6 +211,35 @@ describe("tool calls", () => {
     });
   });
 
+  it("keeps non-text content on an agent message", () => {
+    const sources = emptySources([
+      makeEvent(1, {
+        type: "agent_message",
+        data: {
+          message_id: "m1",
+          text: "",
+          attachments: [
+            {
+              file_name: "shot.png",
+              mime_type: "image/png",
+              size_bytes: 2,
+              local_path: null,
+              data_b64: "aGk=",
+            },
+          ],
+          is_complete: true,
+        },
+      }),
+    ]);
+    const items = buildTimelineItems(sources);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: "agent",
+      text: "",
+      attachments: [{ file_name: "shot.png", data_b64: "aGk=" }],
+    });
+  });
+
   it("keeps the embedded terminal id on a tool call", () => {
     const sources = emptySources([
       makeEvent(1, {

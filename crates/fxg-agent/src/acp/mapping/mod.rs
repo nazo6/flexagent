@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use super::terminal::*;
 use super::*;
 use agent_client_protocol::v1::schema::{SessionConfigSelectOption, SessionConfigSelectOptions};
+use fxg_protocol::common::AttachmentMeta;
 
 mod types;
 
@@ -94,6 +95,140 @@ pub(super) fn file_uri(path: &str) -> String {
     }
 }
 
+/// Largest image / audio / blob payload persisted inline in an event.
+///
+/// ACP agents can emit arbitrarily large screenshots. Keeping them small avoids
+/// bloating `node.db` and the outbox; larger blocks are still listed, but only
+/// their metadata survives.
+const MAX_INLINE_ATTACHMENT_BYTES: u64 = 10 * 1024 * 1024;
+
+/// A renderable piece of an ACP `ContentBlock`.
+enum ChunkPart {
+    Text(String),
+    Attachment(AttachmentMeta),
+}
+
+/// Splits a content block into text or an attachment.
+///
+/// Text resources are folded into the body text; images, audio, resource links
+/// and embedded blobs become attachments so the UI can render them without
+/// losing the payload.
+fn chunk_part(block: &ContentBlock) -> Option<ChunkPart> {
+    match block {
+        ContentBlock::Text(text) => Some(ChunkPart::Text(text.text.clone())),
+        ContentBlock::Image(image) => Some(ChunkPart::Attachment(inline_attachment(
+            "image",
+            &image.mime_type,
+            &image.data,
+            image.uri.as_deref(),
+        ))),
+        ContentBlock::Audio(audio) => Some(ChunkPart::Attachment(inline_attachment(
+            "audio",
+            &audio.mime_type,
+            &audio.data,
+            None,
+        ))),
+        ContentBlock::ResourceLink(link) => Some(ChunkPart::Attachment(AttachmentMeta {
+            file_name: if link.name.is_empty() {
+                file_name_from_uri(&link.uri).unwrap_or_default()
+            } else {
+                link.name.clone()
+            },
+            mime_type: link
+                .mime_type
+                .clone()
+                .unwrap_or_else(|| "application/octet-stream".to_owned()),
+            size_bytes: link.size.unwrap_or(0).max(0) as u64,
+            local_path: file_path_from_uri(&link.uri),
+            data_b64: None,
+        })),
+        ContentBlock::Resource(resource) => match &resource.resource {
+            agent_client_protocol::v1::schema::EmbeddedResourceResource::TextResourceContents(
+                text,
+            ) => Some(ChunkPart::Text(text.text.clone())),
+            agent_client_protocol::v1::schema::EmbeddedResourceResource::BlobResourceContents(
+                blob,
+            ) => Some(ChunkPart::Attachment(inline_attachment(
+                "resource",
+                blob.mime_type
+                    .as_deref()
+                    .unwrap_or("application/octet-stream"),
+                &blob.blob,
+                Some(&blob.uri),
+            ))),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Builds attachment metadata for base64 inline content.
+fn inline_attachment(
+    default_name: &str,
+    mime_type: &str,
+    data: &str,
+    uri: Option<&str>,
+) -> AttachmentMeta {
+    let size_bytes = base64_decoded_len(data);
+    let file_name = uri
+        .and_then(file_name_from_uri)
+        .unwrap_or_else(|| format!("{default_name}.{}", extension_for_mime(mime_type)));
+    let inline = size_bytes <= MAX_INLINE_ATTACHMENT_BYTES;
+    if !inline {
+        tracing::warn!(
+            mime_type,
+            size_bytes,
+            "agent attachment exceeds the inline limit; keeping metadata only"
+        );
+    }
+    AttachmentMeta {
+        file_name,
+        mime_type: mime_type.to_owned(),
+        size_bytes,
+        local_path: uri.and_then(file_path_from_uri),
+        data_b64: inline.then(|| data.to_owned()),
+    }
+}
+
+/// Size of standard base64 data without decoding it.
+fn base64_decoded_len(data: &str) -> u64 {
+    let padding = data.bytes().rev().take_while(|byte| *byte == b'=').count() as u64;
+    ((data.len() as u64).saturating_mul(3) / 4).saturating_sub(padding)
+}
+
+/// Last path segment of a `file:` URI (or any URI).
+fn file_name_from_uri(uri: &str) -> Option<String> {
+    let path = uri.strip_prefix("file://").unwrap_or(uri);
+    path.rsplit(['/', '\\'])
+        .next()
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+}
+
+/// Node-local path of a `file:` URI.
+fn file_path_from_uri(uri: &str) -> Option<String> {
+    let path = uri.strip_prefix("file://")?;
+    #[cfg(windows)]
+    let path = path.strip_prefix('/').unwrap_or(path);
+    Some(path.to_owned())
+}
+
+/// File extension for the MIME types agents commonly emit.
+fn extension_for_mime(mime_type: &str) -> &'static str {
+    match mime_type {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/svg+xml" => "svg",
+        "audio/wav" | "audio/x-wav" => "wav",
+        "audio/mpeg" => "mp3",
+        "audio/ogg" => "ogg",
+        "audio/webm" => "webm",
+        _ => "bin",
+    }
+}
+
 /// Accumulates streaming chunks per session scope (parent or subagent).
 ///
 /// Only completion events are persisted (docs/01 §2.3), and they consume a
@@ -102,12 +237,21 @@ pub(super) fn file_uri(path: &str) -> String {
 /// reasoning would be recorded after the answer it preceded. The scope is part
 /// of the key so concurrently running subagents do not finalize each other's
 /// streams.
+/// One stream (answer, thought or replayed user message) being accumulated.
+#[derive(Debug, Default)]
+pub(super) struct PendingStream {
+    pub(super) id: String,
+    pub(super) text: String,
+    /// Non-text blocks that arrived inside the stream (images, resources, ...).
+    pub(super) attachments: Vec<AttachmentMeta>,
+}
+
 #[derive(Debug, Default)]
 pub(super) struct StreamingAccumulator {
-    pub(super) messages: BTreeMap<Option<String>, (String, String)>,
-    pub(super) thoughts: BTreeMap<Option<String>, (String, String)>,
+    pub(super) messages: BTreeMap<Option<String>, PendingStream>,
+    pub(super) thoughts: BTreeMap<Option<String>, PendingStream>,
     /// Replayed user messages (import only; empty during live turns).
-    pub(super) user_messages: BTreeMap<Option<String>, (String, String)>,
+    pub(super) user_messages: BTreeMap<Option<String>, PendingStream>,
     /// Sender / recipient of a session message, keyed by message ID (used to
     /// attach direction to chunks that arrive after the upsert).
     pub(super) session_messages: BTreeMap<String, (String, String)>,
@@ -127,11 +271,11 @@ impl StreamingAccumulator {
     ) -> Option<UnifiedEventPayload> {
         self.user_messages
             .remove(subagent_id)
-            .map(|(message_id, text)| UnifiedEventPayload::UserMessage {
-                text,
-                attachments: Vec::new(),
+            .map(|stream| UnifiedEventPayload::UserMessage {
+                text: stream.text,
+                attachments: stream.attachments,
                 client_source: fxg_protocol::common::ClientSource::Import,
-                agent_message_id: Some(message_id),
+                agent_message_id: Some(stream.id),
             })
     }
 
@@ -139,28 +283,30 @@ impl StreamingAccumulator {
         &mut self,
         subagent_id: &Option<String>,
     ) -> Option<UnifiedEventPayload> {
-        self.messages.remove(subagent_id).map(|(message_id, text)| {
-            UnifiedEventPayload::AgentMessage {
-                message_id,
-                text,
+        self.messages
+            .remove(subagent_id)
+            .map(|stream| UnifiedEventPayload::AgentMessage {
+                message_id: stream.id,
+                text: stream.text,
+                attachments: stream.attachments,
                 is_complete: true,
                 subagent_id: subagent_id.clone(),
-            }
-        })
+            })
     }
 
     pub(super) fn finish_thought(
         &mut self,
         subagent_id: &Option<String>,
     ) -> Option<UnifiedEventPayload> {
-        self.thoughts.remove(subagent_id).map(|(thought_id, text)| {
-            UnifiedEventPayload::AgentThought {
-                thought_id,
-                text,
+        self.thoughts
+            .remove(subagent_id)
+            .map(|stream| UnifiedEventPayload::AgentThought {
+                thought_id: stream.id,
+                text: stream.text,
+                attachments: stream.attachments,
                 is_complete: true,
                 subagent_id: subagent_id.clone(),
-            }
-        })
+            })
     }
 
     /// Appends a message chunk. Returns completion events for streams that
@@ -179,16 +325,37 @@ impl StreamingAccumulator {
         if self
             .messages
             .get(&subagent_id)
-            .is_some_and(|(id, _)| *id != message_id)
+            .is_some_and(|stream| stream.id != message_id)
         {
             out.extend(self.finish_message(&subagent_id));
         }
         match self.messages.get_mut(&subagent_id) {
-            Some((_, text)) => text.push_str(delta),
+            Some(stream) => stream.text.push_str(delta),
             None => {
-                self.messages
-                    .insert(subagent_id, (message_id, delta.to_owned()));
+                self.messages.insert(
+                    subagent_id,
+                    PendingStream {
+                        id: message_id,
+                        text: delta.to_owned(),
+                        attachments: Vec::new(),
+                    },
+                );
             }
+        }
+        out
+    }
+
+    /// Appends a non-text block to the message stream, creating the stream when
+    /// the block arrived without any text (an image-only answer).
+    pub(super) fn push_message_attachment(
+        &mut self,
+        subagent_id: Option<String>,
+        message_id: String,
+        attachment: AttachmentMeta,
+    ) -> Vec<UnifiedEventPayload> {
+        let out = self.push_message(subagent_id.clone(), message_id, "");
+        if let Some(stream) = self.messages.get_mut(&subagent_id) {
+            stream.attachments.push(attachment);
         }
         out
     }
@@ -207,16 +374,36 @@ impl StreamingAccumulator {
         if self
             .thoughts
             .get(&subagent_id)
-            .is_some_and(|(id, _)| *id != thought_id)
+            .is_some_and(|stream| stream.id != thought_id)
         {
             out.extend(self.finish_thought(&subagent_id));
         }
         match self.thoughts.get_mut(&subagent_id) {
-            Some((_, text)) => text.push_str(delta),
+            Some(stream) => stream.text.push_str(delta),
             None => {
-                self.thoughts
-                    .insert(subagent_id, (thought_id, delta.to_owned()));
+                self.thoughts.insert(
+                    subagent_id,
+                    PendingStream {
+                        id: thought_id,
+                        text: delta.to_owned(),
+                        attachments: Vec::new(),
+                    },
+                );
             }
+        }
+        out
+    }
+
+    /// Appends a non-text block to the reasoning stream.
+    pub(super) fn push_thought_attachment(
+        &mut self,
+        subagent_id: Option<String>,
+        thought_id: String,
+        attachment: AttachmentMeta,
+    ) -> Vec<UnifiedEventPayload> {
+        let out = self.push_thought(subagent_id.clone(), thought_id, "");
+        if let Some(stream) = self.thoughts.get_mut(&subagent_id) {
+            stream.attachments.push(attachment);
         }
         out
     }
@@ -237,16 +424,36 @@ impl StreamingAccumulator {
         if self
             .user_messages
             .get(&subagent_id)
-            .is_some_and(|(id, _)| *id != message_id)
+            .is_some_and(|stream| stream.id != message_id)
         {
             out.extend(self.finish_user_message(&subagent_id));
         }
         match self.user_messages.get_mut(&subagent_id) {
-            Some((_, text)) => text.push_str(delta),
+            Some(stream) => stream.text.push_str(delta),
             None => {
-                self.user_messages
-                    .insert(subagent_id, (message_id, delta.to_owned()));
+                self.user_messages.insert(
+                    subagent_id,
+                    PendingStream {
+                        id: message_id,
+                        text: delta.to_owned(),
+                        attachments: Vec::new(),
+                    },
+                );
             }
+        }
+        out
+    }
+
+    /// Appends a non-text block to a replayed user message.
+    pub(super) fn push_user_message_attachment(
+        &mut self,
+        subagent_id: Option<String>,
+        message_id: String,
+        attachment: AttachmentMeta,
+    ) -> Vec<UnifiedEventPayload> {
+        let out = self.push_user_message(subagent_id.clone(), message_id, "");
+        if let Some(stream) = self.user_messages.get_mut(&subagent_id) {
+            stream.attachments.push(attachment);
         }
         out
     }
@@ -322,14 +529,27 @@ pub(super) fn map_session_update_with_mode(
             ..
         }) => {
             if mode == UpdateMode::Import {
-                if let ContentBlock::Text(TextContent { text, .. }) = content {
-                    let message_id = message_id
-                        .map(|id| id.to_string())
-                        .unwrap_or_else(|| "acp-user-message".to_owned());
-                    for finished in accumulator.push_user_message(scope.clone(), message_id, &text)
-                    {
-                        events.push(DriverEvent::Event(finished));
+                let message_id = message_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| "acp-user-message".to_owned());
+                match chunk_part(&content) {
+                    Some(ChunkPart::Text(text)) => {
+                        for finished in
+                            accumulator.push_user_message(scope.clone(), message_id, &text)
+                        {
+                            events.push(DriverEvent::Event(finished));
+                        }
                     }
+                    Some(ChunkPart::Attachment(attachment)) => {
+                        for finished in accumulator.push_user_message_attachment(
+                            scope.clone(),
+                            message_id,
+                            attachment,
+                        ) {
+                            events.push(DriverEvent::Event(finished));
+                        }
+                    }
+                    None => tracing::trace!("ignoring unsupported user message content"),
                 }
             } else {
                 // User messages are already recorded by the manager as `UserMessage`.
@@ -347,18 +567,30 @@ pub(super) fn map_session_update_with_mode(
             message_id,
             ..
         }) => {
-            if let ContentBlock::Text(TextContent { text, .. }) = content {
-                let message_id = message_id
-                    .map(|id| id.to_string())
-                    .unwrap_or_else(|| "acp-message".to_owned());
-                for finished in accumulator.push_message(scope.clone(), message_id.clone(), &text) {
-                    events.push(DriverEvent::Event(finished));
+            let message_id = message_id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "acp-message".to_owned());
+            match chunk_part(&content) {
+                Some(ChunkPart::Text(text)) => {
+                    for finished in
+                        accumulator.push_message(scope.clone(), message_id.clone(), &text)
+                    {
+                        events.push(DriverEvent::Event(finished));
+                    }
+                    events.push(DriverEvent::Delta(StreamDeltaPayload::AgentMessageDelta {
+                        message_id,
+                        text_delta: text,
+                        subagent_id: scope,
+                    }));
                 }
-                events.push(DriverEvent::Delta(StreamDeltaPayload::AgentMessageDelta {
-                    message_id,
-                    text_delta: text,
-                    subagent_id: scope,
-                }));
+                Some(ChunkPart::Attachment(attachment)) => {
+                    for finished in
+                        accumulator.push_message_attachment(scope.clone(), message_id, attachment)
+                    {
+                        events.push(DriverEvent::Event(finished));
+                    }
+                }
+                None => tracing::trace!("ignoring unsupported agent message content"),
             }
         }
         SessionUpdate::AgentThoughtChunk(ContentChunk {
@@ -366,18 +598,30 @@ pub(super) fn map_session_update_with_mode(
             message_id,
             ..
         }) => {
-            if let ContentBlock::Text(TextContent { text, .. }) = content {
-                let thought_id = message_id
-                    .map(|id| id.to_string())
-                    .unwrap_or_else(|| "acp-thought".to_owned());
-                for finished in accumulator.push_thought(scope.clone(), thought_id.clone(), &text) {
-                    events.push(DriverEvent::Event(finished));
+            let thought_id = message_id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "acp-thought".to_owned());
+            match chunk_part(&content) {
+                Some(ChunkPart::Text(text)) => {
+                    for finished in
+                        accumulator.push_thought(scope.clone(), thought_id.clone(), &text)
+                    {
+                        events.push(DriverEvent::Event(finished));
+                    }
+                    events.push(DriverEvent::Delta(StreamDeltaPayload::AgentThoughtDelta {
+                        thought_id,
+                        text_delta: text,
+                        subagent_id: scope,
+                    }));
                 }
-                events.push(DriverEvent::Delta(StreamDeltaPayload::AgentThoughtDelta {
-                    thought_id,
-                    text_delta: text,
-                    subagent_id: scope,
-                }));
+                Some(ChunkPart::Attachment(attachment)) => {
+                    for finished in
+                        accumulator.push_thought_attachment(scope.clone(), thought_id, attachment)
+                    {
+                        events.push(DriverEvent::Event(finished));
+                    }
+                }
+                None => tracing::trace!("ignoring unsupported agent thought content"),
             }
         }
         SessionUpdate::ToolCall(tool_call) => {

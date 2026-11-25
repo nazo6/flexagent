@@ -3,6 +3,7 @@
   import PermissionCard from "#lib/components/PermissionCard.svelte";
   import MarkdownText from "#lib/components/MarkdownText.svelte";
   import ActivityBlock from "./ActivityBlock.svelte";
+  import MessageAttachments from "./MessageAttachments.svelte";
   import ForkOrigin from "./ForkOrigin.svelte";
   import MessageActions from "./MessageActions.svelte";
   import Self from "./ChatTimeline.svelte";
@@ -27,7 +28,6 @@
   import ClockIcon from "@lucide/svelte/icons/clock";
   import ListChecksIcon from "@lucide/svelte/icons/list-checks";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
-  import PaperclipIcon from "@lucide/svelte/icons/paperclip";
   import SquareTerminalIcon from "@lucide/svelte/icons/square-terminal";
 
   let {
@@ -248,26 +248,7 @@
           <div
             class="bg-user-message text-foreground max-w-[82%] rounded-xl rounded-br-sm px-4 py-2.5"
           >
-            {#if item.attachments.length > 0}
-              <div class="mb-1 flex flex-wrap gap-1.5">
-                {#each item.attachments as attachment, index (`${index}:${attachment.file_name}:${attachment.local_path ?? ""}`)}
-                  {#if attachment.data_b64 && attachment.mime_type.startsWith("image/")}
-                    <img
-                      src={`data:${attachment.mime_type};base64,${attachment.data_b64}`}
-                      alt={attachment.file_name}
-                      class="max-h-40 rounded-md object-contain"
-                    />
-                  {:else}
-                    <span
-                      class="bg-background/60 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]"
-                    >
-                      <PaperclipIcon class="size-2.5" />
-                      {attachment.file_name}
-                    </span>
-                  {/if}
-                {/each}
-              </div>
-            {/if}
+            <MessageAttachments attachments={item.attachments} inBubble />
             <p class="text-sm whitespace-pre-wrap">{item.text}</p>
           </div>
         </div>
@@ -294,6 +275,7 @@
             <BotIcon class="size-3" />
           </span>
           <div class="min-w-0 max-w-[92%] flex-1">
+            <MessageAttachments attachments={item.attachments} />
             <MarkdownText
               text={item.text}
               streaming={item.streaming}

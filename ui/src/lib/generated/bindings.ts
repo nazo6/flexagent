@@ -2523,6 +2523,8 @@ export type UnifiedEventPayload =
 	message_id: string,
 	/**  Body text */
 	text: string,
+	/**  Non-text content blocks (images, audio, resources) from the agent. */
+	attachments?: AttachmentMeta[],
 	/**  Whether it is complete (only `true` is persisted) */
 	is_complete: boolean,
 	/**  Subagent that produced this message (`None` = the parent session) */
@@ -2538,6 +2540,8 @@ export type UnifiedEventPayload =
 	thought_id: string,
 	/**  Body text */
 	text: string,
+	/**  Non-text content blocks (images, audio, resources) from the agent. */
+	attachments?: AttachmentMeta[],
 	/**  Whether it is complete */
 	is_complete: boolean,
 	/**  Subagent that produced this thought (`None` = the parent session) */

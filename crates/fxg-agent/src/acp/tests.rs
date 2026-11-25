@@ -28,6 +28,38 @@ fn thought_chunk(text: &str, message_id: Option<&str>) -> SessionUpdate {
     SessionUpdate::AgentThoughtChunk(serde_json::from_value(value).expect("content chunk fixture"))
 }
 
+fn image_chunk(mime_type: &str, data: &str, message_id: Option<&str>) -> SessionUpdate {
+    let mut value = serde_json::json!({
+        "content": { "type": "image", "data": data, "mimeType": mime_type },
+    });
+    if let Some(id) = message_id {
+        value["messageId"] = serde_json::Value::String(id.to_owned());
+    }
+    SessionUpdate::AgentMessageChunk(serde_json::from_value(value).expect("image chunk fixture"))
+}
+
+fn resource_link_chunk(
+    name: &str,
+    uri: &str,
+    mime_type: &str,
+    message_id: Option<&str>,
+) -> SessionUpdate {
+    let mut value = serde_json::json!({
+        "content": {
+            "type": "resource_link",
+            "name": name,
+            "uri": uri,
+            "mimeType": mime_type,
+        },
+    });
+    if let Some(id) = message_id {
+        value["messageId"] = serde_json::Value::String(id.to_owned());
+    }
+    SessionUpdate::AgentMessageChunk(
+        serde_json::from_value(value).expect("resource link chunk fixture"),
+    )
+}
+
 fn user_chunk(text: &str, message_id: Option<&str>) -> SessionUpdate {
     let mut value = serde_json::json!({
         "content": { "type": "text", "text": text },
@@ -439,11 +471,19 @@ fn finish_all_emits_thought_before_message() {
     let mut acc = StreamingAccumulator {
         messages: std::collections::BTreeMap::from([(
             None,
-            ("m1".to_owned(), "answer".to_owned()),
+            PendingStream {
+                id: "m1".to_owned(),
+                text: "answer".to_owned(),
+                attachments: Vec::new(),
+            },
         )]),
         thoughts: std::collections::BTreeMap::from([(
             None,
-            ("t1".to_owned(), "thinking".to_owned()),
+            PendingStream {
+                id: "t1".to_owned(),
+                text: "thinking".to_owned(),
+                attachments: Vec::new(),
+            },
         )]),
         ..Default::default()
     };
@@ -542,6 +582,105 @@ fn thought_and_message_are_completed_before_tool_call_and_plan() {
         &events[1],
         DriverEvent::Event(UnifiedEventPayload::PlanUpdate { .. })
     ));
+}
+
+#[test]
+fn image_chunks_are_kept_as_message_attachments() {
+    let mut acc = StreamingAccumulator::default();
+    let mut caps = SessionCapabilitiesState::default();
+
+    let events = map_session_update(
+        image_chunk("image/png", "aGk=", Some("m1")),
+        None,
+        &mut acc,
+        &mut caps,
+    );
+    assert!(
+        events.is_empty(),
+        "an image-only chunk has no text delta to stream"
+    );
+
+    let finished = acc.finish_all();
+    let attachments = finished
+        .iter()
+        .find_map(|payload| match payload {
+            UnifiedEventPayload::AgentMessage {
+                text, attachments, ..
+            } => {
+                assert_eq!(text, "");
+                Some(attachments)
+            }
+            _ => None,
+        })
+        .expect("image-only message completes");
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].file_name, "image.png");
+    assert_eq!(attachments[0].mime_type, "image/png");
+    assert_eq!(attachments[0].size_bytes, 2);
+    assert_eq!(attachments[0].data_b64.as_deref(), Some("aGk="));
+}
+
+#[test]
+fn attachments_accumulate_alongside_message_text() {
+    let mut acc = StreamingAccumulator::default();
+    let mut caps = SessionCapabilitiesState::default();
+
+    map_session_update(
+        image_chunk("image/jpeg", "aGk=", Some("m1")),
+        None,
+        &mut acc,
+        &mut caps,
+    );
+    map_session_update(
+        text_chunk("see above", Some("m1")),
+        None,
+        &mut acc,
+        &mut caps,
+    );
+
+    let finished = acc.finish_all();
+    let message = finished
+        .iter()
+        .find_map(|payload| match payload {
+            UnifiedEventPayload::AgentMessage {
+                text, attachments, ..
+            } => Some((text, attachments)),
+            _ => None,
+        })
+        .expect("message completes");
+    assert_eq!(message.0, "see above");
+    assert_eq!(message.1.len(), 1);
+    assert_eq!(message.1[0].mime_type, "image/jpeg");
+}
+
+#[test]
+fn resource_links_keep_the_node_local_path() {
+    let mut acc = StreamingAccumulator::default();
+    let mut caps = SessionCapabilitiesState::default();
+
+    map_session_update(
+        resource_link_chunk(
+            "notes.md",
+            "file:///repo/notes.md",
+            "text/markdown",
+            Some("m1"),
+        ),
+        None,
+        &mut acc,
+        &mut caps,
+    );
+    let finished = acc.finish_all();
+    let attachments = finished
+        .iter()
+        .find_map(|payload| match payload {
+            UnifiedEventPayload::AgentMessage { attachments, .. } => Some(attachments),
+            _ => None,
+        })
+        .expect("resource link message completes");
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].file_name, "notes.md");
+    assert_eq!(attachments[0].local_path.as_deref(), Some("/repo/notes.md"));
+    assert!(attachments[0].data_b64.is_none());
 }
 
 #[test]

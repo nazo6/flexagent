@@ -31,8 +31,20 @@ pub fn classify_payload(payload: &UnifiedEventPayload) -> (EventType, Option<Str
             parts.extend(attachments.iter().map(|a| a.file_name.clone()));
             join_parts(parts)
         }
-        UnifiedEventPayload::AgentMessage { text, .. } => join_parts(vec![text.clone()]),
-        UnifiedEventPayload::AgentThought { text, .. } => join_parts(vec![text.clone()]),
+        UnifiedEventPayload::AgentMessage {
+            text, attachments, ..
+        } => {
+            let mut parts = vec![text.clone()];
+            parts.extend(attachments.iter().map(|a| a.file_name.clone()));
+            join_parts(parts)
+        }
+        UnifiedEventPayload::AgentThought {
+            text, attachments, ..
+        } => {
+            let mut parts = vec![text.clone()];
+            parts.extend(attachments.iter().map(|a| a.file_name.clone()));
+            join_parts(parts)
+        }
         UnifiedEventPayload::SubagentMessage { text, .. } => join_parts(vec![text.clone()]),
         UnifiedEventPayload::ToolCall {
             title,
@@ -279,6 +291,7 @@ mod tests {
         let payload = UnifiedEventPayload::AgentMessage {
             message_id: "m".to_owned(),
             text: long,
+            attachments: Vec::new(),
             is_complete: true,
             subagent_id: None,
         };
@@ -292,6 +305,7 @@ mod tests {
         let payload = UnifiedEventPayload::AgentMessage {
             message_id: "m".to_owned(),
             text: "   ".to_owned(),
+            attachments: Vec::new(),
             is_complete: true,
             subagent_id: None,
         };

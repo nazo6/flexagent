@@ -425,6 +425,7 @@ mod tests {
                 UnifiedEventPayload::AgentMessage {
                     message_id: "m1".to_owned(),
                     text: "partial".to_owned(),
+                    attachments: Vec::new(),
                     is_complete: false,
                     subagent_id: None,
                 },
@@ -459,6 +460,7 @@ mod tests {
                 UnifiedEventPayload::AgentMessage {
                     message_id: "m1".to_owned(),
                     text: "complete".to_owned(),
+                    attachments: Vec::new(),
                     is_complete: true,
                     subagent_id: None,
                 },

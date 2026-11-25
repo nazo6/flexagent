@@ -153,6 +153,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                              Load earlier messages to walk back through the pages.",
                             event_index / 2 + 1
                         ),
+                        attachments: Vec::new(),
                         is_complete: true,
                         subagent_id: None,
                     }

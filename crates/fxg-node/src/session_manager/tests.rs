@@ -1207,6 +1207,7 @@ async fn fork_uses_native_session_fork() {
             UnifiedEventPayload::AgentMessage {
                 message_id: "parent-message".to_owned(),
                 text: "parent answer".to_owned(),
+                attachments: Vec::new(),
                 is_complete: true,
                 subagent_id: None,
             },
@@ -1966,6 +1967,7 @@ async fn import_session_flushes_replayed_events_before_returning() {
         UnifiedEventPayload::AgentMessage {
             message_id: "replay-1".to_owned(),
             text: "earlier answer".to_owned(),
+            attachments: Vec::new(),
             is_complete: true,
             subagent_id: None,
         },

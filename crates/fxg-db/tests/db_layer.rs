@@ -973,6 +973,7 @@ async fn fts_search_matches_text_and_excludes_binary_events() {
     let message = fixture.event(UnifiedEventPayload::AgentMessage {
         message_id: "m-1".to_owned(),
         text: "Fixed the OpenCode2Driver connection".to_owned(),
+        attachments: Vec::new(),
         is_complete: true,
         subagent_id: None,
     });
@@ -1047,6 +1048,7 @@ async fn fts_index_stays_in_sync_on_regenerate_and_delete() {
     let message = fixture.event(UnifiedEventPayload::AgentMessage {
         message_id: "m-1".to_owned(),
         text: "Applied the migration".to_owned(),
+        attachments: Vec::new(),
         is_complete: true,
         subagent_id: None,
     });
@@ -2077,6 +2079,7 @@ async fn copy_fork_conversation_mirrors_conversation_events_only() {
     let answer = source.event(UnifiedEventPayload::AgentMessage {
         message_id: "parent-message".to_owned(),
         text: "parent answer".to_owned(),
+        attachments: Vec::new(),
         is_complete: true,
         subagent_id: None,
     });
@@ -2262,6 +2265,7 @@ async fn non_persistable_events_are_rejected_on_batch_append() {
     let partial = fixture.event(UnifiedEventPayload::AgentMessage {
         message_id: "m1".to_owned(),
         text: "partial".to_owned(),
+        attachments: Vec::new(),
         is_complete: false,
         subagent_id: None,
     });
@@ -2291,6 +2295,7 @@ async fn non_persistable_events_are_rejected_on_batch_append() {
     complete.payload = UnifiedEventPayload::AgentMessage {
         message_id: "m1".to_owned(),
         text: "complete".to_owned(),
+        attachments: Vec::new(),
         is_complete: true,
         subagent_id: None,
     };

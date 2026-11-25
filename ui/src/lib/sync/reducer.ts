@@ -113,6 +113,8 @@ export type TimelineItem =
       seq: number;
       createdAt: number;
       text: string;
+      /** Non-text content blocks received with the message. */
+      attachments: AttachmentMeta[];
       streaming: boolean;
       subagentId: string | null;
     }
@@ -122,6 +124,8 @@ export type TimelineItem =
       seq: number;
       createdAt: number;
       text: string;
+      /** Non-text content blocks received with the reasoning. */
+      attachments: AttachmentMeta[];
       streaming: boolean;
       /** Client-observed first-delta time (null when replayed from history). */
       startedAt: number | null;
@@ -443,6 +447,7 @@ function addAgentMessage(
     key: `agent:${payload.data.message_id}:${base.seq}`,
     ...base,
     text: payload.data.text,
+    attachments: payload.data.attachments ?? [],
     streaming: !payload.data.is_complete,
     subagentId: payload.data.subagent_id ?? null,
   });
@@ -458,6 +463,7 @@ function addAgentThought(
     key: `thought:${payload.data.thought_id}:${base.seq}`,
     ...base,
     text: payload.data.text,
+    attachments: payload.data.attachments ?? [],
     streaming: !payload.data.is_complete,
     startedAt: builder.thoughtTimes?.get(payload.data.thought_id)?.startedAt ?? null,
     endedAt: builder.thoughtTimes?.get(payload.data.thought_id)?.endedAt ?? null,
@@ -797,6 +803,7 @@ function appendEphemeralItems(builder: TimelineBuilder, sources: TimelineSources
           seq: nextStreamSeq(),
           createdAt: items.at(-1)?.createdAt ?? 0,
           text,
+          attachments: [],
           streaming: true,
           subagentId: sources.subagentByMessage?.get(id) ?? null,
         });
@@ -812,6 +819,7 @@ function appendEphemeralItems(builder: TimelineBuilder, sources: TimelineSources
           seq: nextStreamSeq(),
           createdAt: items.at(-1)?.createdAt ?? 0,
           text,
+          attachments: [],
           streaming: true,
           startedAt: timing?.startedAt ?? null,
           endedAt: timing?.endedAt ?? null,

@@ -43,6 +43,7 @@ function message(text: string, subagentId: string | null = null): TimelineItem {
     seq: 3,
     createdAt: 0,
     text,
+    attachments: [],
     streaming: false,
     subagentId,
   };
@@ -85,6 +86,7 @@ function thought(text: string): TimelineItem {
     seq: 2,
     createdAt: 0,
     text,
+    attachments: [],
     streaming: false,
     startedAt: null,
     endedAt: null,

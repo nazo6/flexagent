@@ -8,6 +8,7 @@
    * stream does not push the rest of the conversation around.
    */
   import MarkdownText from "#lib/components/MarkdownText.svelte";
+  import MessageAttachments from "./MessageAttachments.svelte";
   import { m } from "#lib/paraglide/messages.js";
   import type { TimelineItem } from "#lib/sync/reducer.ts";
   import BrainIcon from "@lucide/svelte/icons/brain";
@@ -109,6 +110,7 @@
       bind:this={body}
       class="text-muted-foreground border-line mt-1.5 max-h-64 overflow-y-auto rounded-md border p-2.5 text-[13px] leading-relaxed"
     >
+      <MessageAttachments attachments={item.attachments} />
       <MarkdownText text={item.text} {streaming} />
     </div>
   {/if}

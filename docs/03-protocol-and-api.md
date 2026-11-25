@@ -62,7 +62,7 @@ Client ⇔ Hub / Local Node（HTTP / WebSocket）で共有する型を定義し�
 | `SessionPermissionPolicyChanged`             | 承認ポリシー変更。`sessions.permission_policy`。              |
 | `SessionAgentBound`                          | ACP セッション確立。`sessions.agent_session_id`。             |
 | `UserMessage`                                | ユーザーのプロンプト（添付・`client_source` を含む）。        |
-| `AgentMessage` / `AgentThought`              | エージェントの返答 / 思考。完成イベントだけを永続化。         |
+| `AgentMessage` / `AgentThought`              | エージェントの返答 / 思考。完成イベントだけを永続化し、画像などの非 Text ブロックは添付として同梱する。 |
 | `ToolCall`                                   | ツール呼び出しと Diff。同一 `tool_call_id` の追記で状態更新。 |
 | `PlanUpdate`                                 | 実行計画（ACP Plan）。                                        |
 | `PermissionRequest` / `PermissionResolved`   | 承認リクエストと解決。`permission_requests` の投影。          |

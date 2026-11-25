@@ -784,6 +784,7 @@ pub(super) fn map_event(
         "session.text.ended" => vec![DriverEvent::Event(UnifiedEventPayload::AgentMessage {
             message_id: text_of("assistantMessageID"),
             text: text_of("text"),
+            attachments: Vec::new(),
             is_complete: true,
             subagent_id: scope,
         })],
@@ -797,6 +798,7 @@ pub(super) fn map_event(
         "session.reasoning.ended" => vec![DriverEvent::Event(UnifiedEventPayload::AgentThought {
             thought_id: reasoning_id(data),
             text: text_of("text"),
+            attachments: Vec::new(),
             is_complete: true,
             subagent_id: scope,
         })],

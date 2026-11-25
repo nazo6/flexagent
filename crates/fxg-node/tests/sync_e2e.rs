@@ -345,6 +345,7 @@ async fn create_session_with_events(
     agent.emit(DriverEvent::Event(UnifiedEventPayload::AgentMessage {
         message_id: "m1".to_owned(),
         text: format!("pong {label}"),
+        attachments: Vec::new(),
         is_complete: true,
         subagent_id: None,
     }));
@@ -1845,6 +1846,7 @@ async fn seed_backlog(db: &Db, count: u64) -> String {
             payload: UnifiedEventPayload::AgentMessage {
                 message_id: format!("m-{seq}"),
                 text: format!("mock event {seq}"),
+                attachments: Vec::new(),
                 is_complete: true,
                 subagent_id: None,
             },

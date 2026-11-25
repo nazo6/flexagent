@@ -159,6 +159,9 @@ pub enum UnifiedEventPayload {
         message_id: String,
         /// Body text
         text: String,
+        /// Non-text content blocks (images, audio, resources) from the agent.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<AttachmentMeta>,
         /// Whether it is complete (only `true` is persisted)
         is_complete: bool,
         /// Subagent that produced this message (`None` = the parent session)
@@ -173,6 +176,9 @@ pub enum UnifiedEventPayload {
         thought_id: String,
         /// Body text
         text: String,
+        /// Non-text content blocks (images, audio, resources) from the agent.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<AttachmentMeta>,
         /// Whether it is complete
         is_complete: bool,
         /// Subagent that produced this thought (`None` = the parent session)
@@ -651,6 +657,7 @@ mod tests {
             !UnifiedEventPayload::AgentMessage {
                 message_id: "m".into(),
                 text: "partial".into(),
+                attachments: Vec::new(),
                 is_complete: false,
                 subagent_id: None,
             }
@@ -660,6 +667,7 @@ mod tests {
             UnifiedEventPayload::AgentMessage {
                 message_id: "m".into(),
                 text: "done".into(),
+                attachments: Vec::new(),
                 is_complete: true,
                 subagent_id: None,
             }
@@ -690,12 +698,14 @@ mod tests {
             UnifiedEventPayload::AgentMessage {
                 message_id: "m1".to_owned(),
                 text: "answer".to_owned(),
+                attachments: Vec::new(),
                 is_complete: true,
                 subagent_id: None,
             },
             UnifiedEventPayload::AgentThought {
                 thought_id: "t1".to_owned(),
                 text: "thinking".to_owned(),
+                attachments: Vec::new(),
                 is_complete: true,
                 subagent_id: None,
             },
@@ -793,6 +803,7 @@ mod tests {
         let message = UnifiedEventPayload::AgentMessage {
             message_id: "m1".to_owned(),
             text: "child output".to_owned(),
+            attachments: Vec::new(),
             is_complete: true,
             subagent_id: Some("child-1".to_owned()),
         };

@@ -53,6 +53,7 @@ pub(super) fn emit_history(runtime: &SessionRuntime, messages: &[Value]) {
                                 runtime.emit_event(UnifiedEventPayload::AgentMessage {
                                     message_id: format!("{message_id}:text:{index}"),
                                     text: text.to_owned(),
+                                    attachments: Vec::new(),
                                     is_complete: true,
                                     subagent_id: None,
                                 });
@@ -63,6 +64,7 @@ pub(super) fn emit_history(runtime: &SessionRuntime, messages: &[Value]) {
                                 runtime.emit_event(UnifiedEventPayload::AgentThought {
                                     thought_id: format!("{message_id}:reasoning:{index}"),
                                     text: text.to_owned(),
+                                    attachments: Vec::new(),
                                     is_complete: true,
                                     subagent_id: None,
                                 });
