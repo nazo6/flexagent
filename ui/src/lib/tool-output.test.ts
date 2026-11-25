@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseToolOutput, summarizeToolOutput } from "./tool-output.ts";
+import { parseToolOutput } from "./tool-output.ts";
 
 describe("parseToolOutput", () => {
   it("keeps plain text output", () => {
@@ -55,46 +55,5 @@ describe("parseToolOutput", () => {
       error: null,
       truncated: false,
     });
-  });
-});
-
-describe("summarizeToolOutput", () => {
-  it("previews the last line of successful output", () => {
-    const summary = summarizeToolOutput(
-      JSON.stringify({ metadata: { output: "Compiling\nFinished in 3.2s", exit: 0 } }),
-      "completed",
-    );
-    expect(summary.preview).toBe("Finished in 3.2s");
-    expect(summary.hiddenLineCount).toBe(1);
-    expect(summary.exitCode).toBe(0);
-  });
-
-  it("previews the first error line for failures", () => {
-    const summary = summarizeToolOutput(
-      JSON.stringify({
-        metadata: { output: "some output", exit: 1 },
-        error: "error: missing dependency\nmore detail",
-      }),
-      "failed",
-    );
-    expect(summary.preview).toBe("error: missing dependency");
-    expect(summary.hiddenLineCount).toBe(1);
-  });
-
-  it("treats a non-zero exit code as a failure", () => {
-    const summary = summarizeToolOutput(
-      JSON.stringify({ metadata: { output: "line one\nboom", exit: 2 } }),
-      "completed",
-    );
-    expect(summary.preview).toBe("line one");
-    expect(summary.exitCode).toBe(2);
-  });
-
-  it("treats a reported error as a failure", () => {
-    const summary = summarizeToolOutput(
-      JSON.stringify({ metadata: { output: "started\nmore" }, error: "boom\nstack" }),
-      "completed",
-    );
-    expect(summary.preview).toBe("boom");
   });
 });

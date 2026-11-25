@@ -4,11 +4,10 @@
   import { m } from "#lib/paraglide/messages.js";
   import { dock } from "#lib/stores/dock.svelte.ts";
   import type { TimelineItem } from "#lib/sync/reducer.ts";
-  import { summarizeToolOutput } from "#lib/tool-output.ts";
+  import { parseToolOutput } from "#lib/tool-output.ts";
   import { cn } from "#lib/utils.ts";
   import CircleCheckIcon from "@lucide/svelte/icons/circle-check";
   import CircleXIcon from "@lucide/svelte/icons/circle-x";
-  import CornerDownRightIcon from "@lucide/svelte/icons/corner-down-right";
   import FileSearchIcon from "@lucide/svelte/icons/file-search";
   import HammerIcon from "@lucide/svelte/icons/hammer";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
@@ -90,7 +89,7 @@
       {@const isExpanded = expandedDetails[tool.toolCallId]}
       {@const toolInfo = getToolInfo(tool)}
       {@const isTerminal = tool.toolKind === "execute"}
-      {@const result = isTerminal ? summarizeToolOutput(tool.rawOutput, tool.status) : null}
+      {@const result = isTerminal ? parseToolOutput(tool.rawOutput) : null}
       {@const hasRawOutput = tool.rawOutput !== null && tool.rawOutput !== ""}
       {@const terminalFailed =
         result !== null &&
@@ -109,7 +108,7 @@
           role="button"
           tabindex="0"
           class={cn(
-            "flex items-start justify-between gap-2 px-2.5 py-1 text-[12px] transition-colors",
+            "flex items-center justify-between gap-2 px-2.5 py-1 text-[12px] transition-colors",
             hasDetailContent ? "cursor-pointer hover:bg-accent/30" : "cursor-default",
           )}
           onclick={(e) => {
@@ -122,63 +121,41 @@
             }
           }}
         >
-          <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-            <div class="flex min-w-0 items-center gap-2">
-              <!-- Icon -->
-              {#if tool.toolKind === "read"}
-                <FileSearchIcon class="text-muted-foreground size-3 shrink-0" />
-              {:else if tool.toolKind === "edit"}
-                <PencilIcon class="text-muted-foreground size-3 shrink-0" />
-              {:else if tool.toolKind === "execute"}
-                <SquareTerminalIcon class="text-muted-foreground size-3 shrink-0" />
-              {:else if tool.toolKind === "search"}
-                <SearchIcon class="text-muted-foreground size-3 shrink-0" />
-              {:else}
-                <HammerIcon class="text-muted-foreground size-3 shrink-0" />
-              {/if}
+          <div class="flex min-w-0 flex-1 items-center gap-2">
+            <!-- Icon -->
+            {#if tool.toolKind === "read"}
+              <FileSearchIcon class="text-muted-foreground size-3 shrink-0" />
+            {:else if tool.toolKind === "edit"}
+              <PencilIcon class="text-muted-foreground size-3 shrink-0" />
+            {:else if tool.toolKind === "execute"}
+              <SquareTerminalIcon class="text-muted-foreground size-3 shrink-0" />
+            {:else if tool.toolKind === "search"}
+              <SearchIcon class="text-muted-foreground size-3 shrink-0" />
+            {:else}
+              <HammerIcon class="text-muted-foreground size-3 shrink-0" />
+            {/if}
 
-              <!-- Tool name badge (Read, Edit, Terminal, Search, etc.) -->
-              <span
-                class="rounded bg-muted px-1.5 py-0.2 font-mono text-[11px] font-semibold text-foreground/85 shrink-0 border border-border/60"
-              >
-                {toolInfo.name}
+            <!-- Tool name badge (Read, Edit, Terminal, Search, etc.) -->
+            <span
+              class="rounded bg-muted px-1.5 py-0.2 font-mono text-[11px] font-semibold text-foreground/85 shrink-0 border border-border/60"
+            >
+              {toolInfo.name}
+            </span>
+
+            <!-- Command / arguments / target paths -->
+            <span class="truncate font-mono text-[11px] text-foreground/90">
+              {toolInfo.detail}
+            </span>
+
+            {#if tool.locations.length > 0 && !toolInfo.detail.includes(tool.locations[0])}
+              <span class="text-muted-foreground truncate font-mono text-[11px]">
+                ({tool.locations.join(", ")})
               </span>
-
-              <!-- Command / arguments / target paths -->
-              <span class="truncate font-mono text-[11px] text-foreground/90">
-                {toolInfo.detail}
-              </span>
-
-              {#if tool.locations.length > 0 && !toolInfo.detail.includes(tool.locations[0])}
-                <span class="text-muted-foreground truncate font-mono text-[11px]">
-                  ({tool.locations.join(", ")})
-                </span>
-              {/if}
-            </div>
-
-            <!-- Terminal result preview (visible without expanding the detail) -->
-            {#if result !== null && result.preview !== ""}
-              <div class="flex min-w-0 items-center gap-1.5 pl-5">
-                <CornerDownRightIcon class="text-muted-foreground size-3 shrink-0" />
-                <span
-                  class={cn(
-                    "truncate font-mono text-[11px]",
-                    terminalFailed ? "text-destructive/85" : "text-muted-foreground",
-                  )}
-                >
-                  {result.preview}
-                </span>
-                {#if result.hiddenLineCount > 0}
-                  <span class="text-muted-foreground/70 shrink-0 text-[10px]">
-                    +{result.hiddenLineCount}
-                  </span>
-                {/if}
-              </div>
             {/if}
           </div>
 
           <!-- Status & expand toggle -->
-          <div class="mt-0.5 ml-1.5 flex shrink-0 items-center gap-1.5">
+          <div class="ml-1.5 flex shrink-0 items-center gap-1.5">
             {#if tool.terminalId}
               <a
                 href={`#terminal-${tool.terminalId}`}

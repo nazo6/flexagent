@@ -17,13 +17,6 @@ export interface ToolOutputView {
   truncated: boolean;
 }
 
-export interface ToolResultSummary extends ToolOutputView {
-  /** Line shown in the collapsed row. */
-  preview: string;
-  /** Number of lines not represented by `preview`. */
-  hiddenLineCount: number;
-}
-
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -87,29 +80,5 @@ export function parseToolOutput(rawOutput: string | null): ToolOutputView {
     exitCode: pickNumber(metadata, ["exit", "exitCode", "exit_code", "code"]),
     error: pickString(root, ["error"]) ?? pickString(metadata, ["error"]),
     truncated: metadata.truncated === true || root.truncated === true,
-  };
-}
-
-/**
- * Builds the one-line result summary shown without expanding the tool call.
- *
- * Failures lead with the first line (the error), successes lead with the last
- * line because CLI tools usually print their result there.
- */
-export function summarizeToolOutput(rawOutput: string | null, status: string): ToolResultSummary {
-  const view = parseToolOutput(rawOutput);
-  const failed =
-    status === "failed" || view.error !== null || (view.exitCode !== null && view.exitCode !== 0);
-  const text = view.error ?? view.text;
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line !== "");
-  const preview = failed ? (lines[0] ?? "") : (lines.at(-1) ?? "");
-
-  return {
-    ...view,
-    preview,
-    hiddenLineCount: Math.max(0, lines.length - 1),
   };
 }
