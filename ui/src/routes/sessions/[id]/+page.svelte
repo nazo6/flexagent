@@ -15,6 +15,7 @@
   import DockHost from "#lib/components/dock/DockHost.svelte";
   import DockRail from "#lib/components/dock/DockRail.svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
+  import { Skeleton } from "#lib/components/ui/skeleton/index.ts";
   import { commandErrorMessage } from "#lib/api/client.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { forkScopeOf } from "#lib/fork-scope.ts";
@@ -692,21 +693,36 @@
                 </Button>
               </div>
             {/if}
-            <ChatTimeline
-              {sessionId}
-              {items}
-              status={currentStatus}
-              {forkScope}
-              forkFrom={session?.parent_session_id ?? null}
-              {forkFromTitle}
-              {forkAfterSeq}
-              {highlightSeq}
-              onfork={handleForkItem}
-              {canRevert}
-              onrevert={handleRevertItem}
-              onstopterminal={handleStopTerminal}
-              onsubagent={(childSessionId) => (selectedSubagentId = childSessionId)}
-            />
+            {#if timeline.historyLoading && items.length === 0}
+              <!-- First page still loading: avoid flashing the empty state. -->
+              <div class="flex flex-col gap-5 py-1" aria-busy="true">
+                {#each [0, 1, 2] as row (row)}
+                  <div class="flex gap-2.5">
+                    <Skeleton class="size-5 shrink-0 rounded-md" />
+                    <div class="flex min-w-0 flex-1 flex-col gap-2">
+                      <Skeleton class="h-3.5 w-4/5" />
+                      <Skeleton class="h-3.5 w-3/5" />
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {:else}
+              <ChatTimeline
+                {sessionId}
+                {items}
+                status={currentStatus}
+                {forkScope}
+                forkFrom={session?.parent_session_id ?? null}
+                {forkFromTitle}
+                {forkAfterSeq}
+                {highlightSeq}
+                onfork={handleForkItem}
+                {canRevert}
+                onrevert={handleRevertItem}
+                onstopterminal={handleStopTerminal}
+                onsubagent={(childSessionId) => (selectedSubagentId = childSessionId)}
+              />
+            {/if}
           </div>
         </div>
 
