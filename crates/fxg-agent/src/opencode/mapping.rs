@@ -817,6 +817,7 @@ pub(super) fn map_event(
                 locations: Vec::new(),
                 diff: None,
                 raw_output: None,
+                terminal_id: None,
                 subagent_id: scope,
             })]
         }
@@ -862,6 +863,7 @@ pub(super) fn map_event(
                 locations,
                 diff,
                 raw_output: None,
+                terminal_id: None,
                 subagent_id: scope.clone(),
             })];
             if let Some(entries) = plan {
@@ -918,6 +920,7 @@ pub(super) fn map_event(
                 locations: tool_locations(&input),
                 diff: tool_diff(&name, &input),
                 raw_output,
+                terminal_id: None,
                 subagent_id: scope,
             })]
         }

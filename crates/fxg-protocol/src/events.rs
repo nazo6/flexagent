@@ -198,6 +198,12 @@ pub enum UnifiedEventPayload {
         diff: Option<FileDiff>,
         /// Raw output (optional)
         raw_output: Option<String>,
+        /// ACP terminal this tool call embeds (`ToolCallContent::Terminal`).
+        ///
+        /// Links the tool row to its live terminal card. `None` when the tool
+        /// did not attach a terminal (or before this field existed).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        terminal_id: Option<String>,
         /// Subagent that produced this tool call (`None` = the parent session)
         #[serde(default, skip_serializing_if = "Option::is_none")]
         subagent_id: Option<String>,
@@ -701,6 +707,7 @@ mod tests {
                 locations: vec!["src/main.rs".to_owned()],
                 diff: None,
                 raw_output: None,
+                terminal_id: None,
                 subagent_id: None,
             },
             UnifiedEventPayload::PlanUpdate {

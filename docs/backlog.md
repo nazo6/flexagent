@@ -33,7 +33,7 @@ incidents とサポートバンドルは 2026-11-17 に削除済み
 
 出典: [`docs/proposals/2026-10-02-acp-enhancement-plan.md`](./proposals/2026-10-02-acp-enhancement-plan.md)
 
-- [ ] `ToolCallContent::Terminal` の `terminal_id` を `ToolCall` に保持し、UI のツールカードからターミナル出力へリンクする
+- [x] `ToolCallContent::Terminal` の `terminal_id` を `ToolCall` に保持し、UI のツールカードからターミナル出力へリンクする
 - [x] `session.config_options.boolean` capability 広告
 - [x] `terminal/output` の `truncated` 対応
 - [ ] `NewSessionRequest.additional_directories`（`session/close` は送信済み）
@@ -76,5 +76,5 @@ Phase 0（ACP v1 端末のライフサイクル・単体停止・スナップシ
 - [ ] MCP 端末への入力（`terminal_send`）。cwd の封じ込め・env・permission ポリシーの検証を含む
 - [ ] OpenCode の experimental persistent PTY を feature flag 付き・読み取り専用で「エージェント端末」として表示する
 - [ ] ACP v2 のエージェント所有 Terminal Output を `TerminalOutput` に正規化する（停止可否は v2 の手段が決まってから）
-- [ ] `ToolCallContent::Terminal` の `terminal_id` を `ToolCall` に保持し、ツールカードから端末カードへリンクする（§4 と共通）
+- [x] `ToolCallContent::Terminal` の `terminal_id` を `ToolCall` に保持し、ツールカードから端末カードへリンクする（§4 と共通）
 - [ ] 停止できない経路（自前実行・OpenCode ネイティブ）で「単体停止は不可」を UI に明示する

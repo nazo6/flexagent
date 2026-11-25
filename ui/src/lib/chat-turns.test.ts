@@ -31,6 +31,7 @@ function tool(): TimelineItem {
     locations: [],
     diff: null,
     rawOutput: null,
+    terminalId: null,
     subagentId: null,
   };
 }

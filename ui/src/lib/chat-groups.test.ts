@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { groupActivitySections, groupTimelineItems, type ToolItem } from "./chat-groups.ts";
 import type { TimelineItem } from "./sync/reducer.ts";
 
-function tool(toolCallId: string): ToolItem {
+function tool(toolCallId: string, terminalId: string | null = null): ToolItem {
   return {
     kind: "tool",
     key: `tool:${toolCallId}`,
@@ -15,6 +15,7 @@ function tool(toolCallId: string): ToolItem {
     locations: [],
     diff: null,
     rawOutput: null,
+    terminalId,
     subagentId: null,
   };
 }
@@ -197,6 +198,18 @@ describe("groupActivitySections", () => {
   it("keeps a running command outside the fold", () => {
     const entries = groupActivitySections(
       groupTimelineItems([tool("t1"), terminal("term-1", true), message("done")]),
+    );
+    expect(entries.map((entry) => entry.kind)).toEqual(["tools", "single", "single"]);
+    expect(entries[1]).toMatchObject({ kind: "single", item: { terminalId: "term-1" } });
+  });
+
+  it("keeps a linked finished command outside the fold", () => {
+    const entries = groupActivitySections(
+      groupTimelineItems([
+        tool("t1", "term-1"),
+        terminal("term-1", false),
+        message("done"),
+      ]),
     );
     expect(entries.map((entry) => entry.kind)).toEqual(["tools", "single", "single"]);
     expect(entries[1]).toMatchObject({ kind: "single", item: { terminalId: "term-1" } });

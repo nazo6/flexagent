@@ -315,7 +315,10 @@
       <ThoughtBlock {item} />
     {:else if item.kind === "terminal"}
       {@const stopping = stoppingTerminals.has(item.terminalId)}
-      <div class="bg-card flex flex-col gap-1.5 rounded-lg border border-border p-3">
+      <div
+        id={`terminal-${item.terminalId}`}
+        class="bg-card flex scroll-mt-20 flex-col gap-1.5 rounded-lg border border-border p-3"
+      >
         <div class="flex items-center gap-2 text-[13px]">
           <SquareTerminalIcon class="text-muted-foreground size-4" />
           <span class="desk-mono">{item.command === "" ? item.terminalId : item.command}</span>

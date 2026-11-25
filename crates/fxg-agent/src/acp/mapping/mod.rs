@@ -554,7 +554,7 @@ pub(super) fn tool_call_event(
     tool_call: &ToolCall,
     subagent_id: Option<&str>,
 ) -> UnifiedEventPayload {
-    let (diff, _, text_content) = tool_call_contents(&tool_call.content);
+    let (diff, _, text_content, terminal_id) = tool_call_contents(&tool_call.content);
     UnifiedEventPayload::ToolCall {
         subagent_id: subagent_id.map(str::to_owned),
         tool_call_id: tool_call.tool_call_id.to_string(),
@@ -572,6 +572,7 @@ pub(super) fn tool_call_event(
             .as_ref()
             .map(|value| value.to_string())
             .or_else(|| (!text_content.is_empty()).then(|| text_content.join("\n"))),
+        terminal_id,
     }
 }
 
@@ -581,11 +582,11 @@ pub(super) fn tool_call_update_event(
     subagent_id: Option<&str>,
 ) -> UnifiedEventPayload {
     let fields = &update.fields;
-    let (diff, locations, text_content) = fields
+    let (diff, locations, text_content, terminal_id) = fields
         .content
         .as_ref()
         .map(|content| tool_call_contents(content))
-        .unwrap_or((None, Vec::new(), Vec::new()));
+        .unwrap_or((None, Vec::new(), Vec::new(), None));
     let locations = fields
         .locations
         .as_ref()
@@ -614,17 +615,20 @@ pub(super) fn tool_call_update_event(
             .as_ref()
             .map(|value| value.to_string())
             .or_else(|| (!text_content.is_empty()).then(|| text_content.join("\n"))),
+        terminal_id,
         subagent_id: subagent_id.map(str::to_owned),
     }
 }
 
-/// Extracts the diff, file paths and text output from a `ToolCallContent` list.
+/// Extracts the diff, file paths, text output and embedded terminal from a
+/// `ToolCallContent` list.
 pub(super) fn tool_call_contents(
     contents: &[ToolCallContent],
-) -> (Option<FileDiff>, Vec<String>, Vec<String>) {
+) -> (Option<FileDiff>, Vec<String>, Vec<String>, Option<String>) {
     let mut diff = None;
     let mut locations = Vec::new();
     let mut texts = Vec::new();
+    let mut terminal_id = None;
     for content in contents {
         match content {
             ToolCallContent::Diff(acp_diff) => {
@@ -638,10 +642,13 @@ pub(super) fn tool_call_contents(
                     texts.push(text.text.clone());
                 }
             }
+            ToolCallContent::Terminal(terminal) => {
+                terminal_id = Some(terminal.terminal_id.to_string());
+            }
             _ => {}
         }
     }
-    (diff, locations, texts)
+    (diff, locations, texts, terminal_id)
 }
 
 /// Computes a unified diff from the before/after text and builds a [`FileDiff`].

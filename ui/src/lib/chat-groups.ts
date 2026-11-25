@@ -52,7 +52,7 @@ export type TimelineEntry = TimelineGroup | ActivitySection;
  * A command that is still running stays visible as well: it goes on producing
  * output after the turn ended, and its card is where the user stops it.
  */
-function isActivity(group: TimelineGroup): boolean {
+function isActivity(group: TimelineGroup, linkedTerminals: ReadonlySet<string>): boolean {
   switch (group.kind) {
     case "tools":
     case "subagent":
@@ -64,7 +64,9 @@ function isActivity(group: TimelineGroup): boolean {
         case "subagent_message":
           return true;
         case "terminal":
-          return !group.item.running;
+          // A running command stays visible so it can be stopped, and a
+          // terminal linked from a tool row stays visible so the link works.
+          return !group.item.running && !linkedTerminals.has(group.item.terminalId);
         default:
           return false;
       }
@@ -87,6 +89,15 @@ export function groupActivitySections(
   const entries: TimelineEntry[] = [];
   let run: TimelineGroup[] = [];
   let counts: ActivityCounts = { tools: 0, thoughts: 0, subagents: 0, steps: 0 };
+  // Terminals referenced by a tool row are linked from the timeline, so keep
+  // their cards outside the fold even after the command finished.
+  const linkedTerminals = new Set(
+    groups.flatMap((group) =>
+      group.kind === "tools"
+        ? group.tools.flatMap((tool) => (tool.terminalId === null ? [] : [tool.terminalId]))
+        : [],
+    ),
+  );
 
   const flush = () => {
     if (run.length === 0) return;
@@ -100,7 +111,7 @@ export function groupActivitySections(
   };
 
   for (const group of groups) {
-    if (!isActivity(group)) {
+    if (!isActivity(group, linkedTerminals)) {
       flush();
       entries.push(group);
       continue;

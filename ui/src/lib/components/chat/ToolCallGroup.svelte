@@ -179,6 +179,16 @@
 
           <!-- Status & expand toggle -->
           <div class="mt-0.5 ml-1.5 flex shrink-0 items-center gap-1.5">
+            {#if tool.terminalId}
+              <a
+                href={`#terminal-${tool.terminalId}`}
+                class="border-border/60 bg-muted/50 text-muted-foreground hover:text-foreground inline-flex items-center gap-1 rounded border px-1.5 py-0.2 text-[10px] transition-colors"
+                title={m.chat_tool_terminal()}
+              >
+                <SquareTerminalIcon class="size-3" />
+                {m.chat_tool_terminal()}
+              </a>
+            {/if}
             {#if tool.diff !== null && (tool.diff.additions > 0 || tool.diff.deletions > 0)}
               <span
                 class="border-border/60 bg-muted/50 inline-flex items-center gap-1 rounded border px-1.5 py-0.2 font-mono text-[10px] tabular-nums"

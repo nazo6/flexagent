@@ -2564,6 +2564,13 @@ export type UnifiedEventPayload =
 	diff: FileDiff | null,
 	/**  Raw output (optional) */
 	raw_output: string | null,
+	/**
+	 *  ACP terminal this tool call embeds (`ToolCallContent::Terminal`).
+	 *
+	 *  Links the tool row to its live terminal card. `None` when the tool
+	 *  did not attach a terminal (or before this field existed).
+	 */
+	terminal_id?: string | null,
 	/**  Subagent that produced this tool call (`None` = the parent session) */
 	subagent_id?: string | null,
 } } |

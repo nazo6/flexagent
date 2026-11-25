@@ -182,6 +182,7 @@ mod tests {
                 deletions: 0,
             }),
             raw_output: Some("test result: FAILED".to_owned()),
+            terminal_id: None,
             subagent_id: None,
         };
         let (event_type, text) = classify_payload(&payload);

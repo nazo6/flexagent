@@ -103,6 +103,7 @@
   "chat_tool_running": "Running…",
   "chat_tool_status": "Status:",
   "chat_tool_target_files": "Target files:",
+  "chat_tool_terminal": "Terminal output",
   "chat_turns_approval": "Approval",
   "chat_turns_close": "Close turns",
   "chat_turns_error": "Error",

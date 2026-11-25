@@ -211,6 +211,31 @@ describe("tool calls", () => {
     });
   });
 
+  it("keeps the embedded terminal id on a tool call", () => {
+    const sources = emptySources([
+      makeEvent(1, {
+        type: "tool_call",
+        data: {
+          tool_call_id: "t3",
+          title: "Run tests",
+          kind: "execute",
+          status: "in_progress",
+          locations: [],
+          diff: null,
+          raw_output: null,
+          terminal_id: "term-1",
+        },
+      }),
+    ]);
+    const items = buildTimelineItems(sources);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: "tool",
+      toolCallId: "t3",
+      terminalId: "term-1",
+    });
+  });
+
   it("preserves title, kind, and locations when partial update arrives with empty fields", () => {
     const sources = emptySources([
       makeEvent(1, {

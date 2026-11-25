@@ -971,10 +971,23 @@ fn tool_call_contents_extracts_text_output() {
             "test output",
         ))),
     )];
-    let (diff, locations, texts) = tool_call_contents(&contents);
+    let (diff, locations, texts, terminal_id) = tool_call_contents(&contents);
     assert!(diff.is_none());
     assert!(locations.is_empty());
     assert_eq!(texts, vec!["test output"]);
+    assert!(terminal_id.is_none());
+}
+
+#[test]
+fn tool_call_contents_extracts_the_embedded_terminal() {
+    let contents = vec![ToolCallContent::Terminal(
+        agent_client_protocol::v1::schema::Terminal::new("term-1"),
+    )];
+    let (diff, locations, texts, terminal_id) = tool_call_contents(&contents);
+    assert!(diff.is_none());
+    assert!(locations.is_empty());
+    assert!(texts.is_empty());
+    assert_eq!(terminal_id.as_deref(), Some("term-1"));
 }
 
 #[test]

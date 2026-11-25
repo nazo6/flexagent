@@ -141,6 +141,8 @@ export type TimelineItem =
       locations: string[];
       diff: FileDiff | null;
       rawOutput: string | null;
+      /** ACP terminal embedded in the tool content (`ToolCallContent::Terminal`). */
+      terminalId: string | null;
       subagentId: string | null;
     }
   | {
@@ -483,6 +485,7 @@ function upsertToolCall(
       locations: payload.data.locations,
       diff: payload.data.diff,
       rawOutput: payload.data.raw_output,
+      terminalId: payload.data.terminal_id ?? null,
       subagentId: payload.data.subagent_id ?? null,
     });
     return;
@@ -497,6 +500,7 @@ function upsertToolCall(
       locations: payload.data.locations.length > 0 ? payload.data.locations : prev.locations,
       diff: payload.data.diff ?? prev.diff,
       rawOutput: payload.data.raw_output ?? prev.rawOutput,
+      terminalId: payload.data.terminal_id ?? prev.terminalId,
       subagentId: payload.data.subagent_id ?? prev.subagentId,
     };
   }
@@ -830,6 +834,7 @@ function appendEphemeralItems(builder: TimelineBuilder, sources: TimelineSources
           locations: [],
           diff: null,
           rawOutput: progress.output === "" ? null : progress.output,
+          terminalId: null,
           subagentId: null,
         });
         break;

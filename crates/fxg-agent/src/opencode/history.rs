@@ -104,6 +104,7 @@ pub(super) fn emit_history(runtime: &SessionRuntime, messages: &[Value]) {
                                 locations: tool_locations(&input),
                                 diff: tool_diff(&name, &input),
                                 raw_output,
+                                terminal_id: None,
                                 subagent_id: None,
                             });
                             if let Some(entries) = todo_plan_entries(&name, &input) {

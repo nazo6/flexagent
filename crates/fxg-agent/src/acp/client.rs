@@ -667,6 +667,7 @@ pub(super) async fn run_acp_process(
                                         locations: vec![path_string],
                                         diff,
                                         raw_output: None,
+                                        terminal_id: None,
                                         subagent_id: context.subagent_id.clone(),
                                     },
                                 )),
