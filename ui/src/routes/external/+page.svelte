@@ -29,7 +29,7 @@
   type Tab = "unimported" | "imported" | "all";
 
   /** Refresh a cached scan in the background once it is older than this. */
-  const CACHE_REFRESH_AFTER_MS = 15_000;
+  const CACHE_REFRESH_AFTER_MS = 30_000;
 
   let response = $state<ExternalSessionListResponse | null>(null);
   let loading = $state(false);
