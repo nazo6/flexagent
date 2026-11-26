@@ -161,8 +161,9 @@ Tier 3 (`impl AgentDriver`) を持ち、`opencode` は Tier 3
    1. カスタム定義 (`node.db` の `custom_agents`)
    2. Tier 3 の full custom provider
    3. **ビルトイン preset**: 既知の CLI が `PATH` にあれば、その ACP
-      起動引数で起動する (`opencode acp` / `agy acp`)。ユーザーが同名の
-      custom を定義した場合は custom が優先される。
+      起動引数で起動する (`agy acp` など)。ユーザーが同名の custom を定義した
+      場合は custom が優先される。OpenCode は native driver (`opencode serve`)
+      を使うため ACP preset の対象外。
    - Registry のエージェントを直接起動することはない。`npx` / `uvx` で
      使いたい場合は、先に import して custom 定義にする。
    - 代表例: `fxg session new opencode` は OpenCode v2 のネイティブドライバ
@@ -286,10 +287,11 @@ ACP のセッション更新は `sessionId` を持つが、`agent-client-protoco
 
 `initialize` で広告する client capability はエージェント定義ごとの
 `AcpExtensionOptions` が持ち、`AcpCapabilitySet` として未知の名前を捨てずに
-保持する。ACP 標準の `subagents` は既定で ON（unstable RFD）。opencode は
-`_meta` の vendor capability も広告する。どちらも有効化すると、子は独立
-セッションにはならず、親タイムラインのサブエージェントブロック / 詳細ビュー
-として表示される。
+保持する。ACP 標準の `subagents` は既定で ON（unstable RFD）。extension は
+`AcpExtensionOptions.client_meta` で `clientCapabilities._meta` を追加できる
+（現在の組み込み extension は antigravity のみで `_meta` は使わない）。
+`subagents` を有効化すると、子は独立セッションにはならず、親タイムラインの
+サブエージェントブロック / 詳細ビューとして表示される。
 
 ACP の必要な unstable feature（`unstable_session_fork` /
 `unstable_subagents`）は `agent-client-protocol` の依存で常に有効化する。
