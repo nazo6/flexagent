@@ -998,17 +998,20 @@ fn classify_status(x: char, y: char, untracked: bool, conflicted: bool) -> Works
 /// SVG is intentionally excluded: it is served as text so embedded scripts can
 /// never become an image document.
 fn image_mime(path: &Path) -> Option<&'static str> {
-    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
-    match extension.as_str() {
-        "png" => Some("image/png"),
-        "jpg" | "jpeg" => Some("image/jpeg"),
-        "gif" => Some("image/gif"),
-        "webp" => Some("image/webp"),
-        "bmp" => Some("image/bmp"),
-        "avif" => Some("image/avif"),
-        "ico" => Some("image/x-icon"),
-        _ => None,
-    }
+    const RENDERABLE: &[&str] = &[
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "image/bmp",
+        "image/avif",
+        "image/x-icon",
+    ];
+    let mime = mime_guess::from_path(path).first_raw()?;
+    RENDERABLE
+        .iter()
+        .copied()
+        .find(|candidate| *candidate == mime)
 }
 
 #[cfg(test)]
@@ -1021,8 +1024,10 @@ mod tests {
         assert_eq!(image_mime(Path::new("a.PNG")), Some("image/png"));
         assert_eq!(image_mime(Path::new("a.jpeg")), Some("image/jpeg"));
         assert_eq!(image_mime(Path::new("a.webp")), Some("image/webp"));
+        assert_eq!(image_mime(Path::new("a.avif")), Some("image/avif"));
         assert_eq!(image_mime(Path::new("a.svg")), None);
         assert_eq!(image_mime(Path::new("a.txt")), None);
+        assert_eq!(image_mime(Path::new("a.ttf")), None);
     }
 
     #[test]

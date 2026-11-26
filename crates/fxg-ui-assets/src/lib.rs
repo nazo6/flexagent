@@ -42,22 +42,26 @@ pub fn resolve(path: &str) -> Option<rust_embed::EmbeddedFile> {
     None
 }
 
-/// Infers the Content-Type from the extension (minimal mapping to avoid extra crates).
-pub fn content_type(path: &str) -> &'static str {
-    match path.rsplit('.').next().unwrap_or_default() {
-        "html" => "text/html; charset=utf-8",
-        "js" | "mjs" => "text/javascript; charset=utf-8",
-        "css" => "text/css; charset=utf-8",
-        "json" | "map" => "application/json; charset=utf-8",
-        "webmanifest" => "application/manifest+json; charset=utf-8",
-        "svg" => "image/svg+xml",
-        "png" => "image/png",
-        "ico" => "image/x-icon",
-        "woff" => "font/woff",
-        "woff2" => "font/woff2",
-        "wasm" => "application/wasm",
-        "txt" => "text/plain; charset=utf-8",
-        _ => "application/octet-stream",
+/// Infers the Content-Type from the extension.
+///
+/// `mime_guess` owns the extension table; text formats get an explicit UTF-8
+/// charset and source maps keep the JSON type the browser devtools expect.
+pub fn content_type(path: &str) -> String {
+    if path.ends_with(".map") {
+        return "application/json; charset=utf-8".to_owned();
+    }
+    let mime = mime_guess::from_path(path)
+        .first_raw()
+        .unwrap_or("application/octet-stream");
+    if mime.starts_with("text/")
+        || matches!(
+            mime,
+            "application/json" | "application/javascript" | "application/manifest+json"
+        )
+    {
+        format!("{mime}; charset=utf-8")
+    } else {
+        mime.to_owned()
     }
 }
 
@@ -67,5 +71,37 @@ pub fn cache_control(path: &str) -> &'static str {
         "no-cache"
     } else {
         "public, max-age=31536000, immutable"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_type_covers_build_assets() {
+        assert_eq!(content_type("index.html"), "text/html; charset=utf-8");
+        assert_eq!(content_type("app.js"), "text/javascript; charset=utf-8");
+        assert_eq!(
+            content_type("app.mjs"),
+            "application/javascript; charset=utf-8"
+        );
+        assert_eq!(content_type("app.css"), "text/css; charset=utf-8");
+        assert_eq!(content_type("data.json"), "application/json; charset=utf-8");
+        assert_eq!(
+            content_type("bundle.js.map"),
+            "application/json; charset=utf-8"
+        );
+        assert_eq!(
+            content_type("app.webmanifest"),
+            "application/manifest+json; charset=utf-8"
+        );
+        assert_eq!(content_type("icon.svg"), "image/svg+xml");
+        assert_eq!(content_type("icon.png"), "image/png");
+        assert_eq!(content_type("font.woff2"), "font/woff2");
+        assert_eq!(content_type("module.wasm"), "application/wasm");
+        assert_eq!(content_type("photo.avif"), "image/avif");
+        assert_eq!(content_type("font.ttf"), "font/ttf");
+        assert_eq!(content_type("unknown.zzz"), "application/octet-stream");
     }
 }

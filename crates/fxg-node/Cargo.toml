@@ -20,6 +20,7 @@ fxg-db = { workspace = true }
 fxg-protocol = { workspace = true }
 fxg-pty = { workspace = true }
 gix-quote = "0.10.2"
+mime_guess = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
