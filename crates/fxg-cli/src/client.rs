@@ -68,7 +68,13 @@ pub(crate) fn local_node_base(env: EnvLookup<'_>) -> Result<String> {
 ///
 /// Returns `None` when the node is not running or the file is empty.
 pub(crate) fn read_local_node_addr(env: EnvLookup<'_>) -> Option<String> {
-    let addr = std::fs::read_to_string(Paths::resolve(env, Role::Node).addr_path()).ok()?;
+    let addr = match std::fs::read_to_string(Paths::resolve(env, Role::Node).addr_path()) {
+        Ok(addr) => addr,
+        Err(err) => {
+            tracing::debug!(error = %err, "failed to read node.addr");
+            return None;
+        }
+    };
     let addr = addr.trim();
     if addr.is_empty() {
         return None;

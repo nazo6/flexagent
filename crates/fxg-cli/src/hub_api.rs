@@ -192,7 +192,13 @@ pub fn local_hub_base(env: EnvLookup<'_>) -> Result<String> {
 /// Returns `None` when the hub is not running or the file is empty.
 pub fn read_local_hub_addr(env: EnvLookup<'_>) -> Option<String> {
     let addr_path = Paths::resolve(env, Role::Hub).addr_path();
-    let raw = std::fs::read_to_string(addr_path).ok()?;
+    let raw = match std::fs::read_to_string(addr_path) {
+        Ok(raw) => raw,
+        Err(err) => {
+            tracing::debug!(error = %err, "failed to read hub.addr");
+            return None;
+        }
+    };
     let addr = raw.trim();
     if addr.is_empty() {
         return None;
