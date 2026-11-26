@@ -50,6 +50,7 @@
   let searchQuery = $state("");
   let attentionOnly = $state(false);
   let showArchivedSection = $state(false);
+  let brand = $state<ReturnType<typeof BrandIcon> | null>(null);
 
   /**
    * Projects the user collapsed are remembered per device. The sidebar is the
@@ -271,6 +272,23 @@
   function handleLinkClick() {
     onNavigate?.();
   }
+
+  /**
+   * Replay the brand reveal on a plain primary click. Modifier clicks open the
+   * link elsewhere, so they leave the logo as a static mark.
+   */
+  function handleBrandClick(event: MouseEvent): void {
+    if (
+      event.button === 0 &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.shiftKey &&
+      !event.altKey
+    ) {
+      brand?.replay();
+    }
+    handleLinkClick();
+  }
 </script>
 
 <aside class="bg-sidebar flex h-full w-full flex-col border-r border-border">
@@ -282,9 +300,9 @@
     <a
       href="/"
       class="flex items-center gap-2.5 font-semibold tracking-tight hover:opacity-80 transition-opacity"
-      onclick={handleLinkClick}
+      onclick={handleBrandClick}
     >
-      <BrandIcon class="size-7" />
+      <BrandIcon bind:this={brand} class="size-7" />
       <span class="text-sm">FlexAgent</span>
     </a>
     <button

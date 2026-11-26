@@ -10,6 +10,24 @@
   import SearchIcon from "@lucide/svelte/icons/search";
 
   let { attentionCount }: { attentionCount: number } = $props();
+
+  let brand = $state<ReturnType<typeof BrandIcon> | null>(null);
+
+  /**
+   * Replay the brand reveal on a plain primary click. Modifier clicks open the
+   * link elsewhere, so they leave the logo as a static mark.
+   */
+  function handleBrandClick(event: MouseEvent): void {
+    if (
+      event.button === 0 &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.shiftKey &&
+      !event.altKey
+    ) {
+      brand?.replay();
+    }
+  }
 </script>
 
 <header
@@ -32,8 +50,8 @@
   </button>
 
   <div class="flex min-w-0 items-center gap-2">
-    <a href="/" class="flex items-center gap-1.5 font-semibold text-sm">
-      <BrandIcon class="size-6" />
+    <a href="/" class="flex items-center gap-1.5 font-semibold text-sm" onclick={handleBrandClick}>
+      <BrandIcon bind:this={brand} class="size-6" />
       <span>FlexAgent</span>
     </a>
     <ConnectionMenu variant="scope-compact" align="end" />

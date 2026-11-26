@@ -97,6 +97,13 @@
   let svg = $state<SVGSVGElement | null>(null);
   let stopDraw: (() => void) | null = null;
 
+  /** Replay the reveal, e.g. when the user activates the logo. */
+  export function replay(): void {
+    if (svg === null) return;
+    stopDraw?.();
+    stopDraw = playBrandDraw(svg, true);
+  }
+
   onMount(() => {
     if (draw && svg !== null) stopDraw = playBrandDraw(svg);
     return () => {
