@@ -960,3 +960,92 @@ describe("session revert", () => {
     );
   });
 });
+
+describe("timeline caching", () => {
+  it("reuses committed items while a streamed message grows", () => {
+    const sources = emptySources();
+    insertEventSorted(
+      sources.events,
+      makeEvent(1, {
+        type: "user_message",
+        data: { text: "hello", attachments: [], client_source: "web" },
+      }),
+    );
+    const before = buildTimelineItems(sources);
+    const userItem = before[0];
+
+    applyStreamDelta(sources, {
+      delta_type: "agent_message_delta",
+      message_id: "m1",
+      text_delta: "Hel",
+    });
+    const partial = buildTimelineItems(sources);
+    applyStreamDelta(sources, {
+      delta_type: "agent_message_delta",
+      message_id: "m1",
+      text_delta: "lo",
+    });
+    const streamed = buildTimelineItems(sources);
+
+    // The persisted event is not rebuilt per chunk, so its item (and every
+    // component holding it) keeps its identity.
+    expect(streamed[0]).toBe(userItem);
+    expect(streamed[0]).toEqual(partial[0]);
+    expect(streamed[1]).toMatchObject({ kind: "agent", text: "Hello", streaming: true });
+  });
+
+  it("rebuilds committed items when events change", () => {
+    const sources = emptySources([
+      makeEvent(1, {
+        type: "user_message",
+        data: { text: "hello", attachments: [], client_source: "web" },
+      }),
+    ]);
+    const before = buildTimelineItems(sources);
+
+    insertEventSorted(
+      sources.events,
+      makeEvent(2, {
+        type: "agent_message",
+        data: { message_id: "m1", text: "hi", is_complete: true, subagent_id: null },
+      }),
+    );
+    const after = buildTimelineItems(sources);
+
+    expect(after).toHaveLength(2);
+    expect(after[0]).not.toBe(before[0]);
+    expect(after[1]).toMatchObject({ kind: "agent", text: "hi", streaming: false });
+  });
+
+  it("does not leak streamed terminal output into the event cache", () => {
+    const sources = emptySources([
+      makeEvent(1, {
+        type: "terminal_output",
+        data: {
+          terminal_id: "term-1",
+          command: "npm run dev",
+          data_b64: encodeTextToBase64("start\n"),
+          exit_code: null,
+          running: true,
+        },
+      }),
+    ]);
+    applyStreamDelta(sources, {
+      delta_type: "terminal_output_delta",
+      terminal_id: "term-1",
+      data_b64: encodeTextToBase64("chunk\n"),
+    });
+    expect(buildTimelineItems(sources)[0]).toMatchObject({
+      kind: "terminal",
+      output: "start\nchunk\n",
+    });
+
+    // Dropping the stream buffer must fall back to the persisted output only.
+    sources.streamKeys.length = 0;
+    sources.terminalDeltas.clear();
+    expect(buildTimelineItems(sources)[0]).toMatchObject({
+      kind: "terminal",
+      output: "start\n",
+    });
+  });
+});

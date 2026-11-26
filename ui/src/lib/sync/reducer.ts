@@ -893,7 +893,55 @@ function appendEphemeralItems(builder: TimelineBuilder, sources: TimelineSources
   }
 }
 
-export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
+/** Items derived from persisted events only, plus the indexes needed to overlay streams. */
+interface CommittedTimeline {
+  items: TimelineItem[];
+  toolIndex: Map<string, number>;
+  terminalIndex: Map<string, number>;
+  permissionIndex: Map<string, number>;
+  permissionResolutions: Map<string, { selectedOptionId: string; resolvedBy: string }>;
+  elicitationIndex: Map<string, number>;
+  subagentMessageIndex: Map<string, number>;
+}
+
+interface CommittedCacheEntry {
+  sessionId: string;
+  events: readonly SessionEventEnvelope[];
+  length: number;
+  firstSeq: number | null;
+  lastSeq: number | null;
+  value: CommittedTimeline;
+}
+
+/**
+ * Last event-derived timeline.
+ *
+ * Streaming deltas arrive several times a second while a turn runs, and each
+ * one used to re-walk every persisted event and rebuild every item, so the
+ * whole conversation re-rendered per chunk. Events are only inserted or
+ * removed through `splice` (length changes) or by replacing the array, so
+ * `[array, length, first seq, last seq]` identifies the committed timeline;
+ * deltas are then overlaid on copies of its items.
+ */
+let committedCache: CommittedCacheEntry | null = null;
+
+function committedTimeline(sources: TimelineSources): CommittedTimeline {
+  const events = sources.events;
+  const length = events.length;
+  const firstSeq = length === 0 ? null : events[0].node_seq;
+  const lastSeq = length === 0 ? null : events[length - 1].node_seq;
+  const cached = committedCache;
+  if (
+    cached !== null &&
+    cached.sessionId === sources.sessionId &&
+    cached.events === events &&
+    cached.length === length &&
+    cached.firstSeq === firstSeq &&
+    cached.lastSeq === lastSeq
+  ) {
+    return cached.value;
+  }
+
   const builder: TimelineBuilder = {
     sessionId: sources.sessionId,
     items: [],
@@ -909,7 +957,7 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
   // A revert rolls back the target turn (starting at `up_to_node_seq`) and
   // everything recorded between it and the revert event.
   // Events recorded after the revert (new turns) stay visible.
-  const revertIntervals = sources.events.flatMap((event) =>
+  const revertIntervals = events.flatMap((event) =>
     event.payload.type === "session_reverted"
       ? [{ from: event.payload.data.up_to_node_seq, to: event.node_seq }]
       : [],
@@ -917,7 +965,7 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
   const isReverted = (seq: number) =>
     revertIntervals.some((interval) => seq >= interval.from && seq < interval.to);
 
-  for (const event of sources.events) {
+  for (const event of events) {
     if (isReverted(event.node_seq)) continue;
     const payload = event.payload;
     const base: TimelineBase = { seq: event.node_seq, createdAt: event.created_at };
@@ -983,6 +1031,42 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
         break;
     }
   }
+
+  const value: CommittedTimeline = {
+    items: builder.items,
+    toolIndex: builder.toolIndex,
+    terminalIndex: builder.terminalIndex,
+    permissionIndex: builder.permissionIndex,
+    permissionResolutions: builder.permissionResolutions,
+    elicitationIndex: builder.elicitationIndex,
+    subagentMessageIndex: builder.subagentMessageIndex,
+  };
+  committedCache = {
+    sessionId: sources.sessionId,
+    events,
+    length,
+    firstSeq,
+    lastSeq,
+    value,
+  };
+  return value;
+}
+
+export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
+  const committed = committedTimeline(sources);
+  const builder: TimelineBuilder = {
+    sessionId: sources.sessionId,
+    // The overlay may replace individual items (terminal output) but never
+    // mutates the cached array or the committed item objects.
+    items: committed.items.slice(),
+    toolIndex: committed.toolIndex,
+    terminalIndex: new Map(committed.terminalIndex),
+    permissionIndex: committed.permissionIndex,
+    permissionResolutions: committed.permissionResolutions,
+    elicitationIndex: committed.elicitationIndex,
+    subagentMessageIndex: committed.subagentMessageIndex,
+    thoughtTimes: sources.thoughtTimes,
+  };
 
   appendEphemeralItems(builder, sources);
   return builder.items;
