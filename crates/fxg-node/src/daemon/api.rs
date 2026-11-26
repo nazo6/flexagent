@@ -1326,3 +1326,29 @@ fn channel_subscription(
     });
     rx
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fxg_protocol::common::{DataSafety, ErrorCode, RecoveryAction};
+
+    #[test]
+    fn local_api_errors_keep_details_recovery_params_and_data_safety() {
+        let err = NodeError::AuthRequired {
+            agent_id: "agy".to_owned(),
+            methods: Vec::new(),
+        };
+        let info = api_error(err).into_info();
+
+        assert_eq!(info.code, ErrorCode::AuthRequired);
+        assert_eq!(info.params.get("agent_id").map(String::as_str), Some("agy"));
+        assert!(info.details.is_some());
+        assert!(info.recovery.iter().any(|action| {
+            matches!(
+                action,
+                RecoveryAction::LoginAgent { agent_id } if agent_id == "agy"
+            )
+        }));
+        assert_eq!(info.data_safety, Some(DataSafety::Preserved));
+    }
+}
