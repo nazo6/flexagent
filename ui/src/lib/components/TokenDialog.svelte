@@ -68,15 +68,15 @@
         />
         <p class="text-muted-foreground text-[13px]">
           {#if connection.role === "hub"}
-            {m.token_help_hub_prefix()} <code>auth_token</code>
+            {m.token_help_hub_prefix()} <code>fxg hub access-token show</code>
             {m.token_help_hub_mid()}
-            <code>&lt;data&gt;/flexagent/hub/auth_token</code>{m.token_help_hub_docker()}
-            <code>docker compose exec hub cat /var/lib/flexagent/data/hub/auth_token</code>.
+            {m.token_help_hub_docker()}
+            <code>docker compose exec hub fxg hub access-token show</code>.
           {:else}
-            {m.token_help_node_prefix()} <code>&lt;data&gt;/flexagent/node/auth_token</code>
-            {m.token_help_node_mid()} <code>fxg node access-token show</code>
+            {m.token_help_node_prefix()} <code>fxg node access-token show</code>
+            {m.token_help_node_mid()}
             {m.token_help_node_docker()}
-            <code>docker compose exec node fxg node access-token show</code>).
+            <code>docker compose exec node fxg node access-token show</code>.
           {/if}
         </p>
       </div>
