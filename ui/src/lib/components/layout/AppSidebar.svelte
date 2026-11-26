@@ -35,6 +35,7 @@
   import SearchIcon from "@lucide/svelte/icons/search";
   import SettingsIcon from "@lucide/svelte/icons/settings";
   import TriangleAlertIcon from "@lucide/svelte/icons/triangle-alert";
+  import XIcon from "@lucide/svelte/icons/x";
 
   interface Props {
     onNavigate?: () => void;
@@ -43,9 +44,45 @@
   let { onNavigate }: Props = $props();
 
   let searchQuery = $state("");
-  let collapsedProjects = $state<Record<string, boolean>>({});
-  let showAttentionSection = $state(true);
+  let attentionOnly = $state(false);
   let showArchivedSection = $state(false);
+
+  /**
+   * Projects the user collapsed are remembered per device. The sidebar is the
+   * only place that knows about them, so the state stays local instead of
+   * travelling to the node or the hub.
+   */
+  const COLLAPSED_PROJECTS_KEY = "fxg:sidebar_collapsed_projects";
+
+  function loadCollapsedProjects(): Record<string, boolean> {
+    if (typeof localStorage === "undefined") return {};
+    try {
+      const stored: unknown = JSON.parse(localStorage.getItem(COLLAPSED_PROJECTS_KEY) ?? "[]");
+      if (!Array.isArray(stored)) return {};
+      const collapsed: Record<string, boolean> = {};
+      for (const projectId of stored) {
+        if (typeof projectId === "string") collapsed[projectId] = true;
+      }
+      return collapsed;
+    } catch {
+      // Storage may be disabled or hold an old shape; start expanded.
+      return {};
+    }
+  }
+
+  let collapsedProjects = $state<Record<string, boolean>>(loadCollapsedProjects());
+
+  function saveCollapsedProjects(): void {
+    if (typeof localStorage === "undefined") return;
+    try {
+      const collapsed = Object.keys(collapsedProjects).filter(
+        (projectId) => collapsedProjects[projectId],
+      );
+      localStorage.setItem(COLLAPSED_PROJECTS_KEY, JSON.stringify(collapsed));
+    } catch {
+      // Ignore quota/storage errors; collapsing still works for this render.
+    }
+  }
 
   const currentPath = $derived(page.url.pathname);
   const activeSessionId = $derived(
@@ -54,6 +91,17 @@
 
   function toggleProject(projectId: string) {
     collapsedProjects[projectId] = !collapsedProjects[projectId];
+    saveCollapsedProjects();
+  }
+
+  /** The navigation strip stays compact, so every destination keeps a short label. */
+  function navItemClass(active: boolean): string {
+    return cn(
+      "flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-md px-0 py-1 text-[11px] leading-tight font-medium transition-colors",
+      active
+        ? "bg-signal-soft text-foreground"
+        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+    );
   }
 
   function isProjectCollapsed(projectId: string): boolean {
@@ -92,6 +140,15 @@
     sync.sessions
       .filter((session) => sessionNeedsAttention(session))
       .toSorted((a, b) => b.updated_at - a.updated_at),
+  );
+
+  /**
+   * The attention strip is a filter over the session list, not a second copy
+   * of it. Typing in the sidebar search leaves the filter so results stay
+   * predictable.
+   */
+  const attentionFilterActive = $derived(
+    attentionOnly && needsAttentionSessions.length > 0 && searchQuery.trim() === "",
   );
 
   interface ProjectSessionGroup {
@@ -192,78 +249,62 @@
     </button>
   </div>
 
-  <!-- Quick navigation -->
-  <nav class="flex flex-col gap-0.5 border-b border-border p-2 text-[13px]">
+  <!-- Quick navigation. One compact strip keeps the session list the
+       dominant part of the sidebar. -->
+  <nav class="flex items-stretch gap-0.5 border-b border-border p-1">
     <a
       href="/"
       onclick={handleLinkClick}
-      class={cn(
-        "flex items-center justify-between rounded-md px-2.5 py-1.5 font-medium transition-colors",
-        currentPath === "/"
-          ? "bg-signal-soft text-foreground"
-          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-      )}
+      title={m.shell_new_session()}
+      aria-current={currentPath === "/" ? "page" : undefined}
+      class={navItemClass(currentPath === "/")}
     >
-      <div class="flex items-center gap-2">
-        <PlusIcon class="size-4" />
-        <span>{m.shell_new_session()}</span>
-      </div>
+      <PlusIcon class="size-4" />
+      <span class="w-full truncate text-center">{m.shell_nav_new()}</span>
     </a>
 
     <a
       href="/projects"
       onclick={handleLinkClick}
-      class={cn(
-        "flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors",
-        currentPath.startsWith("/projects")
-          ? "bg-signal-soft text-foreground"
-          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-      )}
+      title={m.shell_projects()}
+      aria-current={currentPath.startsWith("/projects") ? "page" : undefined}
+      class={navItemClass(currentPath.startsWith("/projects"))}
     >
       <FolderGit2Icon class="size-4" />
-      <span>{m.shell_projects()}</span>
+      <span class="w-full truncate text-center">{m.shell_projects()}</span>
     </a>
 
     <a
       href="/external"
       onclick={handleLinkClick}
-      class={cn(
-        "flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors",
-        currentPath === "/external"
-          ? "bg-signal-soft text-foreground"
-          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-      )}
+      title={m.shell_external_sessions()}
+      aria-current={currentPath === "/external" ? "page" : undefined}
+      class={navItemClass(currentPath === "/external")}
     >
       <HistoryIcon class="size-4" />
-      <span>{m.shell_external_sessions()}</span>
+      <span class="w-full truncate text-center">{m.shell_nav_external()}</span>
     </a>
 
     <a
       href="/search"
       onclick={handleLinkClick}
-      class={cn(
-        "flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors",
-        currentPath.startsWith("/search")
-          ? "bg-signal-soft text-foreground"
-          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-      )}
+      title={m.shell_full_text_search()}
+      aria-current={currentPath.startsWith("/search") ? "page" : undefined}
+      class={navItemClass(currentPath.startsWith("/search"))}
     >
       <SearchIcon class="size-4" />
-      <span>{m.shell_full_text_search()}</span>
+      <span class="w-full truncate text-center">{m.shell_nav_search()}</span>
     </a>
 
     <a
       href="/settings"
       onclick={handleLinkClick}
-      class={cn(
-        "flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors",
-        currentPath.startsWith("/settings")
-          ? "bg-signal-soft text-foreground"
-          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-      )}
+      title={m.shell_settings()}
+      aria-current={currentPath.startsWith("/settings") ? "page" : undefined}
+      class={navItemClass(currentPath.startsWith("/settings"))}
     >
       <SettingsIcon class="size-4" />
-      <span>{m.shell_settings()}</span>
+      <span class="w-full truncate text-center">{m.shell_settings()}</span>
     </a>
   </nav>
 
@@ -274,6 +315,7 @@
       <input
         type="text"
         bind:value={searchQuery}
+        oninput={() => (attentionOnly = false)}
         placeholder={m.shell_search_placeholder()}
         aria-label={m.shell_search_placeholder()}
         class="bg-chip placeholder:text-muted-foreground focus-visible:ring-ring/40 h-8 w-full rounded-md border border-border pr-2 pl-7 text-[13px] outline-none focus-visible:ring-2"
@@ -283,40 +325,46 @@
 
   <!-- Session list (grouped by project) -->
   <div class="scrollbar-thin flex-1 overflow-y-auto p-2">
-    <!-- Needs attention section (shown at the top only when there are pending approvals or errors) -->
+    <!-- Attention is a filter over the list, not a second copy of it: the
+         same session must not appear twice. -->
     {#if needsAttentionSessions.length > 0 && searchQuery.trim() === ""}
-      <div class="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 p-1.5">
-        <button
-          type="button"
-          class="text-destructive flex w-full items-center justify-between px-1 py-0.5 text-[11px] font-semibold tracking-wider uppercase select-none"
-          onclick={() => (showAttentionSection = !showAttentionSection)}
+      <button
+        type="button"
+        class={cn(
+          "mb-2 flex h-7 w-full items-center gap-1.5 rounded-md border px-2 text-[11px] font-semibold transition-colors select-none",
+          attentionFilterActive
+            ? "border-destructive/40 bg-destructive/15 text-destructive"
+            : "border-destructive/25 bg-destructive/5 text-destructive hover:bg-destructive/10",
+        )}
+        aria-pressed={attentionFilterActive}
+        title={attentionFilterActive ? m.shell_clear_filter() : m.shell_attention_filter_hint()}
+        onclick={() => (attentionOnly = !attentionOnly)}
+      >
+        <AlertCircleIcon class="size-3 shrink-0" />
+        <span class="truncate">{m.shell_needs_attention()}</span>
+        <span
+          class="rounded-full bg-destructive/15 px-1.5 text-[10px] leading-tight tabular-nums text-destructive"
         >
-          <span class="flex items-center gap-1.5">
-            <AlertCircleIcon class="size-3" />
-            <span>{m.shell_needs_attention()}</span>
-            <span class="rounded-full bg-destructive/15 px-1.5 py-0.2 text-[11px] text-destructive">
-              {needsAttentionSessions.length}
-            </span>
-          </span>
-          {#if showAttentionSection}
-            <ChevronDownIcon class="size-3" />
+          {needsAttentionSessions.length}
+        </span>
+        <span class="ml-auto flex shrink-0 items-center gap-1 text-[10px] font-medium">
+          {#if attentionFilterActive}
+            {m.shell_clear_filter()}
+            <XIcon class="size-3" />
           {:else}
             <ChevronRightIcon class="size-3" />
           {/if}
-        </button>
-
-        {#if showAttentionSection}
-          <ul class="flex list-none flex-col gap-0.5 p-0 mt-1">
-            {#each needsAttentionSessions as session (session.session_id)}
-              {@render sessionRow(session)}
-            {/each}
-          </ul>
-        {/if}
-      </div>
+        </span>
+      </button>
     {/if}
 
-    <!-- List by project -->
-    {#if projectGroups.length === 0}
+    {#if attentionFilterActive}
+      <ul class="flex list-none flex-col gap-0.5 p-0">
+        {#each needsAttentionSessions as session (session.session_id)}
+          {@render sessionRow(session)}
+        {/each}
+      </ul>
+    {:else if projectGroups.length === 0}
       <div class="text-muted-foreground p-3 text-center text-[13px]">
         {searchQuery ? m.shell_no_matching_results() : m.shell_no_projects_yet()}
       </div>
@@ -403,8 +451,9 @@
       </div>
     {/if}
 
-    <!-- Archived sessions (collapsible) -->
-    {#if archivedSessions.length > 0}
+    <!-- Archived sessions (collapsible; hidden while the attention filter owns
+         the list, since that list already includes archived waiting sessions) -->
+    {#if archivedSessions.length > 0 && !attentionFilterActive}
       <div class="mt-3 border-t pt-2">
         <button
           type="button"

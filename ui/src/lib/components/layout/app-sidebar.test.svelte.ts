@@ -1,9 +1,11 @@
 import { flushSync, mount, unmount } from "svelte";
 import { describe, expect, it } from "vitest";
 import { page } from "$app/state";
-import type { ProjectSummary } from "#lib/generated/bindings.ts";
+import type { ProjectSummary, SessionSummary } from "#lib/generated/bindings.ts";
 import AppSidebar from "./AppSidebar.svelte";
 import { sync } from "#lib/stores/app.svelte.ts";
+
+const COLLAPSED_PROJECTS_KEY = "fxg:sidebar_collapsed_projects";
 
 function project(projectId: string, hasSessions: boolean): ProjectSummary {
   return {
@@ -18,14 +20,40 @@ function project(projectId: string, hasSessions: boolean): ProjectSummary {
   };
 }
 
-function seed(projects: ProjectSummary[]): HTMLElement {
+function session(
+  overrides: Partial<SessionSummary> &
+    Pick<SessionSummary, "session_id" | "project_id" | "title" | "status">,
+): SessionSummary {
+  return {
+    node_id: "node-1",
+    local_path: `/tmp/${overrides.project_id}`,
+    git_branch: null,
+    is_worktree: false,
+    agent_id: "opencode",
+    agent_session_id: null,
+    parent_session_id: null,
+    current_mode: null,
+    usage: null,
+    last_node_seq: 0,
+    created_at: 0,
+    updated_at: 0,
+    archived_at: null,
+    ...overrides,
+  };
+}
+
+function seed(projects: ProjectSummary[], sessions: SessionSummary[] = []): HTMLElement {
   page.url = new URL("http://localhost/");
   sync.projects = projects;
   sync.nodes = [];
-  sync.sessions = [];
+  sync.sessions = sessions;
   const target = document.createElement("div");
   document.body.appendChild(target);
   return target;
+}
+
+function occurrences(text: string, needle: string): number {
+  return text.split(needle).length - 1;
 }
 
 /** Renders the sidebar and returns its text after the project groups settle. */
@@ -55,6 +83,67 @@ describe("AppSidebar project groups", () => {
       expect(text).not.toContain("Start a session");
     } finally {
       unmount(component);
+    }
+  });
+});
+
+describe("AppSidebar attention filter", () => {
+  it("lists a session once and filters down to the sessions that need attention", () => {
+    const target = seed(
+      [project("alpha-app", true)],
+      [
+        session({
+          session_id: "waiting",
+          project_id: "alpha-app",
+          title: "Waiting session",
+          status: "waiting_input",
+          updated_at: 2,
+        }),
+        session({
+          session_id: "calm",
+          project_id: "alpha-app",
+          title: "Calm session",
+          status: "idle",
+          updated_at: 1,
+        }),
+      ],
+    );
+    const { component } = render(target);
+    try {
+      expect(occurrences(target.textContent ?? "", "Waiting session")).toBe(1);
+
+      const strip = target.querySelector<HTMLButtonElement>('button[aria-pressed="false"]');
+      expect(strip).not.toBeNull();
+      strip?.click();
+      flushSync();
+
+      expect(target.textContent).toContain("Waiting session");
+      expect(target.textContent).not.toContain("Calm session");
+      expect(strip?.getAttribute("aria-pressed")).toBe("true");
+    } finally {
+      unmount(component);
+    }
+  });
+});
+
+describe("AppSidebar project collapse", () => {
+  it("restores collapsed projects on the next mount", () => {
+    localStorage.clear();
+    const target = seed([project("alpha-app", false)]);
+    const first = render(target);
+    const header = Array.from(target.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("alpha-app"),
+    );
+    header?.click();
+    flushSync();
+    expect(localStorage.getItem(COLLAPSED_PROJECTS_KEY)).toBe('["alpha-app"]');
+    unmount(first.component);
+
+    const second = render(target);
+    try {
+      expect(target.textContent).not.toContain("Start a session");
+    } finally {
+      unmount(second.component);
     }
   });
 });
