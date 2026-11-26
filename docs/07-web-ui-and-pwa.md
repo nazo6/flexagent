@@ -30,11 +30,11 @@ PC ブラウザ、ローカル直結 (`node.addr`、既定 `localhost:7860`)、�
 
 - **3 層トークン構成**:
   1. **Design constants**: type scale（11px 大文字ラベル / 12px メタデータ / 13px UI / 14px 本文）、spacing、radius（pill = full / control = 8px / surface = 12px / dialog = 14px）、border（1px ヘアライン主体）、layout、motion。
-  2. **Semantic roles**: `--canvas` / `--surface` / `--sidebar-bg` / `--ink` / `--muted-ink` / `--line` / `--chip` / `--signal`（選択面の tint やフォーカスリング用）/ `--ok` / `--warn` / `--danger`。
+  2. **Semantic roles**: `--canvas` / `--surface` / `--sidebar-bg` / `--ink` / `--muted-ink` / `--line` / `--chip` / `--signal`（フォーカスリングやアクセント用）/ `--selection`（選択行の面）/ `--ok` / `--warn` / `--danger`。
   3. **shadcn mapping**: `--background` / `--card` / `--border` / `--ring` / `--primary` 等を semantic role へ写像。
 - **プリセット**: **Bone**（暖色ニュートラル + 琥珀、既定）、**Graphite**（冷色ニュートラル + コバルト）、**Moss**（緑寄りニュートラル + モス）の 3 種（各 light / dark）。端末ごとの `localStorage["fxg:palette"]` に保存し、サーバーへは同期しない。
 - **表示規則**: 機械的文字列（branch / path / ID / model / 時刻）のみ mono フォント。ステータスは色だけでなくラベル・アイコンを併記する。ターミナルと Shiki コードテーマは可読性優先で固定テーマを維持する。
-- **選択・状態の表現**: 選択は `signal-soft` の塗りと文字ウェイト、要対応はインラインのステータスアイコンとピル、カードや折りたたみは 1px の全面ボーダーで示す。左端のアクセントバーは使わない。
+- **選択・状態の表現**: 選択行は `--selection` の面・1px の signal ヘアライン・文字ウェイトで示す（色だけに頼らない）。`--signal-soft` はアイコンチップや `mark` 用の淡い tint であり、選択面には使わない（明色パレットでは `--sidebar-bg` とほぼ同明度になり判別できない）。要対応はインラインのステータスアイコンとピル、カードや折りたたみは 1px の全面ボーダーで示す。左端のアクセントバーは使わない。選択中の項目は `aria-current="page"` を持つ。
 - **Motion**: 状態変化は 120ms（hover / press）/ 160ms（開閉・状態クロスフェード）/ 240ms（強調）を上限とし、`transform` と `opacity` を優先する。高さアニメは折りたたみパネルだけに限定し、履歴の初期描画・セッション切替・ページング・スクロールは動かさない。新着メッセージの入場とサイドバーの並べ替えは、ライブな変化に限って動かす。実行中スイープは `running` の間だけ、承認リングはカードがライブで現れたときの一度だけ、ロゴ描画はコールドスタート時だけ再生する。`prefers-reduced-motion` を尊重し、Browser > Appearance の `Motion: System / Full / Reduced`（`localStorage["fxg:motion"]`）で端末ごとに上書きできる。Reduced は装飾的なループと移動を止めるが、実行中を示すスピナーは残す。ターミナル / Monaco は対象外。
 - **モバイル密度**: `pointer: coarse` では本文 15px・入力 16px・最小ヒット領域 32–44px（`.touch-target*`）・リスト行 44px（`.touch-row`）に上げる。デスクトップのコンパクト密度をそのまま持ち込まず、指で押せることを優先する。
 

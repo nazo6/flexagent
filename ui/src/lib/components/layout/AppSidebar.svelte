@@ -103,7 +103,7 @@
     return cn(
       "touch-row flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-md px-0 py-1 text-[11px] leading-tight font-medium transition-colors max-lg:text-[12px]",
       active
-        ? "bg-signal-soft text-foreground"
+        ? "bg-selection text-foreground ring-1 ring-signal/40 ring-inset"
         : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
     );
   }
@@ -597,10 +597,11 @@
             {...props}
             href={`/sessions/${session.session_id}`}
             onclick={handleLinkClick}
+            aria-current={isActive ? "page" : undefined}
             class={cn(
               "session-row touch-row group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors max-lg:text-sm",
               isActive
-                ? "bg-signal-soft text-foreground font-medium"
+                ? "bg-selection text-foreground font-semibold ring-1 ring-signal/40 ring-inset"
                 : isWaiting
                   ? "text-foreground font-semibold hover:bg-warn-soft/50"
                   : isAttention

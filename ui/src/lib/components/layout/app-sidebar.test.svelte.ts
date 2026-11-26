@@ -147,3 +147,45 @@ describe("AppSidebar project collapse", () => {
     }
   });
 });
+
+describe("AppSidebar selection", () => {
+  it("marks the open session as the current page with a surface beyond color", () => {
+    localStorage.clear();
+    const target = seed(
+      [project("selection-app", true)],
+      [
+        session({
+          session_id: "open",
+          project_id: "selection-app",
+          title: "Open session",
+          status: "idle",
+          updated_at: 2,
+        }),
+        session({
+          session_id: "other",
+          project_id: "selection-app",
+          title: "Other session",
+          status: "idle",
+          updated_at: 1,
+        }),
+      ],
+    );
+    page.url = new URL("http://localhost/sessions/open");
+    const { component } = render(target);
+    try {
+      const current = target.querySelector<HTMLAnchorElement>('a[href="/sessions/open"]');
+      expect(current?.getAttribute("aria-current")).toBe("page");
+      // The fill alone is too close to the sidebar in the light palettes;
+      // the hairline and the weight carry the selection with it.
+      expect(current?.className).toContain("bg-selection");
+      expect(current?.className).toContain("ring-1");
+      expect(current?.className).toContain("font-semibold");
+
+      const other = target.querySelector<HTMLAnchorElement>('a[href="/sessions/other"]');
+      expect(other?.getAttribute("aria-current")).toBeNull();
+      expect(other?.className).not.toContain("bg-selection");
+    } finally {
+      unmount(component);
+    }
+  });
+});

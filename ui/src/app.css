@@ -50,6 +50,18 @@
   --signal: oklch(0.52 0.14 55);
   --signal-soft: oklch(0.94 0.035 70);
   --signal-ink: oklch(0.99 0.005 85);
+  /*
+   * Selected row surface (session rows, active nav items).
+   *
+   * `--signal-soft` is a washed tint for icon chips, `mark` and backgrounds
+   * behind text; in the light palettes it sits within ~1.05:1 of
+   * `--sidebar-bg`, so it cannot identify a selected row on its own. A
+   * selection needs a surface that separates from the panel it sits on, so it
+   * gets its own role. Light palettes target ~1.25:1 against `--sidebar-bg`;
+   * dark palettes keep the softer tint (>=1.4:1 against the sidebar there).
+   * `ui/src/lib/theme-contrast.test.ts` enforces the floor.
+   */
+  --selection: oklch(0.885 0.045 68);
   --ok: oklch(0.52 0.09 150);
   --ok-soft: oklch(0.94 0.04 150);
   --warn: oklch(0.52 0.12 70);
@@ -109,6 +121,7 @@
   --signal: oklch(0.78 0.13 70);
   --signal-soft: oklch(0.3 0.05 60);
   --signal-ink: oklch(0.17 0.008 70);
+  --selection: oklch(0.3 0.05 60);
   --ok: oklch(0.75 0.09 150);
   --ok-soft: oklch(0.28 0.04 150);
   --warn: oklch(0.78 0.12 80);
@@ -134,6 +147,7 @@
   --signal: oklch(0.52 0.17 260);
   --signal-soft: oklch(0.94 0.03 260);
   --signal-ink: oklch(0.99 0.002 250);
+  --selection: oklch(0.885 0.045 258);
   --ok: oklch(0.52 0.09 155);
   --ok-soft: oklch(0.94 0.04 155);
   --warn: oklch(0.52 0.12 70);
@@ -158,6 +172,7 @@
   --signal: oklch(0.76 0.13 255);
   --signal-soft: oklch(0.29 0.05 255);
   --signal-ink: oklch(0.17 0.008 250);
+  --selection: oklch(0.29 0.05 255);
   --ok: oklch(0.75 0.09 155);
   --ok-soft: oklch(0.28 0.04 155);
   --warn: oklch(0.78 0.12 80);
@@ -183,6 +198,7 @@
   --signal: oklch(0.5 0.11 145);
   --signal-soft: oklch(0.94 0.04 140);
   --signal-ink: oklch(0.99 0.005 120);
+  --selection: oklch(0.885 0.045 140);
   --ok: oklch(0.52 0.1 150);
   --ok-soft: oklch(0.94 0.04 150);
   --warn: oklch(0.52 0.12 70);
@@ -207,6 +223,7 @@
   --signal: oklch(0.76 0.11 145);
   --signal-soft: oklch(0.29 0.05 145);
   --signal-ink: oklch(0.17 0.01 120);
+  --selection: oklch(0.29 0.05 145);
   --ok: oklch(0.75 0.1 150);
   --ok-soft: oklch(0.28 0.04 150);
   --warn: oklch(0.78 0.12 80);
@@ -233,6 +250,7 @@
   --color-signal: var(--signal);
   --color-signal-soft: var(--signal-soft);
   --color-signal-ink: var(--signal-ink);
+  --color-selection: var(--selection);
   --color-ok: var(--ok);
   --color-ok-soft: var(--ok-soft);
   --color-warn: var(--warn);
