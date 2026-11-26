@@ -122,7 +122,7 @@
   onunhandledrejection={onUnhandledRejection}
   onkeydown={onGlobalKeydown}
 />
-<Toaster richColors position="top-center" />
+<Toaster richColors position="top-center" offset="calc(var(--safe-top) + 1rem)" />
 <ProblemCenter onaction={handleProblemAction} />
 <TokenDialog />
 
@@ -133,7 +133,7 @@
 {/snippet}
 
 {#if !connection.ready}
-  <div class="bg-background text-muted-foreground flex min-h-svh flex-col">
+  <div class="safe-area-shell bg-background text-muted-foreground flex min-h-svh flex-col">
     {@render wcoDragStrip()}
     <div class="flex flex-1 items-center justify-center gap-2">
       <LoaderCircleIcon class="size-4 animate-spin" />
@@ -141,7 +141,7 @@
     </div>
   </div>
 {:else if connection.error !== null}
-  <div class="bg-background flex min-h-svh flex-col">
+  <div class="safe-area-shell bg-background flex min-h-svh flex-col">
     {@render wcoDragStrip()}
     <div class="flex flex-1 items-center justify-center p-6">
       <div class="flex max-w-md flex-col items-center gap-3 text-center">
@@ -161,12 +161,12 @@
     </div>
   </div>
 {:else if connection.tokenRequired}
-  <div class="bg-background flex min-h-svh flex-col">
+  <div class="safe-area-shell bg-background flex min-h-svh flex-col">
     {@render wcoDragStrip()}
   </div>
 {:else}
   <div
-    class="bg-background text-foreground flex h-svh w-full overflow-hidden"
+    class="safe-area-shell bg-background text-foreground flex h-svh w-full overflow-hidden"
     class:wco-sidebar-collapsed={layoutState.sidebarCollapsed}
   >
     <!-- Desktop sidebar (persistent on lg and up) -->
@@ -178,7 +178,7 @@
 
     <!-- Mobile drawer (Sheet) -->
     <Sheet.Root bind:open={layoutState.mobileDrawerOpen}>
-      <Sheet.Content side="left" class="p-0 w-80 max-w-[85vw]">
+      <Sheet.Content side="left" class="safe-area-portal w-80 max-w-[85vw] p-0">
         <AppSidebar onNavigate={() => (layoutState.mobileDrawerOpen = false)} />
       </Sheet.Content>
     </Sheet.Root>

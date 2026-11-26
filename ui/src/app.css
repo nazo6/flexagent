@@ -17,6 +17,16 @@
 :root {
   --radius: 0.75rem;
   color-scheme: light;
+  /*
+   * Installed-PWA safe areas (`viewport-fit=cover` in app.html). All are 0 in
+   * a desktop browser tab and in a window without notches; the shell and the
+   * portaled drawers use them so the status bar / home indicator never cover
+   * the header, composer, or navigation.
+   */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
 
   /* Bone: the default warm neutral + amber signal. */
   --canvas: oklch(0.972 0.006 85);
@@ -291,6 +301,18 @@
 }
 
 @layer components {
+  /* Installed-PWA inset for the whole shell (no-op in a normal browser tab). */
+  .safe-area-shell {
+    padding-top: var(--safe-top);
+    padding-right: var(--safe-right);
+    padding-bottom: var(--safe-bottom);
+    padding-left: var(--safe-left);
+  }
+  /* Inset for views portaled outside the shell (drawers, full-height sheets). */
+  .safe-area-portal {
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+  }
   /* Shared page frame: management screens use the wider variant. */
   .desk-page {
     @apply mx-auto flex w-full max-w-[1120px] flex-col gap-5 px-4 py-6 md:px-8 md:py-8;
