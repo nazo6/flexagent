@@ -6,8 +6,8 @@
   import * as Drawer from "#lib/components/ui/drawer/index.ts";
   import * as Popover from "#lib/components/ui/popover/index.ts";
   import { isCoarsePointer } from "#lib/pointer.ts";
-  import { mobileUI } from "#lib/media.svelte.ts";
   import { registerOverlay } from "#lib/overlays.ts";
+  import { uiTraits } from "#lib/ui-traits.svelte.ts";
   import { cn } from "#lib/utils.ts";
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
@@ -58,7 +58,7 @@
   // A bottom sheet on phones is easier to reach and dismiss than a popover
   // anchored to a small pill. A narrow desktop window keeps the popover.
   $effect(() => {
-    if (!mobileUI.matches || !open) return;
+    if (!uiTraits.sheetPickers || !open) return;
     return registerOverlay(overlayId, () => setOpen(false));
   });
 </script>
@@ -77,7 +77,7 @@
   {/if}
 {/snippet}
 
-{#if mobileUI.matches}
+{#if uiTraits.sheetPickers}
   <button
     type="button"
     class={triggerClass}

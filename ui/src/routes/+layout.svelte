@@ -17,7 +17,7 @@
   import { theme } from "#lib/theme.svelte.ts";
   import { initViewport } from "#lib/viewport.ts";
   import { closeTopOverlay } from "#lib/overlays.ts";
-  import { mobileLayout } from "#lib/media.svelte.ts";
+  import { uiTraits } from "#lib/ui-traits.svelte.ts";
   import type { RecoveryAction } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { ModeWatcher } from "mode-watcher";
@@ -84,7 +84,7 @@
   // itself with the back stack. A desktop resize closes it because the
   // desktop sidebar takes over.
   $effect(() => {
-    if (mobileLayout.matches) return;
+    if (uiTraits.overlayNav) return;
     if (layoutState.mobileDrawerOpen) layoutState.setMobileDrawer(false);
   });
 
@@ -200,7 +200,7 @@
     class:wco-sidebar-collapsed={layoutState.sidebarCollapsed}
   >
     <!-- Desktop sidebar (persistent on lg and up) -->
-    {#if !mobileLayout.matches && !layoutState.sidebarCollapsed}
+    {#if !uiTraits.overlayNav && !layoutState.sidebarCollapsed}
       <div class="flex h-full w-[264px] shrink-0 xl:w-[288px]">
         <AppSidebar />
       </div>
@@ -209,7 +209,7 @@
     <!-- Main area -->
     <div
       class="relative flex h-full flex-1 flex-col overflow-hidden"
-      inert={mobileLayout.matches && layoutState.mobileDrawerOpen}
+      inert={uiTraits.overlayNav && layoutState.mobileDrawerOpen}
     >
       <!-- Desktop: a floating control reopens the collapsed sidebar without
            reserving a full-height rail. Session pages place this control in
@@ -305,7 +305,7 @@
       </main>
     </div>
 
-    {#if mobileLayout.matches}
+    {#if uiTraits.overlayNav}
       <MobileDrawer
         open={layoutState.mobileDrawerOpen}
         onopen={() => layoutState.setMobileDrawer(true)}

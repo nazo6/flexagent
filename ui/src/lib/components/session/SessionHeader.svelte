@@ -16,6 +16,7 @@
   import { sessionNeedsAttention } from "#lib/session-status.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { layoutState } from "#lib/stores/layout.svelte.ts";
+  import { uiTraits } from "#lib/ui-traits.svelte.ts";
   import { DOCK_LAUNCHERS, type DockLauncherId } from "#lib/dock/registry.ts";
   import { cn } from "#lib/utils.ts";
   import MenuIcon from "@lucide/svelte/icons/menu";
@@ -66,17 +67,9 @@
       .length,
   );
 
-  // The quota control is a single instance: in the top bar on desktop and in
-  // the compact context row on phones (where the top bar is already full).
-  let isDesktop = $state(typeof window !== "undefined" && window.innerWidth >= 768);
-  function updateDesktop(): void {
-    isDesktop = window.innerWidth >= 768;
-  }
-  $effect(() => {
-    window.addEventListener("resize", updateDesktop);
-    return () => window.removeEventListener("resize", updateDesktop);
-  });
-
+  // The quota control is a single instance: in the top bar when the header has
+  // room, and in the compact context row on phones (where the top bar is
+  // already full). It must not be mounted twice, or both copies fetch usage.
   // The usage control keeps the agent identity visible even before the agent
   // reports limits, so the icon comes from the catalog, not the usage payload.
   let agentIcon = $state<string | null>(null);
@@ -160,7 +153,7 @@
     </div>
 
     <div class="hidden min-w-0 items-center gap-2 md:flex">
-      {#if isDesktop && session}
+      {#if uiTraits.roomyHeader && session}
         <AgentUsage
           nodeId={session.node_id}
           agentId={session.agent_id}
@@ -254,7 +247,7 @@
 
   <!-- Mobile: compact context row -->
   <div class="flex min-w-0 items-center gap-1 px-3 pb-1.5 md:hidden">
-    {#if !isDesktop && session}
+    {#if !uiTraits.roomyHeader && session}
       <AgentUsage
         nodeId={session.node_id}
         agentId={session.agent_id}

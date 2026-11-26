@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import { onDestroy, onMount, tick, untrack } from "svelte";
+  import { onDestroy, tick, untrack } from "svelte";
   import { fade, fly, slide } from "svelte/transition";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import ProvisioningLogCard from "#lib/components/ProvisioningLogCard.svelte";
@@ -37,6 +37,7 @@
   import { toast } from "svelte-sonner";
   import ArchiveIcon from "@lucide/svelte/icons/archive";
   import { layoutState } from "#lib/stores/layout.svelte.ts";
+  import { uiTraits } from "#lib/ui-traits.svelte.ts";
   import { registerOverlay } from "#lib/overlays.ts";
   import ArrowDownIcon from "@lucide/svelte/icons/arrow-down";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
@@ -79,6 +80,8 @@
       : { sessionId: session.session_id, nodeId: session.node_id, localPath: session.local_path },
   );
   const isDockOpen = $derived(dock.isOpen && dockContext !== null);
+  /** Compact layouts show the dock as a full-screen layer; wide ones split the pane. */
+  const dockAsOverlay = $derived(isDockOpen && uiTraits.overlayPanels);
   /** Highlight the active launcher only while the dock is visible. */
   const visibleLauncher = $derived(dock.isOpen ? dock.activeTool : null);
 
@@ -161,27 +164,6 @@
   // Desktop resizable right pane
   let mainContainer = $state<HTMLDivElement | null>(null);
   let isResizing = $state(false);
-  /**
-   * The side panel has a desktop slot (split pane) and a mobile slot
-   * (full-screen). Only the slot matching the viewport is rendered, because
-   * mounting both started two terminals — and therefore two PTYs — at once.
-   * `lg` is 64rem in Tailwind.
-   */
-  const DESKTOP_LAYOUT_QUERY = "(min-width: 64rem)";
-  let desktopLayout = $state(
-    typeof window === "undefined" || typeof window.matchMedia !== "function"
-      ? true
-      : window.matchMedia(DESKTOP_LAYOUT_QUERY).matches,
-  );
-
-  onMount(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const query = window.matchMedia(DESKTOP_LAYOUT_QUERY);
-    desktopLayout = query.matches;
-    const onChange = (event: MediaQueryListEvent) => (desktopLayout = event.matches);
-    query.addEventListener("change", onChange);
-    return () => query.removeEventListener("change", onChange);
-  });
 
   function handlePointerMove(e: PointerEvent) {
     if (!isResizing || !mainContainer) return;
@@ -218,7 +200,7 @@
   // Mobile layers close on the system back gesture instead of leaving the
   // session. The desktop dock is a split pane, so it is not in this stack.
   $effect(() => {
-    if (!isDockOpen || desktopLayout) return;
+    if (!dockAsOverlay) return;
     return registerOverlay("session-dock", () => dock.collapse());
   });
   $effect(() => {
@@ -712,12 +694,10 @@
     class="relative flex flex-1 overflow-hidden"
     class:select-none={isResizing}
   >
-    <!-- Chat column. On mobile the dock is an overlay, so the chat stays
-         rendered (and dimmed) behind it; `inert` keeps it out of the tab order. -->
-    <div
-      class="flex h-full min-w-0 flex-1 flex-col overflow-hidden"
-      inert={isDockOpen && !desktopLayout}
-    >
+    <!-- Chat column. In the compact shell the dock is an overlay, so the chat
+         stays rendered (and dimmed) behind it; `inert` keeps it out of the tab
+         order. -->
+    <div class="flex h-full min-w-0 flex-1 flex-col overflow-hidden" inert={dockAsOverlay}>
       <!-- Scrollable message timeline -->
       <div class="relative min-h-0 flex-1">
         <div
@@ -856,8 +836,8 @@
       </div>
     </div>
 
-    <!-- Desktop workspace dock -->
-    {#if isDockOpen && dockContext !== null && desktopLayout}
+    <!-- Wide workspace dock -->
+    {#if isDockOpen && dockContext !== null && !uiTraits.overlayPanels}
       {@const ctx = dockContext}
       <button
         type="button"
@@ -865,7 +845,7 @@
         in:fade|local={{ duration: motion.duration(120) }}
         out:fade|local={{ duration: motion.duration(120) }}
         class={cn(
-          "group z-10 -ml-px hidden w-1.5 cursor-col-resize shrink-0 items-center justify-center border-l border-border bg-transparent p-0 outline-none transition-colors select-none hover:bg-signal/50 focus-visible:ring-1 focus-visible:ring-signal active:bg-signal lg:flex",
+          "group z-10 -ml-px flex w-1.5 cursor-col-resize shrink-0 items-center justify-center border-l border-border bg-transparent p-0 outline-none transition-colors select-none hover:bg-signal/50 focus-visible:ring-1 focus-visible:ring-signal active:bg-signal",
           isResizing && "bg-signal",
         )}
         onpointerdown={startResize}
@@ -889,16 +869,16 @@
       <div
         in:slide|local={{ axis: "x", duration: motion.duration(180) }}
         out:slide|local={{ axis: "x", duration: motion.duration(180) }}
-        class="hidden h-full shrink-0 flex-col overflow-hidden lg:flex"
+        class="flex h-full shrink-0 flex-col overflow-hidden"
         style="width: clamp(22rem, {dock.width}%, 75%);"
       >
         <DockHost {ctx} {items} oncollapse={() => dock.collapse()} />
       </div>
     {/if}
 
-    <!-- Desktop tool rail -->
-    {#if !layoutState.rightRailCollapsed && session !== null}
-      <div class="hidden h-full lg:flex">
+    <!-- Wide tool rail -->
+    {#if !uiTraits.overlayPanels && !layoutState.rightRailCollapsed && session !== null}
+      <div class="flex h-full">
         <DockRail
           active={visibleLauncher}
           onselect={(id) => dock.toggleTool(id)}
@@ -907,11 +887,11 @@
       </div>
     {/if}
 
-    <!-- Mobile dock overlay. The inset panel and the dimmed, blurred backdrop
+    <!-- Compact dock overlay. The inset panel and the dimmed, blurred backdrop
          make it obvious that this is a layer above the conversation. -->
-    {#if isDockOpen && dockContext !== null && !desktopLayout}
+    {#if isDockOpen && dockContext !== null && uiTraits.overlayPanels}
       {@const ctx = dockContext}
-      <div class="absolute inset-0 z-20 lg:hidden">
+      <div class="absolute inset-0 z-20">
         <button
           type="button"
           tabindex="-1"

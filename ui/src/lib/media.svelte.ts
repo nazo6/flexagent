@@ -1,17 +1,12 @@
 import { browser } from "$app/env";
 
 /**
- * Shared reactive media queries.
+ * Reactive wrapper around `matchMedia`.
  *
- * `max-width: 63.99rem` matches Tailwind's `lg` breakpoint. Below it the app
- * uses its compact shell: drawer navigation and the full-screen dock.
- *
- * `mobileUI` additionally requires a coarse primary pointer. The touch-only
- * surfaces (bottom-sheet pickers) must not replace desktop popovers just
- * because a desktop window was resized narrow; a phone or tablet keeps the
- * mobile interaction model.
+ * Instances live in `ui-traits.svelte.ts` so responsive policy has a single
+ * source of truth. Read `matches` from a template or `$derived` to subscribe.
  */
-class MediaQueryStore {
+export class MediaQueryStore {
   matches = $state(false);
 
   constructor(readonly query: string) {
@@ -23,6 +18,3 @@ class MediaQueryStore {
     });
   }
 }
-
-export const mobileLayout = new MediaQueryStore("(max-width: 63.99rem)");
-export const mobileUI = new MediaQueryStore("(max-width: 63.99rem) and (pointer: coarse)");
