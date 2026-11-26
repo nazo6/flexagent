@@ -11,10 +11,8 @@ E2E暗号化を行わないため、ハブ側で会話履歴の構造化クエ�
 両者の違いは **「行のスコープ」と「実行ロール」だけ**
 であり、スキーマ対称性は「規約」ではなく 「単一定義」によって保証されます。
 
-マイグレーションは現在 `0001_initial.sql` の1本だけで、最新スキーマを直接作成します。
-プレリリース前の開発 DB は互換性を持たないため、スキーマを変更した場合は
-`fxg internal wipe` で作り直します（sqlx のチェックサム検証により、旧 DB は
-起動時にマイグレーションエラーになります）。
+マイグレーションは `crates/fxg-db/migrations/` の連番セットで管理し、`0001_initial.sql` に加えて追加マイグレーション（インデックス、承認 / 質問 ID のスコープ、`warm_idle_secs` など）を適用します。最新スキーマを直接作成するのは初回の `0001_initial.sql` だけです。
+プレリリース前の開発 DB は互換性を持たないため、**適用済みのマイグレーションを変更した場合**は `fxg internal wipe` で作り直します（sqlx のチェックサム検証により、旧 DB は起動時にマイグレーションエラーになります）。追加マイグレーションは既存 DB にも通常どおり適用されます。
 
 ---
 
@@ -85,6 +83,10 @@ SessionDeleted        → sessions.deleted_at = tombstone イベントの create
                         (本イベント (tombstone) と sessions 行は残す)
 ```
 
+- `sessions.project_id` は例外で、イベント適用だけでなく実行ノードの `NodeHello`
+  が報告する `project_node_bindings` / `SessionSyncState.project_id` でもハブが
+  再割当します（`project_key` の変更を `SessionCreated` の再送で巻き戻さないため。
+  `SessionCreated` の適用時も現在の binding を優先します）。
 - 投影はイベントログから**完全に再構築可能**です。`fxg-db` は再構築関数
   （イベント全量からの再生）を提供し、テストで「イベント適用後の状態 ==
   全量再構築後の状態」を 検証します。
@@ -165,12 +167,12 @@ Truth）とするため、テーブル上の以下のカラムは
 すべて**派生データ**として扱います。派生カラムはクエリ性能のためにのみ存在し、
 常にイベントログから再構築できることが要件です（再構築関数 + テストで保証）。
 
-| 派生カラム / テーブル                          | 生成源                                                                     |
-| :--------------------------------------------- | :------------------------------------------------------------------------- |
-| `sessions.*`（`synced_up_to_node_seq` を除く） | `session_events` の適用（§0.3 の投影規則）                                 |
-| `permission_requests`                          | `PermissionRequest` / `PermissionResolved` イベント                        |
-| `elicitation_requests`                         | `ElicitationRequest` / `ElicitationResolved` イベント                      |
-| `session_events.searchable_text`               | `payload_json` からのテキスト抽出（`TerminalOutput` 等のバイナリ系は除外） |
+| 派生カラム / テーブル                          | 生成源                                                                                   |
+| :--------------------------------------------- | :--------------------------------------------------------------------------------------- |
+| `sessions.*`（`synced_up_to_node_seq` を除く） | `session_events` の適用（§0.3 の投影規則）。`project_id` は現在の binding 報告でも再割当 |
+| `permission_requests`                          | `PermissionRequest` / `PermissionResolved` イベント                                      |
+| `elicitation_requests`                         | `ElicitationRequest` / `ElicitationResolved` イベント                                    |
+| `session_events.searchable_text`               | `payload_json` からのテキスト抽出（`TerminalOutput` 等のバイナリ系は除外）               |
 
 - `searchable_text` の生成責務はイベントを永続化する側（ノード /
   ハブ双方の受信ハンドラ）にあります。

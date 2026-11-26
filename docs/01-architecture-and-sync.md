@@ -217,11 +217,13 @@ sequenceDiagram
 **不変条件**: ハブはクライアント要求に応じてセッション状態（`sessions` /
 `permission_requests`）を直接書き換えない。書き込みは常に「実行ノードへのコマンド転送
 → ノードが状態更新とイベント発行」を経由します（例外はイベント適用の結果としての
-投影更新のみ）。これにより「どちらの値が正か」という判定規則が1つになります。
+投影更新と、実行ノードの `NodeHello` が報告する `project_node_bindings` /
+`SessionSyncState.project_id` に基づく `sessions.project_id` の再割当のみ）。
+これにより「どちらの値が正か」という判定規則が1つになります。
 
 なお、ハブの投影が何らかの理由で失われた場合（DB再構築等）に備え、再接続時の
 `NodeHello` は
-セッションごとの同期状態（`SessionSyncState { session_id, last_node_seq }`）を報告し、
+セッションごとの同期状態（`SessionSyncState { session_id, project_id, last_node_seq }`）を報告し、
 ハブは欠落・遅延を検出したセッションに対して `ResyncRequest` で `from_node_seq`
 以降のイベント再送を要求します。
 
@@ -356,11 +358,14 @@ Logical Project (例: github.com/nazo6/flexagent)
       └── Worktree B    (<data>/node/worktrees/github.com-nazo6-flexagent/fix-bug)   [branch: fix/bug]    <-- Session #2
 ```
 
-- 各ノードの `fxg node` は、セッション起動・プロジェクト追加・Worktree 操作の
-  タイミングで `git worktree list --porcelain` を実行し、同一リポジトリに属する
-  Worktree（パス、ブランチ）を検出してハブへ報告します。HEAD は必要時に
-  ノードの Worktree API から取得します。
-- 検出結果に変化（Worktree の追加・削除・ブランチ切替）があった場合、ノードは
+- 各ノードの `fxg node` は、Worktree API の一覧・作成・削除・prune の
+  タイミングで `git worktree list --porcelain` を実行し、対象リポジトリの
+  Worktree（パス、ブランチ、HEAD）を返します。セッション起動・プロジェクト追加
+  では、解決した `(node_id, local_path)` を binding として登録します。ハブの
+  Worktree 一覧は `NodeHello` で報告された binding から構築されるため、fxg が
+  まだ登録していない Worktree や HEAD は含みません（HEAD はノード直結の
+  Worktree API で取得します）。
+- binding に変化（Worktree の追加・削除・ブランチ切替）があった場合、ノードは
   `NodeProjectReport` を含む `NodeHello` を再送し、`hub.db` の
   `project_node_bindings` を更新します。
 - `fxg` が新規作成する Worktree は、親フォルダを散らかさないよう
