@@ -1652,37 +1652,47 @@ async fn events_belong_to_sender(
             }
             Ok(Some(_)) => {}
             Ok(None) => {
-                let created = events.iter().find_map(|event| {
-                    if event.session_id.as_str() != session_id {
-                        return None;
-                    }
+                let mut created_owner: Option<&NodeId> = None;
+                let mut created_mismatch = false;
+                let mut only_tombstones = true;
+                for event in events
+                    .iter()
+                    .filter(|event| event.session_id.as_str() == session_id)
+                {
                     match &event.payload {
                         fxg_protocol::events::UnifiedEventPayload::SessionCreated {
                             node_id: event_node_id,
                             ..
-                        } => Some(event_node_id),
-                        _ => None,
+                        } => {
+                            if event_node_id == node_id {
+                                created_owner = Some(event_node_id);
+                            } else {
+                                created_mismatch = true;
+                            }
+                        }
+                        // `SessionDeleted` for a session this hub never saw (the node
+                        // created and deleted it while offline, or the hub DB was
+                        // rebuilt) is a no-op in `fxg-db`. Accept it so the node's
+                        // outbox watermark can advance instead of retrying forever.
+                        fxg_protocol::events::UnifiedEventPayload::SessionDeleted {} => {}
+                        _ => only_tombstones = false,
                     }
-                });
-                match created {
-                    Some(event_node_id) if event_node_id == node_id => {}
-                    Some(event_node_id) => {
-                        tracing::warn!(
-                            node_id = node_id.as_str(),
-                            event_node_id = event_node_id.as_str(),
-                            session_id,
-                            "rejecting SessionCreated with a mismatched node_id"
-                        );
-                        return false;
-                    }
-                    None => {
-                        tracing::warn!(
-                            node_id = node_id.as_str(),
-                            session_id,
-                            "rejecting events for an unknown session without SessionCreated"
-                        );
-                        return false;
-                    }
+                }
+                if created_mismatch {
+                    tracing::warn!(
+                        node_id = node_id.as_str(),
+                        session_id,
+                        "rejecting SessionCreated with a mismatched node_id"
+                    );
+                    return false;
+                }
+                if created_owner.is_none() && !only_tombstones {
+                    tracing::warn!(
+                        node_id = node_id.as_str(),
+                        session_id,
+                        "rejecting events for an unknown session without SessionCreated"
+                    );
+                    return false;
                 }
             }
             Err(err) => {
@@ -1960,6 +1970,55 @@ mod tests {
                 .await
                 .expect("owner"),
             Some(owner)
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_session_tombstone_is_accepted_but_other_events_are_rejected() {
+        use fxg_protocol::common::ClientSource;
+        use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
+        use fxg_protocol::{EventId, SessionId};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state = HubState::new(crate::state::HubOptions {
+            paths: Paths::portable(dir.path(), Role::Hub),
+            listen_addr: "127.0.0.1:0".to_owned(),
+            allowed_hosts: Vec::new(),
+            allowed_origins: Vec::new(),
+            log: Default::default(),
+        })
+        .await
+        .expect("hub state");
+
+        let node_id = NodeId::from("node-1");
+        let session_id = SessionId::from("offline-deleted");
+        let tombstone = SessionEventEnvelope {
+            event_id: EventId::from("event-tombstone"),
+            session_id: session_id.clone(),
+            node_seq: 2,
+            created_at: 2,
+            payload: UnifiedEventPayload::SessionDeleted {},
+        };
+        assert!(
+            events_belong_to_sender(&state, &node_id, &[tombstone]).await,
+            "a tombstone-only batch for an unknown session must be acknowledged as a no-op"
+        );
+
+        let message = SessionEventEnvelope {
+            event_id: EventId::from("event-message"),
+            session_id,
+            node_seq: 2,
+            created_at: 2,
+            payload: UnifiedEventPayload::UserMessage {
+                text: "must not be accepted".to_owned(),
+                attachments: Vec::new(),
+                client_source: ClientSource::Web,
+                agent_message_id: None,
+            },
+        };
+        assert!(
+            !events_belong_to_sender(&state, &node_id, &[message]).await,
+            "non-tombstone events for an unknown session must still be rejected"
         );
     }
 }
