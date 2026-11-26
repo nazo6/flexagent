@@ -69,9 +69,9 @@
   </button>
 
   {#if isOpen}
-    <div transition:slide={{ duration: motion.duration(160) }} class="mt-1.5">
+    <div transition:slide|local={{ duration: motion.duration(160) }} class="mt-1.5">
       <div
-        transition:fade={{ duration: motion.duration(160) }}
+        transition:fade|local={{ duration: motion.duration(160) }}
         class="border-line rounded-md border p-2.5"
       >
         {@render children()}

@@ -451,6 +451,23 @@
     animation: seq-focus-flash 2.4s ease-out 1;
   }
   /*
+   * A row that arrived live rises a few pixels while it fades in. History is
+   * gated by `ChatTimeline` and never receives this class.
+   */
+  @keyframes motion-message-enter {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .motion-message-enter {
+    animation: motion-message-enter var(--motion-base) var(--ease-out) both;
+  }
+  /*
    * One-shot pop for a status that just resolved (tool call, exit code).
    */
   @keyframes motion-status-pop {

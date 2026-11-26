@@ -264,9 +264,9 @@
 
         <!-- Detail content (diff / log output) -->
         {#if isExpanded && hasDetailContent}
-          <div transition:slide={{ duration: motion.duration(160) }}>
+          <div transition:slide|local={{ duration: motion.duration(160) }}>
             <div
-              transition:fade={{ duration: motion.duration(160) }}
+              transition:fade|local={{ duration: motion.duration(160) }}
               class="bg-background/80 border-border/60 border-t p-2.5 flex flex-col gap-2"
             >
               <div class="flex flex-wrap items-center gap-2 text-[11px]">

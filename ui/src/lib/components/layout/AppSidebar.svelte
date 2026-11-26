@@ -12,8 +12,11 @@
   } from "#lib/session-status.ts";
   import { pinned } from "#lib/stores/pinned.svelte.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
+  import { motion } from "#lib/motion.svelte.ts";
   import { cn } from "#lib/utils.ts";
   import { m } from "#lib/paraglide/messages.js";
+  import { flip } from "svelte/animate";
+  import { slide } from "svelte/transition";
   import BrandIcon from "#lib/components/BrandIcon.svelte";
   import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
   import ProblemBadge from "#lib/components/ProblemBadge.svelte";
@@ -215,6 +218,22 @@
     });
   });
 
+  /**
+   * Suppress the fold transition for the first batch of projects. Without this
+   * gate, every expanded project would slide open together on initial load.
+   * Later fold toggles animate normally.
+   */
+  let projectsReady = $state(false);
+  let projectsSeen = false;
+
+  $effect(() => {
+    if (projectsSeen || projectGroups.length === 0) return;
+    projectsSeen = true;
+    requestAnimationFrame(() => {
+      projectsReady = true;
+    });
+  });
+
   function getNode(nodeId: string) {
     return sync.nodes.find((n) => n.node_id === nodeId);
   }
@@ -361,7 +380,9 @@
     {#if attentionFilterActive}
       <ul class="flex list-none flex-col gap-0.5 p-0">
         {#each needsAttentionSessions as session (session.session_id)}
-          {@render sessionRow(session)}
+          <li animate:flip={{ duration: motion.duration(180) }}>
+            {@render sessionRow(session)}
+          </li>
         {/each}
       </ul>
     {:else if projectGroups.length === 0}
@@ -372,7 +393,7 @@
       <div class="flex flex-col gap-2.5">
         {#each projectGroups as group (group.projectId)}
           {@const isCollapsed = isProjectCollapsed(group.projectId)}
-          <div class="flex flex-col">
+          <div animate:flip={{ duration: motion.duration(180) }} class="flex flex-col">
             <!-- Project header -->
             <div
               class="group/proj flex items-center justify-between rounded-md px-1.5 py-1 text-[13px] hover:bg-muted/40 transition-colors"
@@ -422,10 +443,13 @@
             <!-- Sessions in the project -->
             {#if !isCollapsed}
               <ul
+                transition:slide|local={{ duration: projectsReady ? motion.duration(160) : 0 }}
                 class="ml-2.5 border-l border-border/60 pl-2 flex list-none flex-col gap-0.5 p-0 mt-0.5"
               >
                 {#each group.sessions as session (session.session_id)}
-                  {@render sessionRow(session)}
+                  <li animate:flip={{ duration: motion.duration(180) }}>
+                    {@render sessionRow(session)}
+                  </li>
                 {/each}
                 {#if group.sessions.length === 0 && !sync.hasLoadedProjectSessions(group.projectId)}
                   <li class="py-1 px-1.5">
@@ -475,9 +499,14 @@
         </button>
 
         {#if showArchivedSection}
-          <ul class="mt-1 flex list-none flex-col gap-0.5 p-0">
+          <ul
+            transition:slide|local={{ duration: motion.duration(160) }}
+            class="mt-1 flex list-none flex-col gap-0.5 p-0"
+          >
             {#each archivedSessions as session (session.session_id)}
-              {@render sessionRow(session)}
+              <li animate:flip={{ duration: motion.duration(180) }}>
+                {@render sessionRow(session)}
+              </li>
             {/each}
           </ul>
         {/if}
@@ -527,159 +556,157 @@
   {@const nodeAvail = getNodeAvailability(node, sync.wsConnected)}
   {@const isPinned = pinned.isPinned(session.session_id)}
   {@const isUnread = sync.hasUnread(session.session_id)}
-  <li>
-    <Tooltip.Provider delayDuration={400}>
-      <Tooltip.Root>
-        <Tooltip.Trigger>
-          {#snippet child({ props })}
-            <a
-              {...props}
-              href={`/sessions/${session.session_id}`}
-              onclick={handleLinkClick}
-              class={cn(
-                "session-row group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors",
-                isActive
-                  ? "bg-signal-soft text-foreground font-medium"
-                  : isWaiting
-                    ? "text-foreground font-semibold hover:bg-warn-soft/50"
-                    : isAttention
-                      ? "text-foreground font-semibold hover:bg-danger-soft/50"
-                      : "text-foreground/80 hover:bg-accent/40 hover:text-foreground",
-                isArchived && !isWaiting && "opacity-70",
-              )}
-            >
-              <!-- Node health is only worth a dot when the node cannot serve
+  <Tooltip.Provider delayDuration={400}>
+    <Tooltip.Root>
+      <Tooltip.Trigger>
+        {#snippet child({ props })}
+          <a
+            {...props}
+            href={`/sessions/${session.session_id}`}
+            onclick={handleLinkClick}
+            class={cn(
+              "session-row group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors",
+              isActive
+                ? "bg-signal-soft text-foreground font-medium"
+                : isWaiting
+                  ? "text-foreground font-semibold hover:bg-warn-soft/50"
+                  : isAttention
+                    ? "text-foreground font-semibold hover:bg-danger-soft/50"
+                    : "text-foreground/80 hover:bg-accent/40 hover:text-foreground",
+              isArchived && !isWaiting && "opacity-70",
+            )}
+          >
+            <!-- Node health is only worth a dot when the node cannot serve
                    the session; healthy rows stay visually quiet. -->
-              {#if !nodeAvail.isAvailable}
-                <span class={cn("size-1.5 shrink-0 rounded-full", nodeAvail.dotColorClass)}></span>
+            {#if !nodeAvail.isAvailable}
+              <span class={cn("size-1.5 shrink-0 rounded-full", nodeAvail.dotColorClass)}></span>
+            {/if}
+
+            <!-- Completed agent output the user has not opened yet -->
+            {#if isUnread}
+              <span
+                class="bg-signal size-1.5 shrink-0 rounded-full"
+                role="img"
+                title={m.shell_unread()}
+                aria-label={m.shell_unread()}
+              ></span>
+            {/if}
+
+            <!-- The agent is answering / working right now -->
+            {#if session.status === "running"}
+              <span
+                class="text-signal shrink-0"
+                role="img"
+                title={m.status_running()}
+                aria-label={m.status_running()}
+              >
+                <LoaderCircleIcon class="size-3.5 animate-spin" aria-hidden="true" />
+              </span>
+            {/if}
+
+            {#if isAttention}
+              {#if isWaiting}
+                <TriangleAlertIcon class="text-warn size-3.5 shrink-0" aria-hidden="true" />
+              {:else}
+                <AlertCircleIcon class="text-danger size-3.5 shrink-0" aria-hidden="true" />
               {/if}
+            {/if}
 
-              <!-- Completed agent output the user has not opened yet -->
-              {#if isUnread}
-                <span
-                  class="bg-signal size-1.5 shrink-0 rounded-full"
-                  role="img"
-                  title={m.shell_unread()}
-                  aria-label={m.shell_unread()}
-                ></span>
-              {/if}
+            <!-- Title -->
+            <span class="min-w-0 flex-1 truncate">{session.title}</span>
 
-              <!-- The agent is answering / working right now -->
-              {#if session.status === "running"}
-                <span
-                  class="text-signal shrink-0"
-                  role="img"
-                  title={m.status_running()}
-                  aria-label={m.status_running()}
-                >
-                  <LoaderCircleIcon class="size-3.5 animate-spin" aria-hidden="true" />
-                </span>
-              {/if}
+            {#if attentionLabel}
+              <span
+                class={cn(
+                  "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none",
+                  isWaiting ? "bg-warn/15 text-warn" : "bg-danger/15 text-danger",
+                )}
+              >
+                {attentionLabel}
+              </span>
+            {/if}
 
-              {#if isAttention}
-                {#if isWaiting}
-                  <TriangleAlertIcon class="text-warn size-3.5 shrink-0" aria-hidden="true" />
-                {:else}
-                  <AlertCircleIcon class="text-danger size-3.5 shrink-0" aria-hidden="true" />
-                {/if}
-              {/if}
-
-              <!-- Title -->
-              <span class="min-w-0 flex-1 truncate">{session.title}</span>
-
-              {#if attentionLabel}
-                <span
-                  class={cn(
-                    "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none",
-                    isWaiting ? "bg-warn/15 text-warn" : "bg-danger/15 text-danger",
-                  )}
-                >
-                  {attentionLabel}
-                </span>
-              {/if}
-
-              <div class="flex shrink-0 items-center text-muted-foreground text-[11px]">
-                <!-- Resting metadata. Hidden while the actions are open on
+            <div class="flex shrink-0 items-center text-muted-foreground text-[11px]">
+              <!-- Resting metadata. Hidden while the actions are open on
                      pointer devices so the two clusters never take horizontal
                      space at the same time; touch screens show both. -->
-                <span class="session-row-meta flex items-center gap-1.5">
-                  {#if isPinned}
-                    <PinIcon
-                      class="text-signal size-3 shrink-0"
-                      fill="currentColor"
-                      aria-hidden="true"
-                    />
-                  {/if}
-                  <span class="tabular-nums">
-                    {formatRelativeTimeCompact(session.updated_at)}
-                  </span>
+              <span class="session-row-meta flex items-center gap-1.5">
+                {#if isPinned}
+                  <PinIcon
+                    class="text-signal size-3 shrink-0"
+                    fill="currentColor"
+                    aria-hidden="true"
+                  />
+                {/if}
+                <span class="tabular-nums">
+                  {formatRelativeTimeCompact(session.updated_at)}
                 </span>
+              </span>
 
-                <!-- Actions. Collapsed until hover/focus on pointer devices so
+              <!-- Actions. Collapsed until hover/focus on pointer devices so
                      they do not truncate the title at rest; always visible on
                      touch screens (see `.session-row-actions` in app.css). -->
-                <div
-                  class="session-row-actions flex shrink-0 items-center gap-1 overflow-hidden transition-opacity"
-                >
-                  <!-- Archive / delete menu -->
-                  <SessionActionsMenu {session} align="end" iconClass="size-3.5" />
+              <div
+                class="session-row-actions flex shrink-0 items-center gap-1 overflow-hidden transition-opacity"
+              >
+                <!-- Archive / delete menu -->
+                <SessionActionsMenu {session} align="end" iconClass="size-3.5" />
 
-                  <!-- Pin button -->
-                  <button
-                    type="button"
-                    class={cn(
-                      "hover:text-foreground p-0.5 transition-colors",
-                      isPinned && "text-signal",
-                    )}
-                    title={isPinned ? m.shell_unpin() : m.shell_pin()}
-                    onclick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      pinned.toggle(session.session_id);
-                    }}
-                  >
-                    <PinIcon class="size-3" fill={isPinned ? "currentColor" : "none"} />
-                  </button>
-                </div>
+                <!-- Pin button -->
+                <button
+                  type="button"
+                  class={cn(
+                    "hover:text-foreground p-0.5 transition-colors",
+                    isPinned && "text-signal",
+                  )}
+                  title={isPinned ? m.shell_unpin() : m.shell_pin()}
+                  onclick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    pinned.toggle(session.session_id);
+                  }}
+                >
+                  <PinIcon class="size-3" fill={isPinned ? "currentColor" : "none"} />
+                </button>
               </div>
-            </a>
-          {/snippet}
-        </Tooltip.Trigger>
-        <Tooltip.Content
-          side="right"
-          align="start"
-          class="max-w-[300px] flex-col items-stretch gap-1.5 px-2.5 py-2 text-left leading-snug"
-        >
-          <span class="font-medium break-words">
-            {`${session.title}${isArchived ? ` (${m.shell_archived()})` : ""}`}
-          </span>
+            </div>
+          </a>
+        {/snippet}
+      </Tooltip.Trigger>
+      <Tooltip.Content
+        side="right"
+        align="start"
+        class="max-w-[300px] flex-col items-stretch gap-1.5 px-2.5 py-2 text-left leading-snug"
+      >
+        <span class="font-medium break-words">
+          {`${session.title}${isArchived ? ` (${m.shell_archived()})` : ""}`}
+        </span>
+        <span class="text-background/70 flex items-center gap-1.5">
+          <FolderGit2Icon class="size-3 shrink-0" />
+          <span class="truncate">{session.project_id}</span>
+        </span>
+        {#if session.git_branch}
           <span class="text-background/70 flex items-center gap-1.5">
-            <FolderGit2Icon class="size-3 shrink-0" />
-            <span class="truncate">{session.project_id}</span>
+            <GitBranchIcon class="size-3 shrink-0" />
+            <span class="truncate font-mono">{session.git_branch}</span>
           </span>
-          {#if session.git_branch}
-            <span class="text-background/70 flex items-center gap-1.5">
-              <GitBranchIcon class="size-3 shrink-0" />
-              <span class="truncate font-mono">{session.git_branch}</span>
-            </span>
-          {/if}
-          <span class="text-background/70 flex items-start gap-1.5">
-            <FolderIcon class="mt-0.5 size-3 shrink-0" />
-            <span class="font-mono text-[11px] break-all">{session.local_path}</span>
+        {/if}
+        <span class="text-background/70 flex items-start gap-1.5">
+          <FolderIcon class="mt-0.5 size-3 shrink-0" />
+          <span class="font-mono text-[11px] break-all">{session.local_path}</span>
+        </span>
+        <span class="text-background/70 flex items-center gap-1.5">
+          <span class={cn("size-1.5 shrink-0 rounded-full", nodeAvail.dotColorClass)}></span>
+          <span class="truncate">
+            {sessionStatusLabel(session.status)}
+            {" · "}
+            {m.shell_node_status({
+              node: node?.name ?? session.node_id,
+              status: nodeAvail.statusText,
+            })}
           </span>
-          <span class="text-background/70 flex items-center gap-1.5">
-            <span class={cn("size-1.5 shrink-0 rounded-full", nodeAvail.dotColorClass)}></span>
-            <span class="truncate">
-              {sessionStatusLabel(session.status)}
-              {" · "}
-              {m.shell_node_status({
-                node: node?.name ?? session.node_id,
-                status: nodeAvail.statusText,
-              })}
-            </span>
-          </span>
-        </Tooltip.Content>
-      </Tooltip.Root>
-    </Tooltip.Provider>
-  </li>
+        </span>
+      </Tooltip.Content>
+    </Tooltip.Root>
+  </Tooltip.Provider>
 {/snippet}

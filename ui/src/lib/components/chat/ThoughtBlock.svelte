@@ -108,9 +108,9 @@
   </button>
 
   {#if isOpen}
-    <div transition:slide={{ duration: motion.duration(160) }} class="mt-1.5">
+    <div transition:slide|local={{ duration: motion.duration(160) }} class="mt-1.5">
       <div
-        transition:fade={{ duration: motion.duration(160) }}
+        transition:fade|local={{ duration: motion.duration(160) }}
         class="text-muted-foreground border-line max-h-64 overflow-y-auto rounded-md border p-2.5 text-[13px] leading-relaxed"
         bind:this={body}
       >

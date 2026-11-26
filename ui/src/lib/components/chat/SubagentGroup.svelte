@@ -87,9 +87,9 @@
     {/if}
   </div>
   {#if open}
-    <div transition:slide={{ duration: motion.duration(160) }}>
+    <div transition:slide|local={{ duration: motion.duration(160) }}>
       <div
-        transition:fade={{ duration: motion.duration(160) }}
+        transition:fade|local={{ duration: motion.duration(160) }}
         class="border-border border-t px-3 py-3"
       >
         {@render children()}

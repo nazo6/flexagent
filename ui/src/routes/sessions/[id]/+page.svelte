@@ -2,6 +2,7 @@
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import { onMount, tick, untrack } from "svelte";
+  import { fade, fly, slide } from "svelte/transition";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import ProvisioningLogCard from "#lib/components/ProvisioningLogCard.svelte";
   import ChatTimeline from "#lib/components/chat/ChatTimeline.svelte";
@@ -23,6 +24,7 @@
   import type { DockLauncherId } from "#lib/dock/registry.ts";
   import { dock } from "#lib/stores/dock.svelte.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
+  import { motion } from "#lib/motion.svelte.ts";
   import {
     provisioningLogLines,
     buildTimelineItems,
@@ -797,6 +799,8 @@
       <button
         type="button"
         aria-label={m.dock_resize()}
+        in:fade|local={{ duration: motion.duration(120) }}
+        out:fade|local={{ duration: motion.duration(120) }}
         class={cn(
           "group z-10 -ml-px hidden w-1.5 cursor-col-resize shrink-0 items-center justify-center border-l border-border bg-transparent p-0 outline-none transition-colors select-none hover:bg-signal/50 focus-visible:ring-1 focus-visible:ring-signal active:bg-signal lg:flex",
           isResizing && "bg-signal",
@@ -820,6 +824,8 @@
       </button>
 
       <div
+        in:slide|local={{ axis: "x", duration: motion.duration(180) }}
+        out:slide|local={{ axis: "x", duration: motion.duration(180) }}
         class="hidden h-full shrink-0 flex-col overflow-hidden lg:flex"
         style="width: clamp(22rem, {dock.width}%, 75%);"
       >
@@ -847,11 +853,13 @@
           type="button"
           tabindex="-1"
           aria-label={m.session_close_panel()}
-          class="bg-background/60 animate-in fade-in absolute inset-0 cursor-default backdrop-blur-[2px] duration-150"
+          transition:fade|local={{ duration: motion.duration(150) }}
+          class="bg-background/60 absolute inset-0 cursor-default backdrop-blur-[2px]"
           onclick={() => dock.collapse()}
         ></button>
         <div
-          class="bg-card border-border animate-in fade-in slide-in-from-bottom-2 absolute inset-x-2 top-6 bottom-2 flex flex-col overflow-hidden rounded-xl border shadow-2xl duration-150"
+          transition:fly|local={{ y: 8, duration: motion.duration(160) }}
+          class="bg-card border-border absolute inset-x-2 top-6 bottom-2 flex flex-col overflow-hidden rounded-xl border shadow-2xl"
         >
           <DockHost {ctx} {items} mobile oncollapse={() => dock.collapse()} />
         </div>
