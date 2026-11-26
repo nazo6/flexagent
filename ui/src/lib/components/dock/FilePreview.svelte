@@ -32,12 +32,11 @@
   interface Props {
     ctx: DockContext;
     tab: DockFileTab;
-    mobile?: boolean;
-    /** Mobile: show the tree again. */
-    onback: () => void;
+    /** Single-pane mode: show the tree again. Omit to hide the back button. */
+    onback?: () => void;
   }
 
-  let { ctx, tab, mobile = false, onback }: Props = $props();
+  let { ctx, tab, onback }: Props = $props();
 
   const path = $derived(tab.path);
   const mode = $derived<DockFileMode>(tab.mode);
@@ -136,13 +135,13 @@
 </script>
 
 <div class="border-border flex h-9 shrink-0 items-center gap-1 border-b px-1.5">
-  {#if mobile}
+  {#if onback !== undefined}
     <button
       type="button"
       class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md transition-colors"
       title={m.dock_files_title()}
       aria-label={m.dock_files_title()}
-      onclick={onback}
+      onclick={() => onback?.()}
     >
       <ChevronLeftIcon class="size-4" />
     </button>

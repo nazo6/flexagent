@@ -2,7 +2,7 @@
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import { onDestroy, tick, untrack } from "svelte";
-  import { fade, fly, slide } from "svelte/transition";
+  import { fade } from "svelte/transition";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import ProvisioningLogCard from "#lib/components/ProvisioningLogCard.svelte";
   import ChatTimeline from "#lib/components/chat/ChatTimeline.svelte";
@@ -13,7 +13,8 @@
   import { groupTimelineItems } from "#lib/chat-groups.ts";
   import Composer from "#lib/components/chat/Composer.svelte";
   import SessionHeader from "#lib/components/session/SessionHeader.svelte";
-  import DockHost from "#lib/components/dock/DockHost.svelte";
+  import DockSplitPane from "#lib/components/dock/DockSplitPane.svelte";
+  import DockSheet from "#lib/components/dock/DockSheet.svelte";
   import DockRail from "#lib/components/dock/DockRail.svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Skeleton } from "#lib/components/ui/skeleton/index.ts";
@@ -33,7 +34,6 @@
     latestUsageFromEvents,
     type TimelineItem,
   } from "#lib/sync/reducer.ts";
-  import { cn } from "#lib/utils.ts";
   import { toast } from "svelte-sonner";
   import ArchiveIcon from "@lucide/svelte/icons/archive";
   import { layoutState } from "#lib/stores/layout.svelte.ts";
@@ -160,35 +160,6 @@
   /** Distance from the bottom that still counts as "reading the tail". */
   const FOLLOW_THRESHOLD_PX = 80;
   let lastUserItemKey: string | null = null;
-
-  // Desktop resizable right pane
-  let mainContainer = $state<HTMLDivElement | null>(null);
-  let isResizing = $state(false);
-
-  function handlePointerMove(e: PointerEvent) {
-    if (!isResizing || !mainContainer) return;
-    const rect = mainContainer.getBoundingClientRect();
-    const pointerX = e.clientX;
-    const rightPixels = rect.right - pointerX;
-    const percentage = (rightPixels / rect.width) * 100;
-    dock.setWidth(Math.round(percentage));
-  }
-
-  function handlePointerUp() {
-    if (!isResizing) return;
-    isResizing = false;
-    window.removeEventListener("pointermove", handlePointerMove);
-    window.removeEventListener("pointerup", handlePointerUp);
-    dock.commitWidth();
-  }
-
-  function startResize(event: PointerEvent) {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    isResizing = true;
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-  }
 
   // The workspace owns the dock state; the session only supplies tool context.
   // Switching sessions inside one workspace must not reset the active tool or
@@ -689,11 +660,7 @@
   {/if}
 
   <!-- Main content area -->
-  <div
-    bind:this={mainContainer}
-    class="relative flex flex-1 overflow-hidden"
-    class:select-none={isResizing}
-  >
+  <div class="relative flex flex-1 overflow-hidden">
     <!-- Chat column. In the compact shell the dock is an overlay, so the chat
          stays rendered (and dimmed) behind it; `inert` keeps it out of the tab
          order. -->
@@ -839,41 +806,7 @@
     <!-- Wide workspace dock -->
     {#if isDockOpen && dockContext !== null && !uiTraits.overlayPanels}
       {@const ctx = dockContext}
-      <button
-        type="button"
-        aria-label={m.dock_resize()}
-        in:fade|local={{ duration: motion.duration(120) }}
-        out:fade|local={{ duration: motion.duration(120) }}
-        class={cn(
-          "group z-10 -ml-px flex w-1.5 cursor-col-resize shrink-0 items-center justify-center border-l border-border bg-transparent p-0 outline-none transition-colors select-none hover:bg-signal/50 focus-visible:ring-1 focus-visible:ring-signal active:bg-signal",
-          isResizing && "bg-signal",
-        )}
-        onpointerdown={startResize}
-        onkeydown={(e) => {
-          if (e.key === "ArrowLeft") {
-            e.preventDefault();
-            dock.setWidth(dock.width + 2);
-            dock.commitWidth();
-          } else if (e.key === "ArrowRight") {
-            e.preventDefault();
-            dock.setWidth(dock.width - 2);
-            dock.commitWidth();
-          }
-        }}
-      >
-        <span
-          class="bg-muted-foreground/30 group-hover:bg-signal h-8 w-0.5 rounded-full pointer-events-none"
-        ></span>
-      </button>
-
-      <div
-        in:slide|local={{ axis: "x", duration: motion.duration(180) }}
-        out:slide|local={{ axis: "x", duration: motion.duration(180) }}
-        class="flex h-full shrink-0 flex-col overflow-hidden"
-        style="width: clamp(22rem, {dock.width}%, 75%);"
-      >
-        <DockHost {ctx} {items} oncollapse={() => dock.collapse()} />
-      </div>
+      <DockSplitPane {ctx} {items} onclose={() => dock.collapse()} />
     {/if}
 
     <!-- Wide tool rail -->
@@ -887,26 +820,10 @@
       </div>
     {/if}
 
-    <!-- Compact dock overlay. The inset panel and the dimmed, blurred backdrop
-         make it obvious that this is a layer above the conversation. -->
+    <!-- Compact dock overlay -->
     {#if isDockOpen && dockContext !== null && uiTraits.overlayPanels}
       {@const ctx = dockContext}
-      <div class="absolute inset-0 z-20">
-        <button
-          type="button"
-          tabindex="-1"
-          aria-label={m.session_close_panel()}
-          transition:fade|local={{ duration: motion.duration(150) }}
-          class="bg-background/60 absolute inset-0 cursor-default backdrop-blur-[2px]"
-          onclick={() => dock.collapse()}
-        ></button>
-        <div
-          transition:fly|local={{ y: 24, duration: motion.duration(180) }}
-          class="bg-card absolute inset-0 flex flex-col overflow-hidden"
-        >
-          <DockHost {ctx} {items} mobile oncollapse={() => dock.collapse()} />
-        </div>
-      </div>
+      <DockSheet {ctx} {items} onclose={() => dock.collapse()} />
     {/if}
   </div>
 </div>
