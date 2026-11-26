@@ -18,7 +18,7 @@
     class: className = "",
   }: Props = $props();
 
-  const availability = $derived(getNodeAvailability(node, sync.wsConnected));
+  const availability = $derived(getNodeAvailability(node, sync.wsConnected, sync.wsReconnecting));
 </script>
 
 <div

@@ -9,11 +9,15 @@ import type { ConnectionStore } from "./connection.svelte.ts";
 import { SyncStore } from "./sync.svelte.ts";
 
 class MockWebSocket {
+  static readonly CONNECTING = 0;
   static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
   static instances: MockWebSocket[] = [];
 
   readyState = MockWebSocket.OPEN;
-  #listeners = new Map<string, Array<(event: { data?: string }) => void>>();
+  sent: string[] = [];
+  #listeners = new Map<string, Array<(event: { data?: string; persisted?: boolean }) => void>>();
 
   constructor(public readonly url: string) {
     MockWebSocket.instances.push(this);
@@ -25,9 +29,20 @@ class MockWebSocket {
     this.#listeners.set(type, list);
   }
 
-  send(_data: string): void {}
+  send(data: string): void {
+    this.sent.push(data);
+  }
 
-  close(): void {}
+  close(): void {
+    this.readyState = MockWebSocket.CLOSED;
+  }
+
+  emitOpen(): void {
+    this.readyState = MockWebSocket.OPEN;
+    for (const listener of this.#listeners.get("open") ?? []) {
+      listener({});
+    }
+  }
 
   emitMessage(payload: unknown): void {
     const data = JSON.stringify(payload);
@@ -37,6 +52,7 @@ class MockWebSocket {
   }
 
   emitClose(): void {
+    this.readyState = MockWebSocket.CLOSED;
     for (const listener of this.#listeners.get("close") ?? []) {
       listener({});
     }
@@ -474,5 +490,100 @@ describe("SyncStore long session history", () => {
     expect(timeline.headEvents).toHaveLength(0);
     expect(timeline.hasOlder).toBe(false);
     expect(timeline.olderCursor).toBeNull();
+  });
+});
+
+describe("SyncStore resume handling", () => {
+  const originalWebSocket = globalThis.WebSocket;
+
+  beforeEach(() => {
+    MockWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.stubGlobal("WebSocket", originalWebSocket);
+  });
+
+  it("reconnects immediately when the page becomes visible again", () => {
+    const { store } = createStore();
+    store.start();
+    const first = MockWebSocket.instances[0];
+    first.emitOpen();
+    expect(store.wsConnected).toBe(true);
+    expect(store.wsReconnecting).toBe(false);
+
+    first.emitClose();
+    expect(store.wsConnected).toBe(false);
+    expect(store.wsReconnecting).toBe(true);
+    // The normal backoff would wait 1s before creating a second socket.
+    expect(MockWebSocket.instances).toHaveLength(1);
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(MockWebSocket.instances).toHaveLength(2);
+
+    store.stop();
+  });
+
+  it("reconnects immediately when the browser comes back online", () => {
+    const { store } = createStore();
+    store.start();
+    MockWebSocket.instances[0].emitClose();
+
+    window.dispatchEvent(new Event("online"));
+    expect(MockWebSocket.instances).toHaveLength(2);
+
+    store.stop();
+  });
+
+  it("pings a socket that still looks open and reconnects when no pong arrives", () => {
+    vi.useFakeTimers();
+    const { store } = createStore();
+    store.start();
+    const first = MockWebSocket.instances[0];
+    first.emitOpen();
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(first.sent.map((data) => JSON.parse(data))).toContainEqual({ op: "ping" });
+
+    vi.advanceTimersByTime(4_000);
+    expect(MockWebSocket.instances).toHaveLength(2);
+
+    store.stop();
+  });
+
+  it("keeps the socket when it answers the resume ping", () => {
+    vi.useFakeTimers();
+    const { store } = createStore();
+    store.start();
+    const first = MockWebSocket.instances[0];
+    first.emitOpen();
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    first.emitMessage({ op: "pong" });
+
+    vi.advanceTimersByTime(10_000);
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(store.wsConnected).toBe(true);
+
+    store.stop();
+  });
+
+  it("replaces a handshake that never completes", () => {
+    vi.useFakeTimers();
+    const { store } = createStore();
+    store.start();
+    const first = MockWebSocket.instances[0];
+    first.readyState = MockWebSocket.CONNECTING;
+
+    vi.advanceTimersByTime(10_000);
+    expect(MockWebSocket.instances).toHaveLength(2);
+
+    store.stop();
   });
 });

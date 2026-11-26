@@ -140,7 +140,7 @@
     }
   });
 
-  const nodeAvail = $derived(getNodeAvailability(node, sync.wsConnected));
+  const nodeAvail = $derived(getNodeAvailability(node, sync.wsConnected, sync.wsReconnecting));
 
   /** Agent config options (model / thought level / agent-specific), newest first. */
   const configOptions = $derived(orderedConfigOptions(capabilities?.configOptions ?? []));
@@ -382,7 +382,9 @@
       onfiles={(files) => void composer.addImageFiles(files)}
     />
     {#if !sync.wsConnected}
-      <span class="text-danger text-[11px]">{m.chat_connection_lost()}</span>
+      <span class="text-danger text-[11px]">
+        {sync.wsReconnecting ? m.chat_reconnecting() : m.chat_connection_lost()}
+      </span>
     {/if}
     <Button
       variant="outline"

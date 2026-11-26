@@ -218,7 +218,9 @@
       : defaultNodeId,
   );
   const selectedNode = $derived(nodes.find((n) => n.node_id === nodeId) ?? null);
-  const nodeAvailability = $derived(getNodeAvailability(selectedNode, sync.wsConnected));
+  const nodeAvailability = $derived(
+    getNodeAvailability(selectedNode, sync.wsConnected, sync.wsReconnecting),
+  );
   /** Whether `catalog` belongs to the current node (never mix two nodes' lists). */
   const catalogReady = $derived(nodeId !== "" && catalogNodeId === nodeId);
   // Agents that can actually be launched on this node (based on the catalog's
@@ -1186,7 +1188,11 @@
                 </p>
               {:else}
                 {#each nodes as node (node.node_id)}
-                  {@const availability = getNodeAvailability(node, sync.wsConnected)}
+                  {@const availability = getNodeAvailability(
+                    node,
+                    sync.wsConnected,
+                    sync.wsReconnecting,
+                  )}
                   <PickerItem
                     selected={!isProvisionerMode && node.node_id === nodeId}
                     disabled={!availability.isAvailable}

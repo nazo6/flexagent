@@ -586,7 +586,7 @@
   {@const isAttention = sessionNeedsAttention(session)}
   {@const attentionLabel = isAttention ? sessionAttentionBadgeLabel(session.status) : null}
   {@const node = getNode(session.node_id)}
-  {@const nodeAvail = getNodeAvailability(node, sync.wsConnected)}
+  {@const nodeAvail = getNodeAvailability(node, sync.wsConnected, sync.wsReconnecting)}
   {@const isPinned = pinned.isPinned(session.session_id)}
   {@const isUnread = sync.hasUnread(session.session_id)}
   <Tooltip.Provider delayDuration={400}>
