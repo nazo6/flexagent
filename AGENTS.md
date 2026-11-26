@@ -110,7 +110,7 @@
 - [`docs/development.md`](docs/development.md): 開発ワークフロー (`mise` タスク)・
   型/DB スキーマ同期・言語ポリシー・i18n
 - [`docs/proposals/README.md`](docs/proposals/README.md): 設計提案・実装計画
-- [`docs/changelog/README.md`](docs/changelog/README.md): 月別実装ログ
+- [`docs/changelog/README.md`](docs/changelog/README.md): 設計判断・移行の記録（記載基準）
 
 ### 3.1 ドキュメントにコードを複製しない
 
@@ -171,5 +171,12 @@
 - **変更履歴 (Changelog) と設計提案 (Proposal) の記録**:
   - 複数クレートに跨がる設計変更や複数フェーズの実装計画は `docs/proposals/YYYY-MM-DD-title.md`
     に記録し、完了時にステート docs へ仕様を昇格させてステータスを `Implemented` にする。
-  - 意味のある機能追加・DB マイグレーション・設計判断は `docs/changelog/YYYY-MM/YYYY-MM-DD-title.md`
-    に記録する（単発の微修正は Git コミットに任せ作成しない）。冒頭に **日付・対象パッケージ・対象スクリプト** を明記すること。
+  - changelog (`docs/changelog/YYYY-MM/YYYY-MM-DD-title.md`) は、次のいずれかに該当する場合だけ作成する:
+    - DB マイグレーション、またはプロトコル / API の型・互換性を変える変更
+    - 複数クレートに跨がる構造変更、新しい抽象化・クレートの導入
+    - 後から参照する設計判断・不変条件・トレードオフ（ステート docs に書くほどでないもの）
+  - 次は作成しない（Git コミットメッセージで十分）: 単一画面・単一コンポーネントの UI 調整
+    (レイアウト・配色・文言・i18n・コピー)、単発のバグ修正、リファクタ・リネーム、
+    依存・ツールチェイン・CI の更新、既存挙動の小さな改善。
+  - 1 機能 = 1 ファイル。コミットごとに増やさない。該当するか迷う場合は作成しない。
+    作成する場合は冒頭に **日付・対象パッケージ・対象スクリプト** を明記すること。

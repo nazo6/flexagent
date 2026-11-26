@@ -66,7 +66,7 @@ Protocol）対応コーディングエージェントを「好きな場所から
 | **[development.md](./development.md)**                                   | 開発ワークフロー（`mise` タスク）・型/DB スキーマ同期・言語ポリシー・i18n (`paraglide-js`)                             |
 | **[backlog.md](./backlog.md)**                                           | 過去の計画から抽出した未完了タスク・技術的負債の一覧                                                                   |
 | **[proposals/](./proposals/README.md)**                                  | 複数クレートに跨がる設計提案・計画・ADR・調査メモ                                                                      |
-| **[changelog/](./changelog/README.md)**                                  | 月別（`YYYY-MM/`）の確定した実装ログ                                                                                   |
+| **[changelog/](./changelog/README.md)**                                  | 月別（`YYYY-MM/`）の設計判断・移行の記録（記載基準は README）                                                          |
 
 ---
 
