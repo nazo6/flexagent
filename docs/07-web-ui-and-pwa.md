@@ -42,15 +42,15 @@ PC ブラウザ、ローカル直結 (`node.addr`、既定 `localhost:7860`)、�
 
 ### 3.1 URL ルーティング契約
 
-| パス                              | 用途                                                                        |
-| :-------------------------------- | :-------------------------------------------------------------------------- |
-| `/`                               | 新規セッション作成（統一コンポーザー）                                      |
-| `/projects`                       | 論理プロジェクト & 各ノードの Git Worktree 一覧・作成・削除                 |
-| `/search`                         | FTS5 全文検索（3 文字以上または LIKE フォールバック）                       |
-| `/sessions/[id]`                  | セッション詳細（チャット・ワークスペースドック）                            |
-| `/settings/hub/[tab]`             | Hub スコープ設定（`general`, `process`, `tokens`, `provisioners`, `audit`） |
-| `/settings/nodes/[node_id]/[tab]` | Node スコープ設定（`general`, `process`, `pairing`, `agents`, `audit`）     |
-| `/settings/browser/[tab]`         | Browser スコープ設定（`appearance`, `notifications`）                       |
+| パス                              | 用途                                                                            |
+| :-------------------------------- | :------------------------------------------------------------------------------ |
+| `/`                               | 新規セッション作成（統一コンポーザー）                                          |
+| `/projects`                       | 論理プロジェクト & 各ノードの Git Worktree 一覧・作成・削除                     |
+| `/search`                         | FTS5 全文検索（3 文字以上または LIKE フォールバック、`?seq=` で該当イベントへ） |
+| `/sessions/[id]`                  | セッション詳細（チャット・ワークスペースドック）                                |
+| `/settings/hub/[tab]`             | Hub スコープ設定（`general`, `process`, `tokens`, `provisioners`, `audit`）     |
+| `/settings/nodes/[node_id]/[tab]` | Node スコープ設定（`general`, `process`, `pairing`, `agents`, `audit`）         |
+| `/settings/browser/[tab]`         | Browser スコープ設定（`appearance`, `notifications`）                           |
 
 Settings 画面の中間パス（`/settings`, `/settings/hub`, `/settings/nodes`, `/settings/nodes/[node_id]`, `/settings/browser`）のみデフォルト先へ `replaceState: true` で補完リダイレクトし、タブ・スコープ切替は通常のブラウザ履歴に積む。利用不可なスコープやオフラインノードは画面内に案内を表示する。
 
@@ -67,6 +67,7 @@ Settings 画面の中間パス（`/settings`, `/settings/hub`, `/settings/nodes`
    - **チャットタイムライン**:
      - `provisioning` 状態時は「Provisioner Log」カードに `stderr` をリアルタイム表示。
      - `LiveStreamDelta` を逐次描画し、確定イベントで置換。思考プロセスはストリーミング中のみ自動展開し、確定後に自動折りたたみ（ユーザーの手動開閉を優先）。
+     - 確定イベント由来のアイテム列はイベント列が変わったときだけ再構築し、ストリーミング差分はその末尾に重ねる。差分ごとに全会話を作り直さないため、長いセッションでもチャンク受信で他メッセージが再レンダリングされない。
      - 連続する思考・ツール実行・サブエージェント・端末出力・Plan は「作業ブロック」として 1 行に集約・折りたたみ（承認・入力要求・通知は折りたたまず常に表示）。
      - 端末カードはコマンドとライブ出力を表示する。コマンドは開始イベントで確定するため、実行中も ID ではなくコマンド名が出る。**実行中の端末出力は折りたたまず**、停止ボタンを出したまま残す。停止は `kill_terminal` でそのコマンドだけを終了し（ターンやセッションは止めない）、終了すると exit code バッジに変わる。
      - 履歴は `before_cursor` で最新ページから読み込み、上部の「Load earlier messages」で古いページを追加する。セッション先頭のページ（capabilities / provisioning log などセッション全体のメタデータ）は別に保持し、会話のページングが先頭へ到達した時点で表示に統合する。開いていないセッションのイベントは保持上限を超えると古いものから破棄し、開いたときに再取得する。
@@ -86,7 +87,7 @@ Settings 画面の中間パス（`/settings`, `/settings/hub`, `/settings/nodes`
      - **Changes**: `Session`（セッション内の tool diff）/ `Worktree`（`git status`）/ `Branch`（base との累積 diff）の 3 スコープ。行をクリックすると Files ツールのプレビューにファイルを開く（Diff モード）。Session の編集差分はノードがオフラインでも閲覧できる。`Worktree` スコープでは変更一覧の下の入力欄から、worktree の全変更を `git add -A` で stage して 1 コミットを作成できる（メッセージ必須、部分 stage は対象外）。ヘッダーの Pull / Push から upstream と同期できる。Pull は fetch + `git merge --ff-only` のみで、merge commit の作成や conflict の解消は行わない。Push は force せず、upstream が未設定なら `origin` に初回 push して upstream を設定する。
      - **Terminal**: workspace の統合 Web PTY（§4）。タブごとに独立したシェルを持ち、`+` で追加、× / 中クリックで閉じる。ドックが開いている間は非アクティブのタブもマウントを維持し、PTY の attach を保つ。
 3. **統一コンポーザー**:
-   - 新規セッション画面とセッション詳細画面で同一コンポーザーを使用。「文脈行（新規のみ）→ 入力 → セレクタ行（Agent / Mode / Model / その他）→ アクション行（添付 / 自動承認 / その他 / 中断 / 送信）」の順を固定し、未存在項目は非表示にするだけで位置を動かさない。
+   - 新規セッション画面とセッション詳細画面で同一コンポーザーを使用。「文脈行（新規のみ）→ 入力 → セレクタ行（Agent / Mode / Model / その他）→ アクション行（添付 / 自動承認 / その他 / 中断 / 送信）」の順を固定し、未存在項目は非表示にするだけで位置を動かさない。添付チップの一覧と画像添付ボタンは `ComposerAttachments` / `ComposerAttachImageButton` を共有し、2 画面で同じ見た目・削除・再選択の挙動にする。
    - セッション詳細の入力欄は既定 2 行（内容に応じて自動伸長、上限あり）とし、会話タイムラインへ縦スペースを優先配分する。
    - 入力途中のプロンプトはセッション単位（新規セッション画面は画面単位）の下書きとして保持し、別画面へ移動して戻っても復元する。テキストのみ端末の `localStorage` に保存し、添付はメモリ内に保持する。送信に成功した下書きは破棄する。
    - 送信時、ネイティブ復元対応エージェントであれば停止済みセッションでも自動再開（Auto Resume on Send）して送信する（非対応時はメニューの Resume から履歴 Replay）。
@@ -130,6 +131,7 @@ Web ターミナルは `ghostty-web`（WASM 版 `libghostty-vt` + Canvas 2D）�
 ## 5. Android PWA・Window Controls Overlay・Web Push (VAPID)
 
 - **`manifest.webmanifest`**: `"display": "standalone"`, `"display_override": ["window-controls-overlay", "standalone"]` を設定。
+- **Safe area**: `app.html` の `viewport-fit=cover` に対し、`app.css` の `--safe-*`（`env(safe-area-inset-*)`）を `.safe-area-shell`（アプリ全体の上下左右）と `.safe-area-portal`（body へ portal されるモバイルドロワー）に適用する。ノッチ・ステータスバー・ホームインジケータの下にヘッダー / コンポーザー / ナビゲーションを置かない。トーストも上端のインセット分だけ下げる。
 - **Window Controls Overlay (WCO)**: インストール済みデスクトップ Chromium では `env(titlebar-area-*)` と `.wco-*` クラス（`ui/src/app.css`）により OS タイトルバーとアプリトップバーを統合する。
 - **Service Worker (`ui/src/service-worker/index.ts`)**:
   - `$app/manifest` と `$app/env` を用いた App Shell キャッシュ（`/api/**` は常にネットワーク素通し）。
