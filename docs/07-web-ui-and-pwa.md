@@ -38,6 +38,16 @@ PC ブラウザ、ローカル直結 (`node.addr`、既定 `localhost:7860`)、�
 - **Motion**: 状態変化は 120ms（hover / press）/ 160ms（開閉・状態クロスフェード）/ 240ms（強調）を上限とし、`transform` と `opacity` を優先する。高さアニメは折りたたみパネルだけに限定し、履歴の初期描画・セッション切替・ページング・スクロールは動かさない。新着メッセージの入場とサイドバーの並べ替えは、ライブな変化に限って動かす。実行中スイープは `running` の間だけ、承認リングはカードがライブで現れたときの一度だけ、ロゴ描画はコールドスタート時だけ再生する。`prefers-reduced-motion` を尊重し、Browser > Appearance の `Motion: System / Full / Reduced`（`localStorage["fxg:motion"]`）で端末ごとに上書きできる。Reduced は装飾的なループと移動を止めるが、実行中を示すスピナーは残す。ターミナル / Monaco は対象外。
 - **モバイル密度**: `pointer: coarse` では本文 15px・入力 16px・最小ヒット領域 32–44px（`.touch-target*`）・リスト行 44px（`.touch-row`）に上げる。デスクトップのコンパクト密度をそのまま持ち込まず、指で押せることを優先する。
 
+### 2.1 レスポンシブ分岐の置き場所
+
+PC ブラウザと PWA を単一 SPA で提供するため、レイアウトの分岐は「何を変えるか」で置き場所を固定します。画面コンポーネントごとに `isMobile` を判定しないことが不変条件です。
+
+- **見た目（余白・密度・表示/非表示）**: Tailwind の `lg:` / `max-lg:` と `pointer: coarse` の CSS だけで表す。JS 分岐にしない。
+- **構造（何をどこにマウントするか）**: `AppShell` が `uiTraits.overlayNav` で `WideShell` / `CompactShell` のどちらか一方だけを描画する。ページ本文は `children` として共有し、端末別の画面を複製しない。PTY のようにマウント自体が副作用を持つものだけが JS 分岐の対象。
+- **操作モデル（ドロワー / シート / ジェスチャー）**: 能力名の trait（`overlayNav` / `overlayPanels` / `sheetPickers`）で選び、プリミティブ（Shell、ピッカー）の内側に閉じ込める。呼び出し側に `mobile` boolean を渡さない。
+- **状態（開閉・折りたたみ）**: 描画に使う値は trait との論理積で派生させる。モードが変わったときのフラグ正規化は `AppShell` の 1 箇所だけ。
+- **ブレークポイントの正**: `ui/src/lib/ui-traits.svelte.ts`。`64rem` は Tailwind の `lg` と一致させ、JS 側は `(width < 64rem)` の完全な補集合を使う。画面やヘッダーで `window.innerWidth` / `matchMedia` を直接読まない。
+
 ---
 
 ## 3. URL ルーティングと主要画面構成
