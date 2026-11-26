@@ -409,7 +409,7 @@ async fn execute_inner(
             let snapshot = state
                 .agent_mcp_action(state.node_id(), &agent_id, &name, action)
                 .await
-                .map_err(|err| NodeError::Agent(err.message))?;
+                .map_err(|err| NodeError::Agent(err.message.into()))?;
             state
                 .record_audit(
                     fxg_db::audit::actions::AGENT_MANAGE,
@@ -435,7 +435,7 @@ async fn execute_inner(
             let snapshot = state
                 .agent_mcp_upsert(state.node_id(), &agent_id, &name, definition)
                 .await
-                .map_err(|err| NodeError::Agent(err.message))?;
+                .map_err(|err| NodeError::Agent(err.message.into()))?;
             state
                 .record_audit(
                     fxg_db::audit::actions::AGENT_MANAGE,
@@ -456,7 +456,7 @@ async fn execute_inner(
             let snapshot = state
                 .agent_mcp_remove(state.node_id(), &agent_id, &name)
                 .await
-                .map_err(|err| NodeError::Agent(err.message))?;
+                .map_err(|err| NodeError::Agent(err.message.into()))?;
             state
                 .record_audit(
                     fxg_db::audit::actions::AGENT_MANAGE,
@@ -477,7 +477,7 @@ async fn execute_inner(
             let diagnostics = state
                 .diagnostics_response()
                 .await
-                .map_err(|err| NodeError::Internal(err.message))?;
+                .map_err(|err| NodeError::Internal(err.message.into()))?;
             Ok(NodeRpcResponse::Diagnostics {
                 diagnostics: Box::new(diagnostics),
             })
