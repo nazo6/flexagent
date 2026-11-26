@@ -113,7 +113,7 @@ mise run dev:node   # dev ノードだけ（Rust 変更で自動再起動）
 mise run dev:hub    # dev ハブ (127.0.0.1:8081)
 mise run dev:home   # dev home の実パスを確認
 
-fxg session ls      # mise のシェル内では dev ノード (7861) に繋がる
+fxg session list     # mise のシェル内では dev ノード (7861) に繋がる
 ```
 
 - dev home はリポジトリの外に置く。`target/` の内側に置くと `cargo clean` や
@@ -164,7 +164,7 @@ ss -ltn | grep -E ':(7860|7861)'
 ```
 
 `node status` が `127.0.0.1:7861` を返し、運用ノードが `7860` のままなら分離できています。
-dev のログは `$FXG_HOME/logs/node/node.log` に出るため、運用側のログと混ざりません。
+dev のログは `$FXG_HOME/logs/node/node.log.YYYY-MM-DD` に出るため、運用側のログと混ざりません。
 
 ### 5.6 運用バイナリのビルドとインストール
 

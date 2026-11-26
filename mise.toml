@@ -174,7 +174,7 @@ set -euo pipefail
 echo "FXG_HOME=$FXG_HOME"
 echo "node db:   $FXG_HOME/data/node/node.db"
 echo "node addr: $FXG_HOME/state/node/node.addr"
-echo "logs:      $FXG_HOME/logs/node/node.log"
+echo "logs:      $FXG_HOME/logs/node/node.log.YYYY-MM-DD"
 """
 
 [tasks."install:prod"]

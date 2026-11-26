@@ -16,7 +16,8 @@ CLI のコマンド・引数の正は `fxg --help` / `fxg <noun> --help` と
 - **プロセス**: `fxg node start|stop|restart|status` と
   `fxg hub start|stop|restart|status`。前景起動が既定で、`--detach` で
   バックグラウンド起動。
-- **常駐**: `fxg service install [node|hub]` は OS ログイン時の登録のみ。
+- **常駐**: `fxg service install [node|hub]` は OS ログイン時の登録を行う。
+  Linux / macOS は登録時に即時起動し、Windows は次回ログオン時に起動する。
   unit が登録済みなら `node` / `hub` の `start` / `stop` / `restart` が
   systemd / launchd / Task Scheduler に委譲する。
 - **対象の指定**: フラグではなく位置引数（`fxg logs hub`、
@@ -96,13 +97,13 @@ CLI のコマンド・引数の正は `fxg --help` / `fxg <noun> --help` と
 分けます。`<config>` / `<data>` / `<state>` / `<logs>` / `<cache>` の実体は
 次のとおりです。
 
-| クラス     | Linux (XDG)                  | macOS                                     | Windows                         |
-| :--------- | :--------------------------- | :---------------------------------------- | :------------------------------ |
-| 設定       | `$XDG_CONFIG_HOME/flexagent` | `~/Library/Application Support/flexagent` | `%APPDATA%\flexagent`           |
-| データ     | `$XDG_DATA_HOME/flexagent`   | `~/Library/Application Support/flexagent` | `%LOCALAPPDATA%\flexagent`      |
-| 実行時     | `$XDG_STATE_HOME/flexagent`  | `~/Library/Application Support/flexagent` | `%LOCALAPPDATA%\flexagent`      |
-| ログ       | `$XDG_STATE_HOME/flexagent`  | `~/Library/Logs/flexagent`                | `%LOCALAPPDATA%\flexagent\logs` |
-| キャッシュ | `$XDG_CACHE_HOME/flexagent`  | `~/Library/Caches/flexagent`              | `%LOCALAPPDATA%\flexagent`      |
+| クラス     | Linux (XDG)                  | macOS                                     | Windows                          |
+| :--------- | :--------------------------- | :---------------------------------------- | :------------------------------- |
+| 設定       | `$XDG_CONFIG_HOME/flexagent` | `~/Library/Application Support/flexagent` | `%APPDATA%\flexagent`            |
+| データ     | `$XDG_DATA_HOME/flexagent`   | `~/Library/Application Support/flexagent` | `%LOCALAPPDATA%\flexagent`       |
+| 実行時     | `$XDG_STATE_HOME/flexagent`  | `~/Library/Application Support/flexagent` | `%LOCALAPPDATA%\flexagent`       |
+| ログ       | `$XDG_STATE_HOME/flexagent`  | `~/Library/Logs/flexagent`                | `%LOCALAPPDATA%\flexagent\logs`  |
+| キャッシュ | `$XDG_CACHE_HOME/flexagent`  | `~/Library/Caches/flexagent`              | `%LOCALAPPDATA%\flexagent\cache` |
 
 Linux では XDG にログ用のクラスがないため、`<logs>` は `<state>` と同じ
 ディレクトリになります。`FXG_HOME` を指定した場合は、OS ルートの代わりに
@@ -134,24 +135,24 @@ Linux では XDG にログ用のクラスがないため、`<logs>` は `<state>
     └── hub.addr                    # 稼働中ハブの待受アドレス (実行時のみ)
 
 <logs>/
-├── node/node.log
-└── hub/hub.log
+├── node/node.log.YYYY-MM-DD
+└── hub/hub.log.YYYY-MM-DD
 
 <cache>/node/registry.json  # ACP Registry キャッシュ
 ```
 
-| ファイル / ディレクトリ      | 用途                                                                           | 所有者・設定方法                                                                                  |
-| :--------------------------- | :----------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------ |
-| `node.toml` / `hub.toml`     | 待受アドレス、ログ、`allowed_hosts` など起動時だけ必要な設定                   | 手動編集 + 再起動                                                                                 |
-| `<data>/<role>/auth_token`   | Web UI / CLI が **そのロールの** API にログインするための Web アクセストークン | 初回起動時に自動生成。`fxg node access-token show`（ノード）/ `fxg hub access-token show`（ハブ） |
-| `<data>/node/node_token`     | ノードが hub に接続するための **ノードペアリングトークン**                     | `fxg hub pairing-token issue` → Web UI / `fxg node pair`                                          |
-| `<data>/<role>/<role>.db`    | 実行時設定、セッション、監査ログ、プロジェクト投影                             | Client API / Web UI                                                                               |
-| `<state>/<role>/<role>.addr` | 起動中プロセスの実際の待受アドレス                                             | 実行時のみ。削除しても再生成される                                                                |
-| `<data>/<role>/vapid.json`   | Web Push の VAPID 鍵ペア                                                       | 各ロールが初回起動時に生成                                                                        |
-| `<data>/<role>/secrets/<id>` | エージェント・Git などの秘密値（書き込み専用、`0600`）                         | Secret API                                                                                        |
-| `<data>/node/worktrees/`     | fxg が作成した Git Worktree                                                    | `fxg session new -w` / `fork -w`                                                                  |
-| `<cache>/node/`              | ACP Registry のキャッシュ                                                      | 自動                                                                                              |
-| `<logs>/<role>/<role>.log`   | プロセスのログ                                                                 | 自動                                                                                              |
+| ファイル / ディレクトリ               | 用途                                                                           | 所有者・設定方法                                                                                  |
+| :------------------------------------ | :----------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------ |
+| `node.toml` / `hub.toml`              | 待受アドレス、ログ、`allowed_hosts` など起動時だけ必要な設定                   | 手動編集 + 再起動                                                                                 |
+| `<data>/<role>/auth_token`            | Web UI / CLI が **そのロールの** API にログインするための Web アクセストークン | 初回起動時に自動生成。`fxg node access-token show`（ノード）/ `fxg hub access-token show`（ハブ） |
+| `<data>/node/node_token`              | ノードが hub に接続するための **ノードペアリングトークン**                     | `fxg hub pairing-token issue` → Web UI / `fxg node pair`                                          |
+| `<data>/<role>/<role>.db`             | 実行時設定、セッション、監査ログ、プロジェクト投影                             | Client API / Web UI                                                                               |
+| `<state>/<role>/<role>.addr`          | 起動中プロセスの実際の待受アドレス                                             | 実行時のみ。削除しても再生成される                                                                |
+| `<data>/<role>/vapid.json`            | Web Push の VAPID 鍵ペア                                                       | 各ロールが初回起動時に生成                                                                        |
+| `<data>/<role>/secrets/<id>`          | エージェント・Git などの秘密値（書き込み専用、`0600`）                         | Secret API                                                                                        |
+| `<data>/node/worktrees/`              | fxg が作成した Git Worktree                                                    | `fxg session new -w` / `fork -w`                                                                  |
+| `<cache>/node/`                       | ACP Registry のキャッシュ                                                      | 自動                                                                                              |
+| `<logs>/<role>/<role>.log.YYYY-MM-DD` | プロセスのログ（日次ローテーション、7世代保持）                                | 自動                                                                                              |
 
 ### 2.1.1 どのトークンを使うか
 
