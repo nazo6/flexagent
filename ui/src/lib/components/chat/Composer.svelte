@@ -3,6 +3,8 @@
   import { Button } from "#lib/components/ui/button/index.ts";
   import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.ts";
   import ComposerCard from "#lib/components/composer/ComposerCard.svelte";
+  import ComposerAttachments from "#lib/components/composer/ComposerAttachments.svelte";
+  import ComposerAttachImageButton from "#lib/components/composer/ComposerAttachImageButton.svelte";
   import ComposerSendButton from "#lib/components/composer/ComposerSendButton.svelte";
   import ComposerTextarea from "#lib/components/composer/ComposerTextarea.svelte";
   import ConfigOptionPicker from "#lib/components/composer/ConfigOptionPicker.svelte";
@@ -30,10 +32,8 @@
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import Minimize2Icon from "@lucide/svelte/icons/minimize-2";
   import MoreHorizontalIcon from "@lucide/svelte/icons/more-horizontal";
-  import PaperclipIcon from "@lucide/svelte/icons/paperclip";
   import ShieldCheckIcon from "@lucide/svelte/icons/shield-check";
   import SlashIcon from "@lucide/svelte/icons/slash";
-  import XIcon from "@lucide/svelte/icons/x";
 
   let {
     sessionId,
@@ -74,7 +74,6 @@
   let controlBusy = $state(false);
   let resuming = $state(false);
   let fileBrowserOpen = $state(false);
-  let fileInput = $state<HTMLInputElement | null>(null);
   /**
    * Policy choice made by this click, shown until the session projection
    * reports the new one. The derived value below drops it once the reported
@@ -172,14 +171,6 @@
     }
     return isEnter ? m.chat_placeholder_idle_enter() : m.chat_placeholder_idle();
   });
-
-  function onFileInputChange(event: Event) {
-    const files = (event.currentTarget as HTMLInputElement).files;
-    if (files) {
-      void composer.addImageFiles(files);
-      (event.currentTarget as HTMLInputElement).value = "";
-    }
-  }
 
   async function send() {
     const value = text.trim();
@@ -368,34 +359,7 @@
         </div>
       {/if}
 
-      {#if attachments.length > 0}
-        <div class="flex flex-wrap gap-2">
-          {#each attachments as attachment, index (index)}
-            <div
-              class="bg-chip border-border flex items-center gap-1.5 rounded-md border px-2 py-1 text-[13px]"
-            >
-              {#if attachment.data_b64}
-                <img
-                  src={`data:${attachment.mime_type};base64,${attachment.data_b64}`}
-                  alt={attachment.file_name}
-                  class="size-8 rounded object-cover"
-                />
-              {:else}
-                <FileIcon class="text-muted-foreground size-3.5" />
-              {/if}
-              <span class="max-w-40 truncate">{attachment.file_name}</span>
-              <button
-                type="button"
-                class="text-muted-foreground hover:text-foreground"
-                title={m.chat_attachment_remove()}
-                onclick={() => composer.remove(index)}
-              >
-                <XIcon class="size-3.5" />
-              </button>
-            </div>
-          {/each}
-        </div>
-      {/if}
+      <ComposerAttachments {attachments} onremove={(index) => composer.remove(index)} />
     </div>
   {/snippet}
 
@@ -427,25 +391,10 @@
   {/snippet}
 
   {#snippet actions()}
-    <input
-      bind:this={fileInput}
-      type="file"
-      accept="image/*"
-      multiple
-      class="hidden"
-      aria-label={m.chat_attach_image()}
-      onchange={onFileInputChange}
+    <ComposerAttachImageButton
+      label={m.chat_attach_image()}
+      onfiles={(files) => void composer.addImageFiles(files)}
     />
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      class="rounded-full"
-      title={m.chat_attach_image()}
-      aria-label={m.chat_attach_image()}
-      onclick={() => fileInput?.click()}
-    >
-      <PaperclipIcon class="size-4" />
-    </Button>
     {#if !sync.wsConnected}
       <span class="text-danger text-[11px]">{m.chat_connection_lost()}</span>
     {/if}

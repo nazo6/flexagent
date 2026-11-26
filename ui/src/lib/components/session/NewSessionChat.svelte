@@ -8,6 +8,8 @@
   import { Label } from "#lib/components/ui/label/index.ts";
   import FolderBrowserDialog from "#lib/components/fs/FolderBrowserDialog.svelte";
   import ComposerCard from "#lib/components/composer/ComposerCard.svelte";
+  import ComposerAttachments from "#lib/components/composer/ComposerAttachments.svelte";
+  import ComposerAttachImageButton from "#lib/components/composer/ComposerAttachImageButton.svelte";
   import ComposerMoreButton from "#lib/components/composer/ComposerMoreButton.svelte";
   import ComposerSendButton from "#lib/components/composer/ComposerSendButton.svelte";
   import ComposerTextarea from "#lib/components/composer/ComposerTextarea.svelte";
@@ -63,7 +65,6 @@
   import GitBranchIcon from "@lucide/svelte/icons/git-branch";
   import GitForkIcon from "@lucide/svelte/icons/git-fork";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
-  import PaperclipIcon from "@lucide/svelte/icons/paperclip";
   import SparklesIcon from "@lucide/svelte/icons/sparkles";
   import ServerIcon from "@lucide/svelte/icons/server";
   import XCircleIcon from "@lucide/svelte/icons/x-circle";
@@ -136,7 +137,6 @@
   let busy = $state(false);
   let browserOpen = $state(false);
   let fileBrowserOpen = $state(false);
-  let fileInput = $state<HTMLInputElement | null>(null);
   let useCustomPath = $state(initialUrl.path !== "");
 
   const composer = createComposerAttachments(draft.attachments);
@@ -873,14 +873,6 @@
   function openFileBrowser(): void {
     fileBrowserOpen = true;
   }
-
-  function onFileInputChange(event: Event): void {
-    const files = (event.currentTarget as HTMLInputElement).files;
-    if (files) {
-      void composer.addImageFiles(files);
-      (event.currentTarget as HTMLInputElement).value = "";
-    }
-  }
 </script>
 
 {#snippet projectIcon()}
@@ -1285,34 +1277,11 @@
             </div>
           </PickerPill>
 
-          {#if attachments.length > 0}
-            <div class="flex w-full flex-wrap gap-2 pt-1">
-              {#each attachments as attachment, index (index)}
-                <div
-                  class="bg-chip border-border flex items-center gap-1.5 rounded-md border px-2 py-1 text-[13px]"
-                >
-                  {#if attachment.data_b64}
-                    <img
-                      src={`data:${attachment.mime_type};base64,${attachment.data_b64}`}
-                      alt={attachment.file_name}
-                      class="size-8 rounded object-cover"
-                    />
-                  {:else}
-                    <FileIcon class="text-muted-foreground size-3.5" />
-                  {/if}
-                  <span class="max-w-40 truncate">{attachment.file_name}</span>
-                  <button
-                    type="button"
-                    class="text-muted-foreground hover:text-foreground"
-                    title={m.chat_attachment_remove()}
-                    onclick={() => composer.remove(index)}
-                  >
-                    <XIcon class="size-3.5" />
-                  </button>
-                </div>
-              {/each}
-            </div>
-          {/if}
+          <ComposerAttachments
+            {attachments}
+            onremove={(index) => composer.remove(index)}
+            class="w-full pt-1"
+          />
         </div>
       {/snippet}
 
@@ -1494,25 +1463,10 @@
       {/snippet}
 
       {#snippet actions()}
-        <input
-          bind:this={fileInput}
-          type="file"
-          accept="image/*"
-          multiple
-          class="hidden"
-          aria-label={m.chat_attach_image()}
-          onchange={onFileInputChange}
+        <ComposerAttachImageButton
+          label={m.chat_attach_image()}
+          onfiles={(files) => void composer.addImageFiles(files)}
         />
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          class="rounded-full"
-          title={m.chat_attach_image()}
-          aria-label={m.chat_attach_image()}
-          onclick={() => fileInput?.click()}
-        >
-          <PaperclipIcon class="size-4" />
-        </Button>
 
         <ComposerMoreButton
           label={m.composer_more_options()}
