@@ -25,6 +25,8 @@ eventsource-stream = { workspace = true }
 futures-util = { workspace = true }
 fxg-protocol = { workspace = true }
 fxg-pty = { workspace = true }
+mime_guess = { workspace = true }
+percent-encoding = "2.3.2"
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -32,6 +34,7 @@ thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+url = "2.5.9"
 which = { workspace = true }
 
 [dev-dependencies]

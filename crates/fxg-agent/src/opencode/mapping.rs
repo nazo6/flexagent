@@ -7,6 +7,7 @@ use base64::Engine;
 use fxg_protocol::common::AttachmentMeta;
 
 use super::*;
+use crate::file_uri;
 
 /// Polls the catalog until the agent and model lists are populated.
 ///
@@ -1605,12 +1606,11 @@ pub(super) fn attachments_from_prompt_files(value: Option<&Value>) -> Vec<Attach
                 .pointer("/source/uri")
                 .and_then(Value::as_str)
                 .or_else(|| file.get("uri").and_then(Value::as_str))?;
-            let local_path = uri.strip_prefix("file://").unwrap_or(uri).to_owned();
             Some(AttachmentMeta {
                 file_name,
                 mime_type,
                 size_bytes: 0,
-                local_path: Some(local_path),
+                local_path: file_uri::to_path(uri),
                 data_b64: None,
             })
         })
@@ -1639,41 +1639,11 @@ pub(super) fn attachments_to_prompt_files(
             continue;
         };
         files.push(json!({
-            "uri": file_uri(path),
+            "uri": file_uri::to_uri(path),
             "name": attachment.file_name,
         }));
     }
     files
-}
-
-pub(super) fn file_uri(path: &str) -> String {
-    let normalized = path.replace('\\', "/");
-    let encoded = percent_encode_file_path(&normalized);
-    if normalized.starts_with("//") {
-        // UNC share: file://server/share
-        format!("file:{encoded}")
-    } else if normalized.starts_with('/') {
-        // Unix absolute path: file:///path
-        format!("file://{encoded}")
-    } else {
-        // Windows drive path: file:///C:/path
-        format!("file:///{encoded}")
-    }
-}
-
-/// Percent-encodes a file path while keeping URI path separators and the
-/// Windows drive colon intact.
-fn percent_encode_file_path(value: &str) -> String {
-    let mut out = String::new();
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' | b':' => {
-                out.push(char::from(byte));
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
 }
 
 /// Deep-object query parameter used by OpenCode's project-scoped endpoints.

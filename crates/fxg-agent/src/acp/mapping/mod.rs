@@ -5,6 +5,8 @@ use super::*;
 use agent_client_protocol::v1::schema::{SessionConfigSelectOption, SessionConfigSelectOptions};
 use fxg_protocol::common::AttachmentMeta;
 
+use crate::file_uri;
+
 mod types;
 
 pub(crate) use types::*;
@@ -70,7 +72,7 @@ pub(super) fn prompt_blocks(
             let uri = attachment
                 .local_path
                 .as_deref()
-                .map(file_uri)
+                .map(file_uri::to_uri)
                 .unwrap_or_else(|| attachment.file_name.clone());
             blocks.push(ContentBlock::ResourceLink(
                 ResourceLink::new(attachment.file_name, uri).mime_type(attachment.mime_type),
@@ -81,18 +83,6 @@ pub(super) fn prompt_blocks(
         bail!("prompt has no content");
     }
     Ok(blocks)
-}
-
-/// Builds a `file://` URI for a node-local path.
-pub(super) fn file_uri(path: &str) -> String {
-    #[cfg(windows)]
-    {
-        format!("file:///{}", path.replace('\\', "/"))
-    }
-    #[cfg(not(windows))]
-    {
-        format!("file://{path}")
-    }
 }
 
 /// Largest image / audio / blob payload persisted inline in an event.
@@ -130,7 +120,7 @@ fn chunk_part(block: &ContentBlock) -> Option<ChunkPart> {
         ))),
         ContentBlock::ResourceLink(link) => Some(ChunkPart::Attachment(AttachmentMeta {
             file_name: if link.name.is_empty() {
-                file_name_from_uri(&link.uri).unwrap_or_default()
+                file_uri::file_name(&link.uri).unwrap_or_default()
             } else {
                 link.name.clone()
             },
@@ -139,7 +129,7 @@ fn chunk_part(block: &ContentBlock) -> Option<ChunkPart> {
                 .clone()
                 .unwrap_or_else(|| "application/octet-stream".to_owned()),
             size_bytes: link.size.unwrap_or(0).max(0) as u64,
-            local_path: file_path_from_uri(&link.uri),
+            local_path: file_uri::to_path(&link.uri),
             data_b64: None,
         })),
         ContentBlock::Resource(resource) => match &resource.resource {
@@ -171,7 +161,7 @@ fn inline_attachment(
 ) -> AttachmentMeta {
     let size_bytes = base64_decoded_len(data);
     let file_name = uri
-        .and_then(file_name_from_uri)
+        .and_then(file_uri::file_name)
         .unwrap_or_else(|| format!("{default_name}.{}", extension_for_mime(mime_type)));
     let inline = size_bytes <= MAX_INLINE_ATTACHMENT_BYTES;
     if !inline {
@@ -185,7 +175,7 @@ fn inline_attachment(
         file_name,
         mime_type: mime_type.to_owned(),
         size_bytes,
-        local_path: uri.and_then(file_path_from_uri),
+        local_path: uri.and_then(file_uri::to_path),
         data_b64: inline.then(|| data.to_owned()),
     }
 }
@@ -196,37 +186,30 @@ fn base64_decoded_len(data: &str) -> u64 {
     ((data.len() as u64).saturating_mul(3) / 4).saturating_sub(padding)
 }
 
-/// Last path segment of a `file:` URI (or any URI).
-fn file_name_from_uri(uri: &str) -> Option<String> {
-    let path = uri.strip_prefix("file://").unwrap_or(uri);
-    path.rsplit(['/', '\\'])
-        .next()
-        .filter(|name| !name.is_empty())
-        .map(str::to_owned)
-}
-
-/// Node-local path of a `file:` URI.
-fn file_path_from_uri(uri: &str) -> Option<String> {
-    let path = uri.strip_prefix("file://")?;
-    #[cfg(windows)]
-    let path = path.strip_prefix('/').unwrap_or(path);
-    Some(path.to_owned())
-}
-
 /// File extension for the MIME types agents commonly emit.
 fn extension_for_mime(mime_type: &str) -> &'static str {
-    match mime_type {
-        "image/png" => "png",
-        "image/jpeg" => "jpg",
-        "image/gif" => "gif",
-        "image/webp" => "webp",
-        "image/svg+xml" => "svg",
-        "audio/wav" | "audio/x-wav" => "wav",
-        "audio/mpeg" => "mp3",
-        "audio/ogg" => "ogg",
-        "audio/webm" => "webm",
-        _ => "bin",
+    if mime_type == "application/octet-stream" {
+        return "bin";
     }
+    let mime_type = match mime_type {
+        // A common legacy alias that mime_guess does not map back.
+        "audio/x-wav" => "audio/wav",
+        other => other,
+    };
+    let Some(extensions) = mime_guess::get_mime_extensions_str(mime_type) else {
+        return "bin";
+    };
+    // mime_guess also lists uncommon aliases (jfif, m2a, oga, ...), so prefer
+    // the extension users expect in a generated file name.
+    const PREFERRED: &[&str] = &[
+        "png", "jpg", "gif", "webp", "svg", "wav", "mp3", "ogg", "webm",
+    ];
+    for preferred in PREFERRED {
+        if extensions.contains(preferred) {
+            return preferred;
+        }
+    }
+    extensions.first().copied().unwrap_or("bin")
 }
 
 /// Accumulates streaming chunks per session scope (parent or subagent).
@@ -926,5 +909,29 @@ pub(super) fn acp_wire_value<T: serde::Serialize>(value: &T) -> String {
     match serde_json::to_value(value) {
         Ok(serde_json::Value::String(text)) => text,
         _ => "unknown".to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extension_for_mime_uses_the_registry() {
+        assert_eq!(extension_for_mime("image/png"), "png");
+        assert_eq!(extension_for_mime("image/jpeg"), "jpg");
+        assert_eq!(extension_for_mime("image/svg+xml"), "svg");
+        assert_eq!(extension_for_mime("audio/x-wav"), "wav");
+        assert_eq!(extension_for_mime("audio/mpeg"), "mp3");
+        assert_eq!(extension_for_mime("application/octet-stream"), "bin");
+    }
+
+    #[test]
+    fn resource_links_decoded_paths_are_node_local() {
+        let attachment =
+            inline_attachment("image", "image/png", "aGk=", Some("file:///tmp/a%20b.png"));
+        #[cfg(not(windows))]
+        assert_eq!(attachment.local_path.as_deref(), Some("/tmp/a b.png"));
+        assert_eq!(attachment.file_name, "a b.png");
     }
 }

@@ -24,6 +24,7 @@ pub mod acp;
 pub mod auth;
 pub mod catalog;
 pub mod driver;
+mod file_uri;
 pub mod management;
 pub mod opencode;
 mod usage;

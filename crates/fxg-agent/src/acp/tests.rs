@@ -679,8 +679,8 @@ fn resource_links_keep_the_node_local_path() {
         .expect("resource link message completes");
     assert_eq!(attachments.len(), 1);
     assert_eq!(attachments[0].file_name, "notes.md");
-    // `file_path_from_uri` drops the leading slash on Windows so that
-    // `file:///C:/...` becomes a usable drive path.
+    // `file_uri::to_path` maps `file:///...` to a platform path (a drive-less
+    // URI keeps the legacy relative shape on Windows).
     let expected_path = if cfg!(windows) {
         "repo/notes.md"
     } else {
