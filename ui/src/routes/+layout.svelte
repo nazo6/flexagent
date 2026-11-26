@@ -15,6 +15,7 @@
   import { problems, type AppProblem } from "#lib/stores/problems.svelte.ts";
   import { motion } from "#lib/motion.svelte.ts";
   import { theme } from "#lib/theme.svelte.ts";
+  import { initViewport } from "#lib/viewport.ts";
   import type { RecoveryAction } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { ModeWatcher } from "mode-watcher";
@@ -60,7 +61,9 @@
   onMount(() => {
     theme.init();
     motion.init();
+    const disposeViewport = initViewport();
     void initApp();
+    return disposeViewport;
   });
 
   /**
@@ -171,7 +174,7 @@
   </div>
 {:else}
   <div
-    class="safe-area-shell bg-background text-foreground flex h-svh w-full overflow-hidden"
+    class="safe-area-shell app-viewport bg-background text-foreground flex w-full overflow-hidden"
     class:wco-sidebar-collapsed={layoutState.sidebarCollapsed}
   >
     <!-- Desktop sidebar (persistent on lg and up) -->
@@ -183,7 +186,7 @@
 
     <!-- Mobile drawer (Sheet) -->
     <Sheet.Root bind:open={layoutState.mobileDrawerOpen}>
-      <Sheet.Content side="left" class="safe-area-portal w-80 max-w-[85vw] p-0">
+      <Sheet.Content side="left" class="safe-area-portal w-80 max-w-[85vw]">
         <AppSidebar onNavigate={() => (layoutState.mobileDrawerOpen = false)} />
       </Sheet.Content>
     </Sheet.Root>

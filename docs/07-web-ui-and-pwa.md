@@ -134,6 +134,9 @@ Web ターミナルは `ghostty-web`（WASM 版 `libghostty-vt` + Canvas 2D）�
 
 - **`manifest.webmanifest`**: `"display": "standalone"`, `"display_override": ["window-controls-overlay", "standalone"]` を設定。
 - **Safe area**: `app.html` の `viewport-fit=cover` に対し、`app.css` の `--safe-*`（`env(safe-area-inset-*)`）を `.safe-area-shell`（アプリ全体の上下左右）と `.safe-area-portal`（body へ portal されるモバイルドロワー）に適用する。ノッチ・ステータスバー・ホームインジケータの下にヘッダー / コンポーザー / ナビゲーションを置かない。トーストも上端のインセット分だけ下げる。
+- **モバイル入力とスクロール**: `viewport` に `interactive-widget=resizes-content` を指定し、`innerHeight` と `visualViewport` の差から `--app-height` / `--keyboard-inset` を更新する。シェルとポータルは下インセットを `max(safe-area, keyboard)` で確保するため、composer がキーボードに隠れない。スクロール領域は `overscroll-behavior-y: contain` で scroll chaining と PWA の pull-to-refresh（アプリ再起動）を止め、タップ可能要素は `touch-action: manipulation` と透明な tap highlight で 300ms 待ち・二重タップズーム・グレーのフラッシュを避ける。
+- **タッチ向け先読み**: `data-sveltekit-preload-data="tap"` により、hover のないタッチ端末でもタップ開始時に遷移先のデータ / コードを取得する。
+- **履歴の置換**: セッション作成後の遷移は `replaceState` で行い、戻る操作が消費済みの新規作成画面ではなく元の画面へ戻るようにする。外部セッションの取り込みは一覧へ戻れるよう通常の push のままにする。
 - **Window Controls Overlay (WCO)**: インストール済みデスクトップ Chromium では `env(titlebar-area-*)` と `.wco-*` クラス（`ui/src/app.css`）により OS タイトルバーとアプリトップバーを統合する。
 - **Service Worker (`ui/src/service-worker/index.ts`)**:
   - `$app/manifest` と `$app/env` を用いた App Shell キャッシュ（`/api/**` は常にネットワーク素通し）。

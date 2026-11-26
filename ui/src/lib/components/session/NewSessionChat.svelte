@@ -758,7 +758,9 @@
       promptText = "";
       composer.clear();
       composerDrafts.clear(NEW_SESSION_DRAFT_ID);
-      await goto(`/sessions/${response.session_id}`);
+      // Replace the consumed new-session screen so Back returns to where the
+      // user came from instead of the submitted form.
+      await goto(`/sessions/${response.session_id}`, { replaceState: true });
     } catch (error) {
       // The form state (including the prompt) is intentionally kept so the
       // user can retry without retyping.

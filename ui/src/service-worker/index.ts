@@ -136,7 +136,9 @@ self.addEventListener("push", (event) => {
       badge: "/icon-192.png",
       data: payload,
       actions,
-      requireInteraction: true,
+      // Only approvals/questions that need an action stay on screen. A sticky
+      // "turn complete" notification is not how a native chat app behaves.
+      requireInteraction: actions.length > 0,
     }),
   );
 });

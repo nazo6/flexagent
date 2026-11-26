@@ -288,11 +288,31 @@
   html {
     @apply font-sans;
     font-optical-sizing: auto;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    /* Pinch zoom stays available; double-tap zoom does not delay taps. */
+    touch-action: manipulation;
+    /* Keep PWA pull-to-refresh from reloading the app at the top of a list. */
+    overscroll-behavior-y: contain;
   }
   body {
     @apply bg-background text-foreground;
     font-size: 0.875rem;
     line-height: 1.55;
+    overscroll-behavior-y: contain;
+  }
+  /*
+   * Touch feedback belongs to the component (motion-press / active scale).
+   * The browser's grey tap flash and long-press text selection on controls
+   * make the app feel like a web page; content links and message text keep
+   * their normal selection behavior.
+   */
+  :where(a, button, [role="button"], summary) {
+    -webkit-tap-highlight-color: transparent;
+  }
+  :where(button, [role="button"], summary) {
+    -webkit-user-select: none;
+    user-select: none;
   }
   ::selection {
     background: var(--signal);
@@ -312,13 +332,25 @@
   .safe-area-shell {
     padding-top: var(--safe-top);
     padding-right: var(--safe-right);
-    padding-bottom: var(--safe-bottom);
+    /* On engines that do not resize the layout viewport for the keyboard, the
+       visualViewport inset pushes the composer above it. `max` avoids adding
+       the home-indicator inset twice. */
+    padding-bottom: max(var(--safe-bottom), var(--keyboard-inset, 0px));
     padding-left: var(--safe-left);
+  }
+  /*
+   * The connected shell follows the layout viewport. `innerHeight` shrinks with
+   * `interactive-widget=resizes-content` (Android), so the composer stays above
+   * the keyboard; the visualViewport inset covers engines that only resize the
+   * visual viewport.
+   */
+  .app-viewport {
+    height: var(--app-height, 100svh);
   }
   /* Inset for views portaled outside the shell (drawers, full-height sheets). */
   .safe-area-portal {
     padding-top: var(--safe-top);
-    padding-bottom: var(--safe-bottom);
+    padding-bottom: max(var(--safe-bottom), var(--keyboard-inset, 0px));
   }
   /* Shared page frame: management screens use the wider variant. */
   .desk-page {
@@ -330,6 +362,7 @@
    */
   .app-scroll {
     scrollbar-gutter: stable;
+    overscroll-behavior-y: contain;
   }
   /*
    * Scroll areas with centered content (chat timelines): reserve the gutter on
@@ -338,6 +371,7 @@
    */
   .app-scroll-centered {
     scrollbar-gutter: stable both-edges;
+    overscroll-behavior-y: contain;
   }
   .desk-page-narrow {
     @apply mx-auto flex w-full max-w-[760px] flex-col gap-5 px-4 py-6 md:py-8;
