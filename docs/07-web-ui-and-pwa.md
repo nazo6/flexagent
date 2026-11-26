@@ -134,9 +134,10 @@ Web ターミナルは `ghostty-web`（WASM 版 `libghostty-vt` + Canvas 2D）�
 ## 5. Android PWA・Window Controls Overlay・Web Push (VAPID)
 
 - **`manifest.webmanifest`**: `"display": "standalone"`, `"display_override": ["window-controls-overlay", "standalone"]` を設定。
-- **Safe area**: `app.html` の `viewport-fit=cover` に対し、`app.css` の `--safe-*`（`env(safe-area-inset-*)`）を `.safe-area-shell`（アプリ全体の上下左右）と `.safe-area-portal`（body へ portal されるモバイルドロワー）に適用する。ノッチ・ステータスバー・ホームインジケータの下にヘッダー / コンポーザー / ナビゲーションを置かない。トーストも上端のインセット分だけ下げる。
+- **Safe area**: `app.html` の `viewport-fit=cover` に対し、`app.css` の `--safe-*`（`env(safe-area-inset-*)`）を `.safe-area-shell`（アプリ全体の上下左右）と `.safe-area-portal`（フルハイトのドロワー / シート）に適用する。ノッチ・ステータスバー・ホームインジケータの下にヘッダー / コンポーザー / ナビゲーションを置かない。トーストも上端のインセット分だけ下げる。
 - **モバイル入力とスクロール**: `viewport` に `interactive-widget=resizes-content` を指定し、`innerHeight` と `visualViewport` の差から `--app-height` / `--keyboard-inset` を更新する。シェルとポータルは下インセットを `max(safe-area, keyboard)` で確保するため、composer がキーボードに隠れない。スクロール領域は `overscroll-behavior-y: contain` で scroll chaining と PWA の pull-to-refresh（アプリ再起動）を止め、タップ可能要素は `touch-action: manipulation` と透明な tap highlight で 300ms 待ち・二重タップズーム・グレーのフラッシュを避ける。
 - **戻る操作とオーバーレイ**: モバイルで開く drawer / dock / TurnOutline / SubagentDetail / Problem center / ピッカーシート / ダイアログは、開いている間だけ overlay stack に登録する。`beforeNavigate` の `popstate` で最上位を閉じて遷移をキャンセルするため、戻るは「最上位のシートを閉じる」、次の戻るが「前の画面へ」になる。オーバーレイのために番兵の履歴エントリは積まない。
+- **ドロワーのスワイプ**: モバイルのナビゲーション drawer は左端 24px からの横スワイプで指に追従して開き、開いている間は左スワイプで閉じる。パネル位置と backdrop の不透明度は同じ進捗で動き、35% / 65% の閾値と velocity で開閉をスナップする。OS の戻るジェスチャー（Android のエッジスワイプ / iOS の画面端スワイプ）が優先される環境ではブラウザがタッチを渡さないため、ヘッダーのメニューボタンも併用する。
 - **タッチ形状**: `pointer: coarse` では `.touch-target-lg`（44px）/ `.touch-target`（40px）/ `.touch-target-sm`（36px）/ `.touch-target-xs`（32px）で最小ヒット領域を確保し、`.touch-row` でリスト行を 44px 以上にする。入力欄は 16px にして iOS のフォーカスズームを避ける。`lg` 未満ではピッカーを vaul のボトムシート、workspace dock を全画面シートにする。
 - **タッチ向け先読み**: `data-sveltekit-preload-data="tap"` により、hover のないタッチ端末でもタップ開始時に遷移先のデータ / コードを取得する。
 - **履歴の置換**: セッション作成後の遷移は `replaceState` で行い、戻る操作が消費済みの新規作成画面ではなく元の画面へ戻るようにする。外部セッションの取り込みは一覧へ戻れるよう通常の push のままにする。

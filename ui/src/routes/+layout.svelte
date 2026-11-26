@@ -3,20 +3,21 @@
   import { onMount } from "svelte";
   import "../app.css";
   import AppSidebar from "#lib/components/layout/AppSidebar.svelte";
+  import MobileDrawer from "#lib/components/layout/MobileDrawer.svelte";
   import BrandIcon from "#lib/components/BrandIcon.svelte";
   import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
   import ProblemBadge from "#lib/components/ProblemBadge.svelte";
   import ProblemCenter from "#lib/components/ProblemCenter.svelte";
   import TokenDialog from "#lib/components/TokenDialog.svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
-  import * as Sheet from "#lib/components/ui/sheet/index.ts";
   import { Toaster } from "#lib/components/ui/sonner/index.ts";
   import { connection, initApp, sync } from "#lib/stores/app.svelte.ts";
   import { problems, type AppProblem } from "#lib/stores/problems.svelte.ts";
   import { motion } from "#lib/motion.svelte.ts";
   import { theme } from "#lib/theme.svelte.ts";
   import { initViewport } from "#lib/viewport.ts";
-  import { closeTopOverlay, registerOverlay } from "#lib/overlays.ts";
+  import { closeTopOverlay } from "#lib/overlays.ts";
+  import { mobileLayout } from "#lib/media.svelte.ts";
   import type { RecoveryAction } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { ModeWatcher } from "mode-watcher";
@@ -79,10 +80,12 @@
     if (closeTopOverlay()) navigation.cancel();
   });
 
-  // The mobile drawer is an overlay, not a route; register it while open.
+  // The mobile drawer is an overlay, not a route; its component registers
+  // itself with the back stack. A desktop resize closes it because the
+  // desktop sidebar takes over.
   $effect(() => {
-    if (!layoutState.mobileDrawerOpen) return;
-    return registerOverlay("mobile-drawer", () => layoutState.setMobileDrawer(false));
+    if (mobileLayout.matches) return;
+    if (layoutState.mobileDrawerOpen) layoutState.setMobileDrawer(false);
   });
 
   /**
@@ -197,21 +200,17 @@
     class:wco-sidebar-collapsed={layoutState.sidebarCollapsed}
   >
     <!-- Desktop sidebar (persistent on lg and up) -->
-    {#if !layoutState.sidebarCollapsed}
-      <div class="hidden lg:flex lg:w-[264px] xl:w-[288px] lg:shrink-0 lg:h-full">
+    {#if !mobileLayout.matches && !layoutState.sidebarCollapsed}
+      <div class="flex h-full w-[264px] shrink-0 xl:w-[288px]">
         <AppSidebar />
       </div>
     {/if}
 
-    <!-- Mobile drawer (Sheet) -->
-    <Sheet.Root bind:open={layoutState.mobileDrawerOpen}>
-      <Sheet.Content side="left" class="safe-area-portal w-80 max-w-[85vw]">
-        <AppSidebar onNavigate={() => (layoutState.mobileDrawerOpen = false)} />
-      </Sheet.Content>
-    </Sheet.Root>
-
     <!-- Main area -->
-    <div class="relative flex h-full flex-1 flex-col overflow-hidden">
+    <div
+      class="relative flex h-full flex-1 flex-col overflow-hidden"
+      inert={mobileLayout.matches && layoutState.mobileDrawerOpen}
+    >
       <!-- Desktop: a floating control reopens the collapsed sidebar without
            reserving a full-height rail. Session pages place this control in
            their own header instead, so only one toggle is ever visible. -->
@@ -305,5 +304,13 @@
         {@render children()}
       </main>
     </div>
+
+    {#if mobileLayout.matches}
+      <MobileDrawer
+        open={layoutState.mobileDrawerOpen}
+        onopen={() => layoutState.setMobileDrawer(true)}
+        onclose={() => layoutState.setMobileDrawer(false)}
+      />
+    {/if}
   </div>
 {/if}

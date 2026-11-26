@@ -49,3 +49,8 @@ export function closeTopOverlay(): boolean {
   entry.close();
   return true;
 }
+
+/** Whether any overlay is currently open (for gesture layers). */
+export function hasOpenOverlay(): boolean {
+  return stack.length > 0;
+}

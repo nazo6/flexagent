@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { closeTopOverlay, registerOverlay } from "./overlays.ts";
+import { closeTopOverlay, hasOpenOverlay, registerOverlay } from "./overlays.ts";
 
 describe("overlay stack", () => {
   it("closes the most recently opened overlay first", () => {
@@ -7,11 +7,13 @@ describe("overlay stack", () => {
     const disposeFirst = registerOverlay("first", () => order.push("first"));
     const disposeSecond = registerOverlay("second", () => order.push("second"));
 
+    expect(hasOpenOverlay()).toBe(true);
     expect(closeTopOverlay()).toBe(true);
     expect(order).toEqual(["second"]);
     expect(closeTopOverlay()).toBe(true);
     expect(order).toEqual(["second", "first"]);
     expect(closeTopOverlay()).toBe(false);
+    expect(hasOpenOverlay()).toBe(false);
 
     disposeFirst();
     disposeSecond();
