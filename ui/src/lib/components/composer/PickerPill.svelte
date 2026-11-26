@@ -1,5 +1,6 @@
 <script lang="ts">
   import * as Popover from "#lib/components/ui/popover/index.ts";
+  import { isCoarsePointer } from "#lib/pointer.ts";
   import { cn } from "#lib/utils.ts";
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
@@ -56,7 +57,15 @@
       <ChevronDownIcon class="text-muted-foreground size-3 shrink-0" />
     {/if}
   </Popover.Trigger>
-  <Popover.Content class={cn("w-72", contentClass)}>
+  <Popover.Content
+    class={cn("w-72", contentClass)}
+    onOpenAutoFocus={(event) => {
+      // Touch devices focus the first tabbable element (the search field for long
+      // option lists), which pops up the on-screen keyboard. Keep the focus on the
+      // trigger there and let the user tap the search field when they want it.
+      if (isCoarsePointer()) event.preventDefault();
+    }}
+  >
     {@render children?.()}
   </Popover.Content>
 </Popover.Root>
