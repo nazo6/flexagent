@@ -39,7 +39,6 @@
 
   let { ctx, tab, mobile = false, onback }: Props = $props();
 
-  const remote = $derived(sync.connection.role === "hub");
   const path = $derived(tab.path);
   const mode = $derived<DockFileMode>(tab.mode);
   const scope = $derived<DockDiffScope>(tab.scope);
@@ -74,7 +73,7 @@
     const currentScope = scope;
     const token = refreshToken;
     void token;
-    if (currentPath === "" || remote) return;
+    if (currentPath === "") return;
     void loadFileStatus(currentPath);
     if (currentMode === "view") {
       void loadView(currentPath);
@@ -216,11 +215,7 @@
   </span>
 </div>
 
-{#if remote}
-  <div class="flex flex-1 items-center justify-center p-6 text-center">
-    <p class="text-muted-foreground text-[12px]">{m.dock_files_remote_disabled()}</p>
-  </div>
-{:else if mode === "view"}
+{#if mode === "view"}
   {#if viewLoading}
     <div class="text-muted-foreground flex flex-1 items-center justify-center gap-2 text-[12px]">
       <LoaderCircleIcon class="size-3.5 animate-spin" />
