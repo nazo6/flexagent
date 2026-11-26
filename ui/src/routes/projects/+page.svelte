@@ -112,7 +112,7 @@
   {:else if sync.projects.length === 0}
     <p class="text-muted-foreground text-sm">{m.projects_empty()}</p>
   {:else}
-    <div class="border-border flex flex-col border-t">
+    <div class="flex flex-col gap-3">
       {#each sync.projects as project (project.project_id)}
         <ProjectCard
           {project}
