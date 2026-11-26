@@ -7,6 +7,7 @@
   import { troubleshootingUrl } from "#lib/api/docs.ts";
   import { recoveryActionKey, recoveryActionLabel } from "#lib/api/recovery.ts";
   import { problems, type AppProblem } from "#lib/stores/problems.svelte.ts";
+  import { registerOverlay } from "#lib/overlays.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { cn } from "#lib/utils.ts";
   import { toast } from "svelte-sonner";
@@ -22,6 +23,12 @@
   }
 
   let { onaction }: Props = $props();
+
+  // Close the sheet on the system back gesture before leaving the route.
+  $effect(() => {
+    if (!problems.centerOpen) return;
+    return registerOverlay("problem-center", () => problems.closeCenter());
+  });
 
   async function copyRequestId(problem: AppProblem): Promise<void> {
     if (problem.requestId === null) return;

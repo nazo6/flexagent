@@ -394,6 +394,12 @@ driver 側のキャッシュを無視する（UI の明示的な Refresh 用）�
 - 上り: `Subscribe` / `SendPrompt` / `ControlSession` / `Ping`。
 - 下り: `EventBatch` / `LiveStreamDelta` / `ProvisioningLog` / `CommandResult` /
   `SystemStatus` / `ProjectsUpdated` / `Error` / `Pong`。
+- モバイルでページがバックグラウンドへ移動すると、ブラウザはタイマーを凍結し、
+  `WebSocket` を `OPEN` のまま残したまま経路だけを失うことがある。UI は
+  `visibilitychange`（visible）/ `online` / `pageshow`（bfcache 復元）で
+  バックオフをリセットして即座に再接続し、`OPEN` のままの socket には `Ping`
+  を送って `Pong`（または任意の受信メッセージ）が一定時間返らなければ
+  破棄して張り直す。再接続中は「Disconnected」ではなく「Reconnecting…」と表示する。
 - 承認 / 質問の回答、Resume / Archive / Delete は REST 専用。
 - 受信イベントは `event_id` / `(session_id, node_seq)` で upsert し、
   `LiveStreamDelta` は `message_id` / `thought_id` でマージする。

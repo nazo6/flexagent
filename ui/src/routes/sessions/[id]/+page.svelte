@@ -1,8 +1,8 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import { onDestroy, onMount, tick, untrack } from "svelte";
-  import { fade, fly, slide } from "svelte/transition";
+  import { onDestroy, tick, untrack } from "svelte";
+  import { fade } from "svelte/transition";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import ProvisioningLogCard from "#lib/components/ProvisioningLogCard.svelte";
   import ChatTimeline from "#lib/components/chat/ChatTimeline.svelte";
@@ -13,7 +13,8 @@
   import { groupTimelineItems } from "#lib/chat-groups.ts";
   import Composer from "#lib/components/chat/Composer.svelte";
   import SessionHeader from "#lib/components/session/SessionHeader.svelte";
-  import DockHost from "#lib/components/dock/DockHost.svelte";
+  import DockSplitPane from "#lib/components/dock/DockSplitPane.svelte";
+  import DockSheet from "#lib/components/dock/DockSheet.svelte";
   import DockRail from "#lib/components/dock/DockRail.svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Skeleton } from "#lib/components/ui/skeleton/index.ts";
@@ -33,10 +34,11 @@
     latestUsageFromEvents,
     type TimelineItem,
   } from "#lib/sync/reducer.ts";
-  import { cn } from "#lib/utils.ts";
   import { toast } from "svelte-sonner";
   import ArchiveIcon from "@lucide/svelte/icons/archive";
   import { layoutState } from "#lib/stores/layout.svelte.ts";
+  import { uiTraits } from "#lib/ui-traits.svelte.ts";
+  import { registerOverlay } from "#lib/overlays.ts";
   import ArrowDownIcon from "@lucide/svelte/icons/arrow-down";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import SkullIcon from "@lucide/svelte/icons/skull";
@@ -78,6 +80,8 @@
       : { sessionId: session.session_id, nodeId: session.node_id, localPath: session.local_path },
   );
   const isDockOpen = $derived(dock.isOpen && dockContext !== null);
+  /** Compact layouts show the dock as a full-screen layer; wide ones split the pane. */
+  const dockAsOverlay = $derived(isDockOpen && uiTraits.overlayPanels);
   /** Highlight the active launcher only while the dock is visible. */
   const visibleLauncher = $derived(dock.isOpen ? dock.activeTool : null);
 
@@ -157,61 +161,26 @@
   const FOLLOW_THRESHOLD_PX = 80;
   let lastUserItemKey: string | null = null;
 
-  // Desktop resizable right pane
-  let mainContainer = $state<HTMLDivElement | null>(null);
-  let isResizing = $state(false);
-  /**
-   * The side panel has a desktop slot (split pane) and a mobile slot
-   * (full-screen). Only the slot matching the viewport is rendered, because
-   * mounting both started two terminals — and therefore two PTYs — at once.
-   * `lg` is 64rem in Tailwind.
-   */
-  const DESKTOP_LAYOUT_QUERY = "(min-width: 64rem)";
-  let desktopLayout = $state(
-    typeof window === "undefined" || typeof window.matchMedia !== "function"
-      ? true
-      : window.matchMedia(DESKTOP_LAYOUT_QUERY).matches,
-  );
-
-  onMount(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const query = window.matchMedia(DESKTOP_LAYOUT_QUERY);
-    desktopLayout = query.matches;
-    const onChange = (event: MediaQueryListEvent) => (desktopLayout = event.matches);
-    query.addEventListener("change", onChange);
-    return () => query.removeEventListener("change", onChange);
-  });
-
-  function handlePointerMove(e: PointerEvent) {
-    if (!isResizing || !mainContainer) return;
-    const rect = mainContainer.getBoundingClientRect();
-    const pointerX = e.clientX;
-    const rightPixels = rect.right - pointerX;
-    const percentage = (rightPixels / rect.width) * 100;
-    dock.setWidth(Math.round(percentage));
-  }
-
-  function handlePointerUp() {
-    if (!isResizing) return;
-    isResizing = false;
-    window.removeEventListener("pointermove", handlePointerMove);
-    window.removeEventListener("pointerup", handlePointerUp);
-    dock.commitWidth();
-  }
-
-  function startResize(event: PointerEvent) {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    isResizing = true;
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-  }
-
   // The workspace owns the dock state; the session only supplies tool context.
   // Switching sessions inside one workspace must not reset the active tool or
   // open file previews.
   $effect(() => {
     dock.setContext(dockContext);
+  });
+
+  // Mobile layers close on the system back gesture instead of leaving the
+  // session. The desktop dock is a split pane, so it is not in this stack.
+  $effect(() => {
+    if (!dockAsOverlay) return;
+    return registerOverlay("session-dock", () => dock.collapse());
+  });
+  $effect(() => {
+    if (!turnsOpen) return;
+    return registerOverlay("turn-outline", () => (turnsOpen = false));
+  });
+  $effect(() => {
+    if (selectedSubagentId === null) return;
+    return registerOverlay("subagent-detail", () => (selectedSubagentId = null));
   });
 
   // Make the session a priority target for WS delivery, and fall back to REST
@@ -303,6 +272,12 @@
 
   let killDialogOpen = $state(false);
   let killing = $state(false);
+
+  // The force-stop confirmation closes on the system back gesture.
+  $effect(() => {
+    if (!killDialogOpen) return;
+    return registerOverlay("session-kill", () => (killDialogOpen = false));
+  });
 
   // Execution state of Resume (restarting a stopped session)
   let resuming = $state(false);
@@ -685,17 +660,11 @@
   {/if}
 
   <!-- Main content area -->
-  <div
-    bind:this={mainContainer}
-    class="relative flex flex-1 overflow-hidden"
-    class:select-none={isResizing}
-  >
-    <!-- Chat column. On mobile the dock is an overlay, so the chat stays
-         rendered (and dimmed) behind it; `inert` keeps it out of the tab order. -->
-    <div
-      class="flex h-full min-w-0 flex-1 flex-col overflow-hidden"
-      inert={isDockOpen && !desktopLayout}
-    >
+  <div class="relative flex flex-1 overflow-hidden">
+    <!-- Chat column. In the compact shell the dock is an overlay, so the chat
+         stays rendered (and dimmed) behind it; `inert` keeps it out of the tab
+         order. -->
+    <div class="flex h-full min-w-0 flex-1 flex-col overflow-hidden" inert={dockAsOverlay}>
       <!-- Scrollable message timeline -->
       <div class="relative min-h-0 flex-1">
         <div
@@ -834,49 +803,15 @@
       </div>
     </div>
 
-    <!-- Desktop workspace dock -->
-    {#if isDockOpen && dockContext !== null && desktopLayout}
+    <!-- Wide workspace dock -->
+    {#if isDockOpen && dockContext !== null && !uiTraits.overlayPanels}
       {@const ctx = dockContext}
-      <button
-        type="button"
-        aria-label={m.dock_resize()}
-        in:fade|local={{ duration: motion.duration(120) }}
-        out:fade|local={{ duration: motion.duration(120) }}
-        class={cn(
-          "group z-10 -ml-px hidden w-1.5 cursor-col-resize shrink-0 items-center justify-center border-l border-border bg-transparent p-0 outline-none transition-colors select-none hover:bg-signal/50 focus-visible:ring-1 focus-visible:ring-signal active:bg-signal lg:flex",
-          isResizing && "bg-signal",
-        )}
-        onpointerdown={startResize}
-        onkeydown={(e) => {
-          if (e.key === "ArrowLeft") {
-            e.preventDefault();
-            dock.setWidth(dock.width + 2);
-            dock.commitWidth();
-          } else if (e.key === "ArrowRight") {
-            e.preventDefault();
-            dock.setWidth(dock.width - 2);
-            dock.commitWidth();
-          }
-        }}
-      >
-        <span
-          class="bg-muted-foreground/30 group-hover:bg-signal h-8 w-0.5 rounded-full pointer-events-none"
-        ></span>
-      </button>
-
-      <div
-        in:slide|local={{ axis: "x", duration: motion.duration(180) }}
-        out:slide|local={{ axis: "x", duration: motion.duration(180) }}
-        class="hidden h-full shrink-0 flex-col overflow-hidden lg:flex"
-        style="width: clamp(22rem, {dock.width}%, 75%);"
-      >
-        <DockHost {ctx} {items} oncollapse={() => dock.collapse()} />
-      </div>
+      <DockSplitPane {ctx} {items} onclose={() => dock.collapse()} />
     {/if}
 
-    <!-- Desktop tool rail -->
-    {#if !layoutState.rightRailCollapsed && session !== null}
-      <div class="hidden h-full lg:flex">
+    <!-- Wide tool rail -->
+    {#if !uiTraits.overlayPanels && !layoutState.rightRailCollapsed && session !== null}
+      <div class="flex h-full">
         <DockRail
           active={visibleLauncher}
           onselect={(id) => dock.toggleTool(id)}
@@ -885,26 +820,10 @@
       </div>
     {/if}
 
-    <!-- Mobile dock overlay. The inset panel and the dimmed, blurred backdrop
-         make it obvious that this is a layer above the conversation. -->
-    {#if isDockOpen && dockContext !== null && !desktopLayout}
+    <!-- Compact dock overlay -->
+    {#if isDockOpen && dockContext !== null && uiTraits.overlayPanels}
       {@const ctx = dockContext}
-      <div class="absolute inset-0 z-20 lg:hidden">
-        <button
-          type="button"
-          tabindex="-1"
-          aria-label={m.session_close_panel()}
-          transition:fade|local={{ duration: motion.duration(150) }}
-          class="bg-background/60 absolute inset-0 cursor-default backdrop-blur-[2px]"
-          onclick={() => dock.collapse()}
-        ></button>
-        <div
-          transition:fly|local={{ y: 8, duration: motion.duration(160) }}
-          class="bg-card border-border absolute inset-x-2 top-6 bottom-2 flex flex-col overflow-hidden rounded-xl border shadow-2xl"
-        >
-          <DockHost {ctx} {items} mobile oncollapse={() => dock.collapse()} />
-        </div>
-      </div>
+      <DockSheet {ctx} {items} onclose={() => dock.collapse()} />
     {/if}
   </div>
 </div>

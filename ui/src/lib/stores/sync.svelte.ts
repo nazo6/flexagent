@@ -42,6 +42,22 @@ const COMMAND_TIMEOUT_MS = 30_000;
 const SEND_PROMPT_TIMEOUT_MS = 120_000;
 /** Upper bound for reconnect backoff. */
 const MAX_RECONNECT_DELAY_MS = 30_000;
+/**
+ * Deadline for a WebSocket handshake.
+ *
+ * A handshake started right before the page is backgrounded can stay pending
+ * for a long time; a timeout turns it into a normal reconnect instead of
+ * leaving the client disconnected indefinitely.
+ */
+const CONNECT_TIMEOUT_MS = 10_000;
+/**
+ * Deadline for the liveness `Ping` sent when the page becomes visible again.
+ *
+ * A socket that was suspended in the background can look `OPEN` even after the
+ * peer (or a proxy) dropped it. The ping turns that into a fast reconnect
+ * instead of waiting for the browser's TCP timeout.
+ */
+const RESUME_PING_TIMEOUT_MS = 4_000;
 /** Sessions per sidebar page (`GET /api/v1/sessions`). */
 const SESSION_PAGE_SIZE = 100;
 /** Events per chat history page (`before_cursor` paging). */
@@ -163,6 +179,14 @@ export class SyncStore {
   projectsError = $state<string | null>(null);
   /** Client WS connection state. */
   wsConnected = $state(false);
+  /**
+   * Whether the client WS is being (re)connected.
+   *
+   * `wsConnected` alone cannot distinguish "the browser suspended the socket
+   * and we are already reconnecting" from a terminal disconnection, so the UI
+   * uses this to show `Reconnecting…` instead of a false `Disconnected` flash.
+   */
+  wsReconnecting = $state(false);
   /** Node ⇔ hub link state (only when connected to a local node). */
   hubLink = $state<HubLinkStatus | null>(null);
   /** Number of unsynced Outbox events. */
@@ -192,6 +216,10 @@ export class SyncStore {
   #stopped = true;
   #reconnectDelayMs = 1_000;
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  #connectTimer: ReturnType<typeof setTimeout> | null = null;
+  #connectStartedAt = 0;
+  #pingTimer: ReturnType<typeof setTimeout> | null = null;
+  #lifecycleBound = false;
   #cursor: number | null = readCursor();
   /** Whether this page has already connected once (later connections resume from `#cursor`). */
   #hasConnected = false;
@@ -222,6 +250,9 @@ export class SyncStore {
   start(): void {
     if (!this.#stopped) return;
     this.#stopped = false;
+    this.#reconnectDelayMs = 1_000;
+    this.wsReconnecting = true;
+    this.#bindLifecycle();
     this.#connect();
     void this.refreshAll();
   }
@@ -229,14 +260,81 @@ export class SyncStore {
   /** Disconnect and stop reconnecting (e.g. on logout). */
   stop(): void {
     this.#stopped = true;
-    if (this.#reconnectTimer !== null) {
-      clearTimeout(this.#reconnectTimer);
-      this.#reconnectTimer = null;
-    }
+    this.#unbindLifecycle();
+    this.#clearReconnectTimer();
+    this.#clearConnectTimer();
+    this.#clearPingTimer();
     this.#ws?.close();
     this.#ws = null;
     this.wsConnected = false;
+    this.wsReconnecting = false;
   }
+
+  /**
+   * Reconnect immediately when the page becomes usable again.
+   *
+   * Mobile browsers freeze timers while a page is backgrounded and may leave a
+   * `WebSocket` in `OPEN` even though the peer dropped it. On resume, reset the
+   * backoff, restart a pending handshake, and verify an open socket with a
+   * `Ping` instead of waiting for the OS/network stack to notice.
+   */
+  #resume(): void {
+    if (this.#stopped || this.connection.tokenRequired) return;
+    this.#reconnectDelayMs = 1_000;
+    this.#clearReconnectTimer();
+    const ws = this.#ws;
+    if (ws === null) {
+      this.wsConnected = false;
+      this.wsReconnecting = true;
+      this.#connect();
+      return;
+    }
+    if (ws.readyState === WebSocket.CONNECTING) {
+      // Leave a handshake that this resume (or a recent attempt) already
+      // started, but replace one that was pending before the page was hidden.
+      if (Date.now() - this.#connectStartedAt < CONNECT_TIMEOUT_MS) return;
+      this.#forceReconnect(ws);
+      return;
+    }
+    if (ws.readyState !== WebSocket.OPEN) {
+      this.#forceReconnect(ws);
+      return;
+    }
+    this.#probeLiveness(ws);
+  }
+
+  #bindLifecycle(): void {
+    if (this.#lifecycleBound || typeof document === "undefined" || typeof window === "undefined") {
+      return;
+    }
+    document.addEventListener("visibilitychange", this.#onVisibilityChange);
+    window.addEventListener("online", this.#onOnline);
+    window.addEventListener("pageshow", this.#onPageShow);
+    this.#lifecycleBound = true;
+  }
+
+  #unbindLifecycle(): void {
+    if (!this.#lifecycleBound || typeof document === "undefined" || typeof window === "undefined") {
+      return;
+    }
+    document.removeEventListener("visibilitychange", this.#onVisibilityChange);
+    window.removeEventListener("online", this.#onOnline);
+    window.removeEventListener("pageshow", this.#onPageShow);
+    this.#lifecycleBound = false;
+  }
+
+  #onVisibilityChange = (): void => {
+    if (document.visibilityState === "visible") this.#resume();
+  };
+
+  #onOnline = (): void => {
+    this.#resume();
+  };
+
+  #onPageShow = (event: PageTransitionEvent): void => {
+    // A restored bfcache page can also resume without a visibility change.
+    if (event.persisted) this.#resume();
+  };
 
   /** Stop once and reconnect (e.g. right after login). */
   restart(): void {
@@ -246,16 +344,22 @@ export class SyncStore {
 
   #connect(): void {
     if (this.#stopped || this.connection.tokenRequired) return;
+    this.#clearConnectTimer();
     let ws: WebSocket;
     try {
       ws = new WebSocket(this.connection.client.wsUrl("/api/v1/client/ws"));
     } catch {
+      this.wsReconnecting = true;
       this.#scheduleReconnect();
       return;
     }
     this.#ws = ws;
+    this.#connectStartedAt = Date.now();
     ws.addEventListener("open", () => {
+      if (this.#ws !== ws) return;
+      this.#clearConnectTimer();
       this.wsConnected = true;
+      this.wsReconnecting = false;
       this.#reconnectDelayMs = 1_000;
       // A client with no stored cursor starts at the store tail: chat history
       // is loaded per session from the paginated events API, so replaying the
@@ -280,6 +384,8 @@ export class SyncStore {
       void this.refreshAll();
     });
     ws.addEventListener("message", (event: MessageEvent) => {
+      // A replaced (stale) socket must not feed messages into the new state.
+      if (this.#ws !== ws) return;
       if (typeof event.data === "string") this.#handleMessage(event.data);
     });
     ws.addEventListener("close", () => {
@@ -287,14 +393,81 @@ export class SyncStore {
       // A stale close must not mark the new connection disconnected or schedule
       // another reconnect (which would leak a second WebSocket).
       if (this.#ws !== ws) return;
+      this.#clearConnectTimer();
+      this.#clearPingTimer();
       this.#ws = null;
       this.wsConnected = false;
+      this.wsReconnecting = !this.#stopped;
       this.#scheduleReconnect();
     });
+    this.#connectTimer = setTimeout(() => {
+      this.#connectTimer = null;
+      if (this.#ws !== ws || ws.readyState === WebSocket.OPEN) return;
+      this.#forceReconnect(ws);
+    }, CONNECT_TIMEOUT_MS);
+  }
+
+  /**
+   * Replace a socket that cannot recover on its own.
+   *
+   * Detaching it first makes its late `open` / `message` / `close` events
+   * no-ops, then a fresh connection is started immediately.
+   */
+  #forceReconnect(ws: WebSocket): void {
+    if (this.#ws !== ws) return;
+    this.#clearConnectTimer();
+    this.#clearPingTimer();
+    this.#ws = null;
+    this.wsConnected = false;
+    this.wsReconnecting = true;
+    try {
+      ws.close();
+    } catch {
+      // Already closed or not closable; there is nothing else to do.
+    }
+    this.#connect();
+  }
+
+  /**
+   * Ask the server for a `Pong` and reconnect when it does not answer.
+   *
+   * Any incoming message counts as liveness (`#handleMessage` clears the
+   * timer), so this only fires when the socket is truly silent.
+   */
+  #probeLiveness(ws: WebSocket): void {
+    if (this.#ws !== ws) return;
+    if (!this.#send({ op: "ping" })) {
+      this.#forceReconnect(ws);
+      return;
+    }
+    this.#clearPingTimer();
+    this.#pingTimer = setTimeout(() => {
+      this.#pingTimer = null;
+      this.#forceReconnect(ws);
+    }, RESUME_PING_TIMEOUT_MS);
+  }
+
+  #clearReconnectTimer(): void {
+    if (this.#reconnectTimer === null) return;
+    clearTimeout(this.#reconnectTimer);
+    this.#reconnectTimer = null;
+  }
+
+  #clearConnectTimer(): void {
+    if (this.#connectTimer === null) return;
+    clearTimeout(this.#connectTimer);
+    this.#connectTimer = null;
+  }
+
+  #clearPingTimer(): void {
+    if (this.#pingTimer === null) return;
+    clearTimeout(this.#pingTimer);
+    this.#pingTimer = null;
   }
 
   #scheduleReconnect(): void {
     if (this.#stopped || this.#reconnectTimer !== null || this.connection.tokenRequired) return;
+    this.wsReconnecting = true;
     const delay = this.#reconnectDelayMs;
     this.#reconnectDelayMs = Math.min(delay * 2, MAX_RECONNECT_DELAY_MS);
     this.#reconnectTimer = setTimeout(() => {
@@ -872,6 +1045,8 @@ export class SyncStore {
   // ------------------------------------------------------------------
 
   #handleMessage(raw: string): void {
+    // Any traffic from the peer proves the socket is alive.
+    this.#clearPingTimer();
     let message: ServerWsMessage;
     try {
       message = JSON.parse(raw) as ServerWsMessage;

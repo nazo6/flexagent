@@ -16,6 +16,7 @@
   } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { cn } from "#lib/utils.ts";
+  import { uiTraits } from "#lib/ui-traits.svelte.ts";
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
   import EyeIcon from "@lucide/svelte/icons/eye";
@@ -32,7 +33,7 @@
   import SearchIcon from "@lucide/svelte/icons/search";
   import XIcon from "@lucide/svelte/icons/x";
 
-  let { ctx, mobile = false }: { ctx: DockContext; mobile?: boolean } = $props();
+  let { ctx }: { ctx: DockContext } = $props();
 
   interface DirState {
     entries: WorkspaceFsEntry[];
@@ -136,10 +137,22 @@
   const treeWidth = $derived(dragTreeWidth ?? dock.treeWidth);
 
   const activePreview = $derived(dock.activeFileTab);
-  const showTree = $derived(
-    mobile ? dock.treeVisible || dock.activeFile === null : dock.treeVisible,
+
+  /**
+   * The tool can be the full screen or a narrow split pane on a wide viewport,
+   * so the single-pane mode follows the tool's own width. Until the first
+   * measurement, the shell trait avoids a split-pane flash on a phone.
+   */
+  const SINGLE_PANE_MAX_PX = 520;
+  let paneWidth = $state(0);
+  const singlePane = $derived(
+    paneWidth === 0 ? uiTraits.overlayPanels : paneWidth < SINGLE_PANE_MAX_PX,
   );
-  const showPreview = $derived(mobile ? !showTree && dock.activeFile !== null : true);
+
+  const showTree = $derived(
+    singlePane ? dock.treeVisible || dock.activeFile === null : dock.treeVisible,
+  );
+  const showPreview = $derived(singlePane ? !showTree && dock.activeFile !== null : true);
 
   const statusByPath = $derived(
     new Map<string, WorkspaceGitFileStatus>(
@@ -180,16 +193,17 @@
     void reload();
   });
 
-  // On mobile the tree and the preview share one pane. Every openFile request
-  // reveals the preview; the back button brings the tree back. Tracking the
-  // request counter (not only the path) also covers reopening the same file,
-  // while the initial run preserves the persisted tree/preview choice.
+  // In single-pane mode the tree and the preview share one pane. Every
+  // openFile request reveals the preview; the back button brings the tree
+  // back. Tracking the request counter (not only the path) also covers
+  // reopening the same file, while the initial run preserves the persisted
+  // tree/preview choice.
   let lastOpenVersion = dock.fileOpenVersion;
   $effect(() => {
     const version = dock.fileOpenVersion;
     if (version === lastOpenVersion) return;
     lastOpenVersion = version;
-    if (!mobile || dock.activeFile === null) return;
+    if (!singlePane || dock.activeFile === null) return;
     if (untrack(() => dock.treeVisible)) {
       dock.setTreeVisible(false);
     }
@@ -308,7 +322,7 @@
     dock.openFile(entry.path, { preview: false });
   }
 
-  /** Open a quick-open match in the preview (mobile switches to it). */
+  /** Open a quick-open match in the preview (single-pane mode switches to it). */
   function openMatch(match: WorkspaceFsMatch): void {
     dock.openFile(match.path);
   }
@@ -357,12 +371,12 @@
   }
 </script>
 
-<div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-  {#if !(mobile && showPreview)}
+<div bind:clientWidth={paneWidth} class="flex min-h-0 flex-1 flex-col overflow-hidden">
+  {#if !(singlePane && showPreview)}
     <div class="border-border flex h-9 shrink-0 items-center gap-0.5 border-b px-1.5">
       <button
         type="button"
-        class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 items-center justify-center rounded-md transition-colors disabled:opacity-50"
+        class="text-muted-foreground hover:bg-accent hover:text-foreground touch-target-xs flex size-7 items-center justify-center rounded-md transition-colors disabled:opacity-50"
         title={m.dock_files_refresh()}
         aria-label={m.dock_files_refresh()}
         disabled={loading}
@@ -373,7 +387,7 @@
       <button
         type="button"
         class={cn(
-          "flex size-7 items-center justify-center rounded-md transition-colors",
+          "touch-target-xs flex size-7 items-center justify-center rounded-md transition-colors",
           showHidden
             ? "bg-signal-soft text-signal"
             : "text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -392,7 +406,7 @@
       <button
         type="button"
         class={cn(
-          "flex size-7 items-center justify-center rounded-md transition-colors",
+          "touch-target-xs flex size-7 items-center justify-center rounded-md transition-colors",
           showIgnored
             ? "bg-signal-soft text-signal"
             : "text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -407,7 +421,7 @@
       <button
         type="button"
         class={cn(
-          "flex size-7 items-center justify-center rounded-md transition-colors",
+          "touch-target-xs flex size-7 items-center justify-center rounded-md transition-colors",
           changedOnly
             ? "bg-signal-soft text-signal"
             : "text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -419,11 +433,11 @@
       >
         <ListFilterIcon class="size-3.5" />
       </button>
-      {#if !mobile}
+      {#if !singlePane}
         <button
           type="button"
           class={cn(
-            "flex size-7 items-center justify-center rounded-md transition-colors",
+            "touch-target-xs flex size-7 items-center justify-center rounded-md transition-colors",
             dock.treeVisible
               ? "text-muted-foreground hover:bg-accent hover:text-foreground"
               : "bg-signal-soft text-signal",
@@ -450,9 +464,9 @@
       <div
         class={cn(
           "flex min-h-0 flex-col",
-          mobile ? "w-full" : "min-w-[160px] max-w-[70%] shrink-0 border-r border-border",
+          singlePane ? "w-full" : "min-w-[160px] max-w-[70%] shrink-0 border-r border-border",
         )}
-        style={mobile ? undefined : `width:${treeWidth}%`}
+        style={singlePane ? undefined : `width:${treeWidth}%`}
       >
         <div class="border-border flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5">
           <SearchIcon class="text-muted-foreground size-3.5 shrink-0" />
@@ -491,7 +505,7 @@
                 <button
                   type="button"
                   data-quick-open={match.relative_path}
-                  class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
+                  class="hover:bg-accent/60 touch-row flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
                   title={match.path}
                   onclick={() => openMatch(match)}
                 >
@@ -534,7 +548,7 @@
                 {#each status.entries as entry (entry.absolute_path)}
                   <button
                     type="button"
-                    class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
+                    class="hover:bg-accent/60 touch-row flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
                     title={entry.path}
                     onclick={() => openChanged(entry)}
                     ondblclick={() => openChangedPinned(entry)}
@@ -551,7 +565,7 @@
                 {@const badge = statusByPath.get(row.entry.path)}
                 <button
                   type="button"
-                  class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm py-1 pr-1.5 text-left text-[12px]"
+                  class="hover:bg-accent/60 touch-row flex w-full items-center gap-1.5 rounded-sm py-1 pr-1.5 text-left text-[12px]"
                   style={`padding-left: ${row.depth * 12 + 6}px`}
                   title={row.entry.path}
                   onclick={() => openEntry(row.entry)}
@@ -607,7 +621,7 @@
       </div>
     {/if}
 
-    {#if showTree && !mobile}
+    {#if showTree && !singlePane}
       <div
         role="separator"
         aria-orientation="vertical"
@@ -638,8 +652,7 @@
           <FilePreview
             {ctx}
             tab={activePreview}
-            {mobile}
-            onback={() => dock.setTreeVisible(true)}
+            onback={singlePane ? () => dock.setTreeVisible(true) : undefined}
           />
         {:else}
           <div

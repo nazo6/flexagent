@@ -278,7 +278,7 @@
       <button
         type="button"
         class={cn(
-          "truncate rounded-sm px-2 py-0.5 text-[11px] font-medium transition-colors",
+          "touch-target-xs truncate rounded-sm px-2 py-0.5 text-[11px] font-medium transition-colors",
           scope === option.value
             ? "bg-card text-foreground shadow-sm"
             : "text-muted-foreground hover:text-foreground",
@@ -292,7 +292,7 @@
   </div>
   <button
     type="button"
-    class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md transition-colors"
+    class="text-muted-foreground hover:bg-accent hover:text-foreground touch-target-xs flex size-7 shrink-0 items-center justify-center rounded-md transition-colors"
     title={m.dock_files_refresh()}
     aria-label={m.dock_files_refresh()}
     onclick={refresh}
@@ -361,7 +361,7 @@
         <button
           type="button"
           class={cn(
-            "hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]",
+            "hover:bg-accent/60 touch-row flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]",
             newRows.has(`session:${file.path}`) && "motion-change-row",
           )}
           title={file.path}
@@ -398,7 +398,7 @@
         <button
           type="button"
           class={cn(
-            "hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]",
+            "hover:bg-accent/60 touch-row flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]",
             newRows.has(`uncommitted:${entry.absolute_path}`) && "motion-change-row",
           )}
           title={entry.old_path === null ? entry.path : `${entry.old_path} → ${entry.path}`}
@@ -430,7 +430,7 @@
       <button
         type="button"
         class={cn(
-          "hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]",
+          "hover:bg-accent/60 touch-row flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]",
           newRows.has(`branch:${file.path}`) && "motion-change-row",
         )}
         title={file.path}
@@ -462,7 +462,7 @@
     />
     <button
       type="submit"
-      class="bg-primary text-primary-foreground hover:bg-primary/90 flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium transition-colors disabled:opacity-50"
+      class="bg-primary text-primary-foreground hover:bg-primary/90 touch-target-sm flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium transition-colors disabled:opacity-50"
       title={m.dock_changes_commit_hint()}
       disabled={!canCommit}
     >

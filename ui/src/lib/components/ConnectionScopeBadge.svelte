@@ -43,7 +43,13 @@
 
   /** Link health of this client and, on a node, of the node's hub link. */
   const healthText = $derived.by(() => {
-    const parts = [sync.wsConnected ? m.shell_connected() : m.shell_disconnected()];
+    const parts = [
+      sync.wsConnected
+        ? m.shell_connected()
+        : sync.wsReconnecting
+          ? m.shell_reconnecting()
+          : m.shell_disconnected(),
+    ];
     if (isLocalNode) {
       parts.push(
         hubState === "standalone"

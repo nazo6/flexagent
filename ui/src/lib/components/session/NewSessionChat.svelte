@@ -218,7 +218,9 @@
       : defaultNodeId,
   );
   const selectedNode = $derived(nodes.find((n) => n.node_id === nodeId) ?? null);
-  const nodeAvailability = $derived(getNodeAvailability(selectedNode, sync.wsConnected));
+  const nodeAvailability = $derived(
+    getNodeAvailability(selectedNode, sync.wsConnected, sync.wsReconnecting),
+  );
   /** Whether `catalog` belongs to the current node (never mix two nodes' lists). */
   const catalogReady = $derived(nodeId !== "" && catalogNodeId === nodeId);
   // Agents that can actually be launched on this node (based on the catalog's
@@ -756,7 +758,9 @@
       promptText = "";
       composer.clear();
       composerDrafts.clear(NEW_SESSION_DRAFT_ID);
-      await goto(`/sessions/${response.session_id}`);
+      // Replace the consumed new-session screen so Back returns to where the
+      // user came from instead of the submitted form.
+      await goto(`/sessions/${response.session_id}`, { replaceState: true });
     } catch (error) {
       // The form state (including the prompt) is intentionally kept so the
       // user can retry without retyping.
@@ -1186,7 +1190,11 @@
                 </p>
               {:else}
                 {#each nodes as node (node.node_id)}
-                  {@const availability = getNodeAvailability(node, sync.wsConnected)}
+                  {@const availability = getNodeAvailability(
+                    node,
+                    sync.wsConnected,
+                    sync.wsReconnecting,
+                  )}
                   <PickerItem
                     selected={!isProvisionerMode && node.node_id === nodeId}
                     disabled={!availability.isAvailable}

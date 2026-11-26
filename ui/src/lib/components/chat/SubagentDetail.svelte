@@ -44,7 +44,13 @@
       <h2 class="truncate text-sm font-semibold">{title}</h2>
       <p class="text-muted-foreground truncate text-[11px]">{subagent.childSessionId}</p>
     </div>
-    <Button variant="ghost" size="icon" onclick={onclose} aria-label={m.chat_subagent_close()}>
+    <Button
+      variant="ghost"
+      size="icon"
+      class="touch-target"
+      onclick={onclose}
+      aria-label={m.chat_subagent_close()}
+    >
       <XIcon class="size-4" />
     </Button>
   </header>

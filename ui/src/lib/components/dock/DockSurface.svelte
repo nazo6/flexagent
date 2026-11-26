@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from "svelte";
   import ChangesTool from "#lib/components/dock/ChangesTool.svelte";
   import FilesTool from "#lib/components/dock/FilesTool.svelte";
   import TerminalTool from "#lib/components/dock/TerminalTool.svelte";
@@ -6,19 +7,17 @@
   import { dock, type DockContext } from "#lib/stores/dock.svelte.ts";
   import type { TimelineItem } from "#lib/sync/reducer.ts";
   import { m } from "#lib/paraglide/messages.js";
-  import { cn } from "#lib/utils.ts";
   import PanelRightCloseIcon from "@lucide/svelte/icons/panel-right-close";
-  import XIcon from "@lucide/svelte/icons/x";
 
   interface Props {
     ctx: DockContext;
     items: TimelineItem[];
-    mobile?: boolean;
-    oncollapse: () => void;
-    class?: string;
+    onclose: () => void;
+    /** Sheet containers pass their own close glyph; the split pane keeps the panel icon. */
+    closeIcon?: Snippet;
   }
 
-  let { ctx, items, mobile = false, oncollapse, class: className = "" }: Props = $props();
+  let { ctx, items, onclose, closeIcon }: Props = $props();
 
   const active = $derived(dock.activeTool);
   const definition = $derived(active === null ? null : dockTool(active));
@@ -27,11 +26,7 @@
 {#if definition !== null}
   {@const Icon = definition.icon}
   <section
-    class={cn(
-      "bg-card/40 border-border flex h-full min-h-0 flex-col overflow-hidden",
-      !mobile && "border-l",
-      className,
-    )}
+    class="bg-card/40 flex h-full min-h-0 flex-col overflow-hidden"
     aria-label={m.session_tools_title()}
   >
     <div class="border-border flex h-11 shrink-0 items-center gap-2 border-b px-2.5">
@@ -39,13 +34,13 @@
       <h2 class="min-w-0 flex-1 truncate text-[13px] font-semibold">{definition.label()}</h2>
       <button
         type="button"
-        class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 items-center justify-center rounded-md transition-colors"
+        class="text-muted-foreground hover:bg-accent hover:text-foreground touch-target flex size-7 items-center justify-center rounded-md transition-colors"
         title={m.session_close_panel()}
         aria-label={m.session_close_panel()}
-        onclick={oncollapse}
+        onclick={onclose}
       >
-        {#if mobile}
-          <XIcon class="size-4" />
+        {#if closeIcon}
+          {@render closeIcon()}
         {:else}
           <PanelRightCloseIcon class="size-4" />
         {/if}
@@ -54,26 +49,23 @@
 
     <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <div
-        class={cn(
-          "min-h-0 flex-1 flex-col overflow-hidden",
-          active === "files" ? "flex" : "hidden",
-        )}
+        class="min-h-0 flex-1 flex-col overflow-hidden"
+        class:flex={active === "files"}
+        class:hidden={active !== "files"}
       >
-        <FilesTool {ctx} {mobile} />
+        <FilesTool {ctx} />
       </div>
       <div
-        class={cn(
-          "min-h-0 flex-1 flex-col overflow-hidden",
-          active === "changes" ? "flex" : "hidden",
-        )}
+        class="min-h-0 flex-1 flex-col overflow-hidden"
+        class:flex={active === "changes"}
+        class:hidden={active !== "changes"}
       >
         <ChangesTool {ctx} {items} />
       </div>
       <div
-        class={cn(
-          "min-h-0 flex-1 flex-col overflow-hidden",
-          active === "terminal" ? "flex" : "hidden",
-        )}
+        class="min-h-0 flex-1 flex-col overflow-hidden"
+        class:flex={active === "terminal"}
+        class:hidden={active !== "terminal"}
       >
         <TerminalTool {ctx} active={active === "terminal"} />
       </div>

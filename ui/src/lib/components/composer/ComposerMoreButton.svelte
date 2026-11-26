@@ -1,6 +1,7 @@
 <script lang="ts">
   import * as Popover from "#lib/components/ui/popover/index.ts";
   import { cn } from "#lib/utils.ts";
+  import { registerOverlay } from "#lib/overlays.ts";
   import MoreHorizontalIcon from "@lucide/svelte/icons/more-horizontal";
   import type { Snippet } from "svelte";
 
@@ -19,12 +20,17 @@
     contentClass?: string;
     children?: Snippet;
   } = $props();
+
+  $effect(() => {
+    if (!open) return;
+    return registerOverlay("composer-more", () => (open = false));
+  });
 </script>
 
 <Popover.Root bind:open>
   <Popover.Trigger
     class={cn(
-      "text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring/40 relative inline-flex size-7 shrink-0 items-center justify-center rounded-full outline-none motion-press focus-visible:ring-2",
+      "text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring/40 touch-target motion-press relative inline-flex size-7 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2",
       active && "text-signal",
     )}
     title={label}

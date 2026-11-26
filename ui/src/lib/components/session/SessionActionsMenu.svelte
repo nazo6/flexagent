@@ -7,6 +7,7 @@
   import { Label } from "#lib/components/ui/label/index.ts";
   import type { SessionSummary } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
+  import { registerOverlay } from "#lib/overlays.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { cn } from "#lib/utils.ts";
   import { toast } from "svelte-sonner";
@@ -54,9 +55,24 @@
   const archived = $derived(session.archived_at !== null);
   let confirmOpen = $state(false);
   let busy = $state(false);
+  let menuOpen = $state(false);
   let renameOpen = $state(false);
   let renameTitle = $state("");
   let renaming = $state(false);
+
+  // Dialogs opened from the actions menu also close on the system back gesture.
+  $effect(() => {
+    if (!menuOpen) return;
+    return registerOverlay("session-actions", () => (menuOpen = false));
+  });
+  $effect(() => {
+    if (!renameOpen) return;
+    return registerOverlay("session-rename", () => (renameOpen = false));
+  });
+  $effect(() => {
+    if (!confirmOpen) return;
+    return registerOverlay("session-delete", () => (confirmOpen = false));
+  });
 
   function openRename(): void {
     renameTitle = session.title;
@@ -122,7 +138,7 @@
     event.stopPropagation();
   }}
 >
-  <DropdownMenu.Root>
+  <DropdownMenu.Root bind:open={menuOpen}>
     <DropdownMenu.Trigger
       class={cn(
         "text-muted-foreground hover:text-foreground focus-visible:ring-ring/40 inline-flex items-center justify-center rounded p-0.5 outline-none transition-colors focus-visible:ring-1",
