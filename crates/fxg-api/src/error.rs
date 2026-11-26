@@ -19,9 +19,9 @@ pub struct ApiError {
     /// Structured error code
     pub code: ErrorCode,
     /// English human-readable fallback message
-    pub message: String,
+    pub message: Box<str>,
     /// Parameters for message interpolation (path, agent_id, exit_code, ...)
-    pub params: std::collections::BTreeMap<String, String>,
+    pub params: Box<std::collections::BTreeMap<String, String>>,
     /// Technical details for the expandable "details" section
     pub details: Option<Box<RawJson>>,
     /// Whether retrying may succeed without a state change
@@ -33,7 +33,7 @@ pub struct ApiError {
     /// What happened to the user's data
     pub data_safety: Option<DataSafety>,
     /// Link to the troubleshooting documentation anchor
-    pub docs: Option<String>,
+    pub docs: Option<Box<str>>,
 }
 
 impl ApiError {
@@ -42,8 +42,8 @@ impl ApiError {
         Self {
             status,
             code,
-            message: message.into(),
-            params: std::collections::BTreeMap::new(),
+            message: message.into().into_boxed_str(),
+            params: Box::default(),
             details: None,
             retryable: code.is_retryable(),
             recovery: Vec::new(),
@@ -108,7 +108,7 @@ impl ApiError {
 
     /// Links the error to its troubleshooting anchor.
     pub fn with_docs(mut self, docs: impl Into<String>) -> Self {
-        self.docs = Some(docs.into());
+        self.docs = Some(docs.into().into_boxed_str());
         self
     }
 
@@ -144,13 +144,13 @@ impl ApiError {
             docs,
         } = info;
         let mut api = Self::from_code(code, message);
-        api.params = params;
+        api.params = Box::new(params);
         api.details = details.map(Box::new);
         api.retryable = retryable;
         api.recovery = recovery;
         api.request_id = request_id.map(String::into_boxed_str);
         api.data_safety = data_safety;
-        api.docs = docs;
+        api.docs = docs.map(String::into_boxed_str);
         api
     }
 
@@ -170,8 +170,8 @@ impl ApiError {
     pub fn into_info(self) -> ErrorInfo {
         ErrorInfo {
             code: self.code,
-            message: self.message,
-            params: self.params,
+            message: self.message.into(),
+            params: *self.params,
             details: self.details.map(|details| *details),
             retryable: self.retryable,
             recovery: self.recovery,
@@ -180,7 +180,7 @@ impl ApiError {
                 .map(String::from)
                 .or_else(request_context::current_request_id),
             data_safety: self.data_safety,
-            docs: self.docs,
+            docs: self.docs.map(String::from),
         }
     }
 
