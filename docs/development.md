@@ -12,6 +12,7 @@
 | :------------------------------------- | :------------------------------------------------------------------------------------------------------ |
 | `mise run dev`                         | Vite dev server (`:5173`) と隔離された dev ノード (`:7861`、変更時自動リビルド) を並列起動              |
 | `mise run dev:home`                    | 隔離された開発用 `FXG_HOME` と DB・addr・ログのパスを表示                                               |
+| `mise run dev:cli` (`fxg-dev`)         | デバッグバイナリを隔離された dev home に対して実行（例: `fxg-dev session list`、§5.3）                  |
 | `mise run install:prod`                | UI をビルドしてリリースバイナリを `cargo install --locked`（運用用、§5.6）                              |
 | `mise run fmt` / `fmt:check`           | Rust (`rustfmt`), TOML (`tombi`), Markdown/JSON/YAML/TS/Svelte (`oxfmt`) の一括整形・検査               |
 | `mise run lint`                        | `lint:rust` (`clippy`), `lint:errors` (型安全・エラー握りつぶし検査), `lint:toml`, `lint:ui` (`oxlint`) |
@@ -104,8 +105,10 @@ fxg を日常使いのノード／ハブとして動かしながら、同じマ�
 
 ### 5.3 使い方
 
-`mise.toml` の `[env]` がリポジトリ内の `FXG_HOME`・待受ポート・Vite のプロキシ先
-(`FXG_DEV_PROXY`) を dev 用に固定します。
+開発用の `FXG_HOME`・待受ポート・Vite のプロキシ先 (`FXG_DEV_PROXY`) は
+`mise.toml` の `dev:*` タスクの `env` にだけ設定します。リポジトリ全体の環境は
+変えないため、インストール済みの `fxg` はリポジトリ内でもそのまま運用ノード
+(`7860` / `8080`) に繋がります。
 
 ```sh
 mise run dev        # Vite (5173) + dev ノード (7861)
@@ -113,18 +116,19 @@ mise run dev:node   # dev ノードだけ（Rust 変更で自動再起動）
 mise run dev:hub    # dev ハブ (127.0.0.1:8081)
 mise run dev:home   # dev home の実パスを確認
 
-fxg session list     # mise のシェル内では dev ノード (7861) に繋がる
+fxg session list      # インストール済みバイナリ → 運用ノード (7860)
+fxg-dev session list  # デバッグビルド → dev ノード (7861)
 ```
 
 - dev home はリポジトリの外に置く。`target/` の内側に置くと `cargo clean` や
   `git clean -xfd` で DB・セッションが消える。
-- `mise` の外（アクティベートされていないシェルや、インストール済みの `fxg`）では
-  従来どおり OS 標準ディレクトリを向く。dev を操作するときは `mise exec -- ...` か
-  `FXG_HOME=~/.local/share/flexagent-dev` を明示する。逆に、リポジトリ内のシェルから
-  運用ノードを操作したいときは `mise` の値を外す。
+- `fxg` は `~/.cargo/bin/fxg`（[§5.6](#56-運用バイナリのビルドとインストール) の
+  リリースバイナリ）、`fxg-dev` は `mise run dev:cli -- ...` と同じデバッグビルドで、
+  どちらもカレントディレクトリの `mise.toml` から解決されます。dev の CLI を
+  `mise` の外から使う場合は `FXG_HOME=~/.local/share/flexagent-dev` を明示してください。
 
   ```sh
-  env -u FXG_HOME -u FXG_NODE_LISTEN_ADDR -u FXG_HUB_LISTEN_ADDR fxg node status
+  FXG_HOME=~/.local/share/flexagent-dev cargo run -p fxg-cli -- node status
   ```
 
 - dev home の削除はディレクトリごと消せばよい（`FXG_HOME` の外に状態はない）。
@@ -138,13 +142,13 @@ fxg session list     # mise のシェル内では dev ノード (7861) に繋が
 - dev ノードでセルフホストする場合は、監視なしで起動し、ビルドで差し替わらない
   バイナリのコピーを使う（`cargo run` は再ビルド時に実行ファイルを置き換える）。
   ```sh
-  cp target/debug/fxg ~/bin/fxg-dev
-  FXG_HOME=~/.local/share/flexagent-dev ~/bin/fxg-dev node start --no-tray
+  cp target/debug/fxg ~/bin/fxg-pinned
+  FXG_HOME=~/.local/share/flexagent-dev ~/bin/fxg-pinned node start --no-tray
   ```
 - 同じチェックアウトで複数セッションが `cargo` を走らせるとビルドロックで待つ。
-  `fxg session new ... -w` の Worktree を使い、タスクごとに作業ツリーを分ける
+  `fxg-dev session new ... -w` の Worktree を使い、タスクごとに作業ツリーを分ける
   （dev 側の Worktree は dev home 配下に作られる）。
-- **`fxg service install` を dev バイナリで実行しない**: unit / plist / タスクは
+- **`fxg-dev service install` を実行しない**: unit / plist / タスクは
   実行パスだけを記録し、`FXG_HOME` を埋め込まない。dev バイナリで登録すると、運用側の
   自動起動が dev ビルドに差し替わる。サービス登録はリリースバイナリだけで行う。
 - **secrets は `FXG_HOME` 配下**: エージェントの API キーや Git 認証は dev home では
@@ -159,7 +163,7 @@ fxg session list     # mise のシェル内では dev ノード (7861) に繋が
 
 ```sh
 mise run dev:home
-FXG_HOME=~/.local/share/flexagent-dev cargo run -p fxg-cli -- node status
+fxg-dev node status
 ss -ltn | grep -E ':(7860|7861)'
 ```
 
@@ -179,11 +183,11 @@ cd ~ && ~/.cargo/bin/fxg service install node
 
 - `ui/build` は `rust-embed` でバイナリに埋め込まれる。UI をビルドせずにリリースビルドすると
   「UI not built」のプレースホルダが入るため、`install:prod` は `build:ui` を先に実行する。
-- サービス登録はリポジトリの外で絶対パス指定で行う。リポジトリ内の `fxg` は `cargo run` の
-  シェルエイリアスなので、`fxg service install` を実行すると dev バイナリ
-  (`target/debug/fxg`) が登録されてしまう。
+- サービス登録はリポジトリの外で絶対パス指定で行う。リポジトリ内の `fxg` は
+  インストール済みバイナリを指すが、デバッグビルドの `fxg-dev` で
+  `fxg-dev service install` を実行すると dev バイナリ (`target/debug/fxg`) が登録されてしまう。
 - 更新は `mise run install:prod` → `~/.cargo/bin/fxg node restart`（サービス登録済みなら
   systemd / launchd / Task Scheduler に委譲される）。`cargo install` はバイナリをコピーする
   ので、以降の dev ビルドで運用バイナリが置き換わることはない。
-- リポジトリ内では `fxg` エイリアスが優先されるため、インストール済みバイナリを直接使う
-  ときは `~/.cargo/bin/fxg`（または `env -u FXG_HOME ...`）と明示する。
+- リポジトリ内でも `fxg` はインストール済みバイナリを指す（`mise` は `FXG_HOME` などを
+  リポジトリ全体には設定しない）。デバッグビルドを使うときだけ `fxg-dev` を使う。
