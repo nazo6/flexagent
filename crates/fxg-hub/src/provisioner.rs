@@ -971,7 +971,37 @@ pub(crate) async fn drain(state: &HubState, node_id: &str, reason: &str) -> bool
         tracing::warn!(node_id, "drain timed out; forcing termination");
     }
     state.provisioners().terminate(node_id);
+    record_provisioning_lifecycle(state, node_id, "drain", reason, drained).await;
     drained
+}
+
+/// Records a system-side provisioning lifecycle event in the hub audit log.
+async fn record_provisioning_lifecycle(
+    state: &HubState,
+    node_id: &str,
+    phase: &str,
+    reason: &str,
+    drained: bool,
+) {
+    let session_id = state.provisioners().session_id(node_id);
+    let client = fxg_api::ClientInfo {
+        ip: "hub".to_owned(),
+        user_agent: None,
+        auth_subject: "system:provisioner".to_owned(),
+    };
+    state
+        .record_audit(
+            fxg_db::audit::actions::PROVISIONING,
+            &client,
+            session_id.as_deref(),
+            serde_json::json!({
+                "node_id": node_id,
+                "phase": phase,
+                "reason": reason,
+                "drained": drained,
+            }),
+        )
+        .await;
 }
 
 /// Node IDs of all running temporary VMs (for shutdown handling).

@@ -95,6 +95,8 @@ crate::open_string_enum! {
         SessionDelete => "session_delete",
         /// Session renamed
         SessionRename => "session_rename",
+        /// Ephemeral VM / sandbox provisioning (start, drain, failure)
+        Provisioning => "provisioning",
         /// Permission resolved
         PermissionResolved => "permission_resolved",
         /// Elicitation resolved

@@ -667,6 +667,7 @@
   "settings_audit_action_node_shutdown": "Node shutdown",
   "settings_audit_action_permission_resolved": "Permission resolved",
   "settings_audit_action_pty_spawn": "PTY spawn",
+  "settings_audit_action_provisioning": "Provisioning",
   "settings_audit_action_session_resume": "Session resume",
   "settings_audit_action_session_start": "Session start",
   "settings_audit_action_workspace_git_commit": "Git commit",

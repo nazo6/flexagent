@@ -192,7 +192,7 @@ impl HubState {
                 return Err(ApiError::from(err));
             }
 
-            provisioner::spawn_session(
+            let spawn_result = provisioner::spawn_session(
                 self,
                 SpawnSessionRequest {
                     session_id: session_id.clone(),
@@ -208,7 +208,22 @@ impl HubState {
                     extra_args: request.extra_args.clone(),
                 },
             )
-            .await?;
+            .await;
+            self.record_audit(
+                fxg_db::audit::actions::PROVISIONING,
+                &client,
+                Some(&session_id),
+                serde_json::json!({
+                    "phase": "start",
+                    "result": if spawn_result.is_ok() { "started" } else { "failed" },
+                    "node_id": node_id.as_str(),
+                    "agent_id": agent_id.as_str(),
+                    "provisioner": provisioner_name.as_str(),
+                    "project_id": request.project_id.as_str(),
+                }),
+            )
+            .await;
+            spawn_result?;
 
             self.record_audit(
                 fxg_db::audit::actions::SESSION_START,

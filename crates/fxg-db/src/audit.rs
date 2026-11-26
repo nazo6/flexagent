@@ -36,6 +36,8 @@ pub mod actions {
     pub const SESSION_DELETE: AuditAction = AuditAction::SessionDelete;
     /// Session renamed
     pub const SESSION_RENAME: AuditAction = AuditAction::SessionRename;
+    /// Ephemeral VM / sandbox provisioning (start, drain, failure)
+    pub const PROVISIONING: AuditAction = AuditAction::Provisioning;
     /// Permission resolved (Approve / Reject)
     pub const PERMISSION_RESOLVED: AuditAction = AuditAction::PermissionResolved;
     /// Elicitation (question) resolved

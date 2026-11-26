@@ -61,6 +61,7 @@
     permission_resolved: m.settings_audit_action_permission_resolved(),
     elicitation_resolved: m.settings_audit_action_elicitation_resolved(),
     pty_spawn: m.settings_audit_action_pty_spawn(),
+    provisioning: m.settings_audit_action_provisioning(),
     kill_switch: m.settings_audit_action_kill_switch(),
     node_shutdown: m.settings_audit_action_node_shutdown(),
     workspace_git_commit: m.settings_audit_action_workspace_git_commit(),
