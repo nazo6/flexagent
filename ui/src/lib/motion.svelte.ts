@@ -79,6 +79,16 @@ class MotionStore {
     return this.reduced ? 0 : milliseconds;
   }
 
+  /**
+   * Effective reduced-motion value, safe before `init()` has run. Cold-start
+   * components (the brand draw) can mount before the layout's `onMount`.
+   */
+  isReducedNow(): boolean {
+    if (!browser) return false;
+    const system = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    return this.preference === "reduced" || (this.preference === "system" && system);
+  }
+
   #apply(): void {
     if (!browser) return;
     document.documentElement.dataset.motion = this.preference;

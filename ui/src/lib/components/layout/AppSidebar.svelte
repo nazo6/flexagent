@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
+  import { onDestroy } from "svelte";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import * as Tooltip from "#lib/components/ui/tooltip/index.ts";
   import { formatRelativeTimeCompact } from "#lib/format.ts";
@@ -144,6 +145,35 @@
       .filter((session) => sessionNeedsAttention(session))
       .toSorted((a, b) => b.updated_at - a.updated_at),
   );
+
+  /** One-shot ring when the number of sessions needing attention grows. */
+  let attentionPulse = $state(false);
+  let lastAttentionCount: number | null = null;
+  let attentionPulseTimer: ReturnType<typeof setTimeout> | null = null;
+
+  $effect(() => {
+    const count = needsAttentionSessions.length;
+    if (lastAttentionCount === null) {
+      lastAttentionCount = count;
+      return;
+    }
+    if (count > lastAttentionCount) {
+      attentionPulse = false;
+      requestAnimationFrame(() => {
+        attentionPulse = true;
+      });
+      if (attentionPulseTimer !== null) clearTimeout(attentionPulseTimer);
+      attentionPulseTimer = setTimeout(() => {
+        attentionPulse = false;
+        attentionPulseTimer = null;
+      }, 700);
+    }
+    lastAttentionCount = count;
+  });
+
+  onDestroy(() => {
+    if (attentionPulseTimer !== null) clearTimeout(attentionPulseTimer);
+  });
 
   /**
    * The attention strip is a filter over the session list, not a second copy
@@ -362,7 +392,10 @@
         <AlertCircleIcon class="size-3 shrink-0" />
         <span class="truncate">{m.shell_needs_attention()}</span>
         <span
-          class="rounded-full bg-destructive/15 px-1.5 text-[10px] leading-tight tabular-nums text-destructive"
+          class={cn(
+            "rounded-full bg-destructive/15 px-1.5 text-[10px] leading-tight tabular-nums text-destructive",
+            attentionPulse && "motion-attention-badge",
+          )}
         >
           {needsAttentionSessions.length}
         </span>

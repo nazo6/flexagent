@@ -76,6 +76,9 @@
   });
 
   const html = $derived(renderMarkdown(renderedText));
+  // A one- or two-line message would lose most of its body under the fade;
+  // only soften the edge when there is enough text to have a "tail".
+  const streamMask = $derived(streaming && text.length > 80);
 
   // Re-apply shiki and the copy button every time `{@html}` re-renders and
   // rebuilds the DOM. During streaming the DOM changes with each delta, so
@@ -121,11 +124,40 @@
   }
 </script>
 
-<div class="fxg-md {className}" bind:this={root} use:activateFileLinks>
-  {@html html}{#if streaming}<span class="animate-pulse">▍</span>{/if}
+<div
+  class="fxg-md {className}"
+  class:motion-streaming={streamMask}
+  bind:this={root}
+  use:activateFileLinks
+>
+  {@html html}{#if streaming}<span class="motion-stream-caret" aria-hidden="true">▍</span>{/if}
 </div>
 
 <style>
+  /* While streaming, the last line dissolves into the page instead of ending
+     with a hard edge. The caret is the only thing that moves in that area. */
+  :global(.fxg-md.motion-streaming) {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 0.55em), transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 0.55em), transparent 100%);
+  }
+
+  .motion-stream-caret {
+    display: inline-block;
+    margin-left: 1px;
+    color: var(--signal);
+    animation: motion-stream-caret 1.1s ease-in-out infinite;
+  }
+
+  @keyframes motion-stream-caret {
+    0%,
+    100% {
+      opacity: 0.22;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
   /* Markdown typography (theme variables and em units so it follows the parent font size) */
   :global(.fxg-md) {
     overflow-wrap: anywhere;

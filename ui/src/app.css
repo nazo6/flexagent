@@ -467,6 +467,20 @@
   .motion-message-enter {
     animation: motion-message-enter var(--motion-base) var(--ease-out) both;
   }
+  /* A new file row in Changes rises once; initial lists are gated in JS. */
+  @keyframes motion-change-row {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .motion-change-row {
+    animation: motion-change-row var(--motion-base) var(--ease-out) both;
+  }
   /*
    * One-shot pop for a status that just resolved (tool call, exit code).
    */
@@ -486,6 +500,30 @@
   }
   .motion-status-pop {
     animation: motion-status-pop 240ms var(--ease-spring) both;
+  }
+  /* One-shot ring for a permission / elicitation card that just appeared. */
+  @keyframes motion-attention-ripple {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in oklch, var(--warn) 42%, transparent);
+    }
+    100% {
+      box-shadow: 0 0 0 12px transparent;
+    }
+  }
+  .motion-attention-ripple {
+    animation: motion-attention-ripple 600ms ease-out 1;
+  }
+  /* One-shot ripple for the sidebar's needs-attention count. */
+  @keyframes motion-attention-badge {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in oklch, var(--danger) 46%, transparent);
+    }
+    100% {
+      box-shadow: 0 0 0 8px transparent;
+    }
+  }
+  .motion-attention-badge {
+    animation: motion-attention-badge 600ms ease-out 1;
   }
   /* Success toast: the check draws itself once. */
   @keyframes motion-check-draw {
@@ -622,6 +660,11 @@
     box-shadow: 0 0 0 2px var(--signal) !important;
     background-color: var(--signal-soft) !important;
   }
+  /* The running sweep lives on a pseudo-element; the element-level rule above
+     cannot reach it, so stop it explicitly. */
+  :root:not([data-motion="full"]) .motion-running-sweep::after {
+    animation: none !important;
+  }
 }
 :root[data-motion="reduced"] :where(*):not(.animate-spin) {
   animation-duration: 1ms !important;
@@ -635,4 +678,7 @@
   animation: none !important;
   box-shadow: 0 0 0 2px var(--signal) !important;
   background-color: var(--signal-soft) !important;
+}
+:root[data-motion="reduced"] .motion-running-sweep::after {
+  animation: none !important;
 }

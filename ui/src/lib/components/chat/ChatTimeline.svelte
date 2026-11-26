@@ -171,6 +171,14 @@
     return groupMinSeq(entry);
   }
 
+  /** Approvals and questions carry their own one-shot attention ring. */
+  function entryNeedsAttention(entry: TimelineEntry): boolean {
+    return (
+      entry.kind === "single" &&
+      (entry.item.kind === "permission" || entry.item.kind === "elicitation")
+    );
+  }
+
   /** Whether a `node_seq` falls inside a rendered group (inclusive). */
   function rangeContains(seq: number | null, start: number, end: number): boolean {
     return seq !== null && seq >= start && seq <= end;
@@ -207,8 +215,10 @@
    * history (load earlier) keeps its older sequence and therefore stays calm.
    */
   const enterEntries = new SvelteSet<string>();
+  const attentionEntries = new SvelteSet<string>();
   const knownEntryKeys = new Set<string>();
   const enterTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const attentionTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let enterSessionId = $state<string | null>(null);
   let lastEntrySessionId: string | null = null;
   let highestRenderedSeq = -1;
@@ -228,8 +238,11 @@
       lastEntrySessionId = currentSessionId;
       knownEntryKeys.clear();
       enterEntries.clear();
+      attentionEntries.clear();
       for (const timer of enterTimers.values()) clearTimeout(timer);
+      for (const timer of attentionTimers.values()) clearTimeout(timer);
       enterTimers.clear();
+      attentionTimers.clear();
       highestRenderedSeq = -1;
       entriesInitialized = false;
     }
@@ -246,14 +259,25 @@
       knownEntryKeys.add(entry.key);
       const minSeq = entryMinSeq(entry);
       if (minSeq > highestRenderedSeq) {
-        enterEntries.add(entry.key);
-        // Drop the class after the animation so the finished message does not
-        // keep a transform / stacking context forever.
-        const timer = setTimeout(() => {
-          enterEntries.delete(entry.key);
-          enterTimers.delete(entry.key);
-        }, 220);
-        enterTimers.set(entry.key, timer);
+        if (entryNeedsAttention(entry)) {
+          // Approvals get the ring instead of the message rise, so the card
+          // does not stack two motions on top of each other.
+          attentionEntries.add(entry.key);
+          const timer = setTimeout(() => {
+            attentionEntries.delete(entry.key);
+            attentionTimers.delete(entry.key);
+          }, 700);
+          attentionTimers.set(entry.key, timer);
+        } else {
+          enterEntries.add(entry.key);
+          // Drop the class after the animation so the finished message does not
+          // keep a transform / stacking context forever.
+          const timer = setTimeout(() => {
+            enterEntries.delete(entry.key);
+            enterTimers.delete(entry.key);
+          }, 220);
+          enterTimers.set(entry.key, timer);
+        }
       }
       nextHighest = Math.max(nextHighest, minSeq);
     }
@@ -262,7 +286,9 @@
 
   onDestroy(() => {
     for (const timer of enterTimers.values()) clearTimeout(timer);
+    for (const timer of attentionTimers.values()) clearTimeout(timer);
     enterTimers.clear();
+    attentionTimers.clear();
   });
 
   function endsWithFork(entry: TimelineEntry): boolean {
@@ -438,6 +464,7 @@
           resolved={item.resolved}
           createdAt={item.createdAt}
           {subagentTitle}
+          pulse={attentionEntries.has(group.key)}
         />
       </div>
     {:else if item.kind === "elicitation"}
@@ -449,6 +476,7 @@
           requestedSchema={item.requestedSchema}
           resolved={item.resolved}
           createdAt={item.createdAt}
+          pulse={attentionEntries.has(group.key)}
         />
       </div>
     {:else if item.kind === "plan"}

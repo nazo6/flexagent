@@ -137,9 +137,12 @@
 {#if !connection.ready}
   <div class="safe-area-shell bg-background text-muted-foreground flex min-h-svh flex-col">
     {@render wcoDragStrip()}
-    <div class="flex flex-1 items-center justify-center gap-2">
-      <LoaderCircleIcon class="size-4 animate-spin" />
-      {m.shell_checking_connection()}
+    <div class="flex flex-1 flex-col items-center justify-center gap-3">
+      <BrandIcon class="size-14" draw />
+      <div class="text-muted-foreground flex items-center gap-2">
+        <LoaderCircleIcon class="size-4 animate-spin" />
+        {m.shell_checking_connection()}
+      </div>
     </div>
   </div>
 {:else if connection.error !== null}
