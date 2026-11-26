@@ -2,10 +2,14 @@
   import DiffText from "#lib/components/diff/DiffText.svelte";
   import { joinPath } from "#lib/dock/paths.ts";
   import { m } from "#lib/paraglide/messages.js";
+  import { motion } from "#lib/motion.svelte.ts";
   import { dock } from "#lib/stores/dock.svelte.ts";
   import type { TimelineItem } from "#lib/sync/reducer.ts";
   import { parseToolOutput } from "#lib/tool-output.ts";
   import { cn } from "#lib/utils.ts";
+  import { SvelteSet } from "svelte/reactivity";
+  import { onDestroy } from "svelte";
+  import { fade, slide } from "svelte/transition";
   import CircleCheckIcon from "@lucide/svelte/icons/circle-check";
   import CircleXIcon from "@lucide/svelte/icons/circle-x";
   import FileSearchIcon from "@lucide/svelte/icons/file-search";
@@ -25,6 +29,38 @@
 
   let expandedDetails = $state<Record<string, boolean>>({});
   const canOpenInDock = $derived(dock.context !== null);
+
+  /**
+   * Tool calls that just resolved while the reader was watching.
+   *
+   * History renders fully populated tool calls, so animating every status
+   * icon on mount would make opening a session noisy. Only a transition from
+   * `in_progress` to `completed` / `failed` inside a mounted group gets the
+   * one-shot pop.
+   */
+  const statusFlash = new SvelteSet<string>();
+  const lastStatus = new Map<string, ToolItem["status"]>();
+  const flashTimers = new Set<ReturnType<typeof setTimeout>>();
+
+  $effect(() => {
+    for (const tool of tools) {
+      const previous = lastStatus.get(tool.toolCallId);
+      lastStatus.set(tool.toolCallId, tool.status);
+      if (previous === undefined || previous === tool.status) continue;
+      if (tool.status !== "completed" && tool.status !== "failed") continue;
+      statusFlash.add(tool.toolCallId);
+      const timer = setTimeout(() => {
+        statusFlash.delete(tool.toolCallId);
+        flashTimers.delete(timer);
+      }, 300);
+      flashTimers.add(timer);
+    }
+  });
+
+  onDestroy(() => {
+    for (const timer of flashTimers) clearTimeout(timer);
+    flashTimers.clear();
+  });
 
   function openDiffInDock(tool: ToolItem): void {
     if (tool.diff === null || dock.context === null) return;
@@ -185,6 +221,7 @@
                 <span
                   class={cn(
                     "rounded border px-1.5 py-0.2 font-mono text-[10px] tabular-nums",
+                    statusFlash.has(tool.toolCallId) && "motion-status-pop",
                     terminalFailed
                       ? "border-destructive/30 bg-danger-soft/60 text-destructive"
                       : "border-ok/30 bg-ok-soft/60 text-ok",
@@ -202,9 +239,19 @@
             {:else if tool.status === "in_progress"}
               <LoaderCircleIcon class="size-3 animate-spin text-signal" />
             {:else if tool.status === "completed"}
-              <CircleCheckIcon class="size-3 text-ok" />
+              <CircleCheckIcon
+                class={cn(
+                  "size-3 text-ok",
+                  statusFlash.has(tool.toolCallId) && "motion-status-pop",
+                )}
+              />
             {:else if tool.status === "failed"}
-              <CircleXIcon class="size-3 text-destructive" />
+              <CircleXIcon
+                class={cn(
+                  "size-3 text-destructive",
+                  statusFlash.has(tool.toolCallId) && "motion-status-pop",
+                )}
+              />
             {/if}
 
             {#if hasDetailContent}
@@ -217,91 +264,96 @@
 
         <!-- Detail content (diff / log output) -->
         {#if isExpanded && hasDetailContent}
-          <div class="bg-background/80 border-border/60 border-t p-2.5 flex flex-col gap-2">
-            <div class="flex flex-wrap items-center gap-2 text-[11px]">
-              {#if result !== null}
-                <span class="text-muted-foreground text-[11px]">{m.chat_tool_command()}</span>
-                <span class="font-mono font-semibold text-foreground">{toolInfo.detail}</span>
-              {:else}
-                <span class="text-muted-foreground text-[11px]">{m.chat_tool_label()}</span>
-                <span class="font-mono font-semibold text-foreground">{toolInfo.name}</span>
-                {#if tool.title && tool.title !== toolInfo.name}
-                  <span class="text-muted-foreground text-[11px]">{m.chat_tool_detail()}</span>
-                  <span class="font-mono text-muted-foreground truncate">{tool.title}</span>
-                {/if}
-              {/if}
-              {#if tool.status}
-                <span class="text-muted-foreground text-[11px]">{m.chat_tool_status()}</span>
-                <span class="font-mono text-muted-foreground">{tool.status}</span>
-              {/if}
-            </div>
-
-            {#if tool.locations.length > 0}
-              <div class="flex flex-col gap-0.5 text-[11px]">
-                <span class="text-muted-foreground text-[11px]">
-                  {m.chat_tool_target_files()}
-                </span>
-                <ul class="flex flex-col gap-0.5 font-mono text-muted-foreground p-0 list-none">
-                  {#each tool.locations as loc, index (`${index}:${loc}`)}
-                    <li class="truncate">{loc}</li>
-                  {/each}
-                </ul>
-              </div>
-            {/if}
-
-            {#if tool.diff !== null}
-              <div class="flex flex-col gap-1">
-                <div class="flex items-center gap-2">
-                  <span class="text-muted-foreground text-[11px]">Diff:</span>
-                  {#if canOpenInDock}
-                    <button
-                      type="button"
-                      class="text-signal text-[11px] font-medium hover:underline"
-                      onclick={() => openDiffInDock(tool)}
-                    >
-                      {m.chat_tool_open_in_dock()}
-                    </button>
+          <div transition:slide|local={{ duration: motion.duration(160) }}>
+            <div
+              transition:fade|local={{ duration: motion.duration(160) }}
+              class="bg-background/80 border-border/60 border-t p-2.5 flex flex-col gap-2"
+            >
+              <div class="flex flex-wrap items-center gap-2 text-[11px]">
+                {#if result !== null}
+                  <span class="text-muted-foreground text-[11px]">{m.chat_tool_command()}</span>
+                  <span class="font-mono font-semibold text-foreground">{toolInfo.detail}</span>
+                {:else}
+                  <span class="text-muted-foreground text-[11px]">{m.chat_tool_label()}</span>
+                  <span class="font-mono font-semibold text-foreground">{toolInfo.name}</span>
+                  {#if tool.title && tool.title !== toolInfo.name}
+                    <span class="text-muted-foreground text-[11px]">{m.chat_tool_detail()}</span>
+                    <span class="font-mono text-muted-foreground truncate">{tool.title}</span>
                   {/if}
-                </div>
-                <DiffText diff={tool.diff.unified_diff} maxHeight="12rem" />
+                {/if}
+                {#if tool.status}
+                  <span class="text-muted-foreground text-[11px]">{m.chat_tool_status()}</span>
+                  <span class="font-mono text-muted-foreground">{tool.status}</span>
+                {/if}
               </div>
-            {/if}
 
-            {#if result !== null}
-              {#if result.error !== null}
-                <div class="flex flex-col gap-1">
-                  <span class="text-muted-foreground text-[11px]">{m.chat_tool_error()}</span>
-                  <pre
-                    class="border-destructive/30 bg-danger-soft/40 text-destructive max-h-40 overflow-auto rounded-md border p-2 font-mono text-[11px] whitespace-pre-wrap">{result.error}</pre>
+              {#if tool.locations.length > 0}
+                <div class="flex flex-col gap-0.5 text-[11px]">
+                  <span class="text-muted-foreground text-[11px]">
+                    {m.chat_tool_target_files()}
+                  </span>
+                  <ul class="flex flex-col gap-0.5 font-mono text-muted-foreground p-0 list-none">
+                    {#each tool.locations as loc, index (`${index}:${loc}`)}
+                      <li class="truncate">{loc}</li>
+                    {/each}
+                  </ul>
                 </div>
               {/if}
 
-              {#if result.text !== ""}
+              {#if tool.diff !== null}
                 <div class="flex flex-col gap-1">
-                  <span class="text-muted-foreground text-[11px]">{m.chat_tool_output()}</span>
-                  <pre
-                    class="bg-muted/40 max-h-40 overflow-auto rounded-md border p-2 font-mono text-[11px] whitespace-pre-wrap">{result.text}</pre>
+                  <div class="flex items-center gap-2">
+                    <span class="text-muted-foreground text-[11px]">Diff:</span>
+                    {#if canOpenInDock}
+                      <button
+                        type="button"
+                        class="text-signal text-[11px] font-medium hover:underline"
+                        onclick={() => openDiffInDock(tool)}
+                      >
+                        {m.chat_tool_open_in_dock()}
+                      </button>
+                    {/if}
+                  </div>
+                  <DiffText diff={tool.diff.unified_diff} maxHeight="12rem" />
                 </div>
-              {:else if result.error === null && hasRawOutput}
+              {/if}
+
+              {#if result !== null}
+                {#if result.error !== null}
+                  <div class="flex flex-col gap-1">
+                    <span class="text-muted-foreground text-[11px]">{m.chat_tool_error()}</span>
+                    <pre
+                      class="border-destructive/30 bg-danger-soft/40 text-destructive max-h-40 overflow-auto rounded-md border p-2 font-mono text-[11px] whitespace-pre-wrap">{result.error}</pre>
+                  </div>
+                {/if}
+
+                {#if result.text !== ""}
+                  <div class="flex flex-col gap-1">
+                    <span class="text-muted-foreground text-[11px]">{m.chat_tool_output()}</span>
+                    <pre
+                      class="bg-muted/40 max-h-40 overflow-auto rounded-md border p-2 font-mono text-[11px] whitespace-pre-wrap">{result.text}</pre>
+                  </div>
+                {:else if result.error === null && hasRawOutput}
+                  <div class="flex flex-col gap-1">
+                    <span class="text-muted-foreground text-[11px]">{m.chat_tool_output()}</span>
+                    <pre
+                      class="bg-muted/40 max-h-40 overflow-auto rounded-md border p-2 font-mono text-[11px] whitespace-pre-wrap">{tool.rawOutput}</pre>
+                  </div>
+                {/if}
+
+                {#if result.truncated}
+                  <span class="text-muted-foreground text-[10px]">
+                    {m.chat_tool_output_truncated()}
+                  </span>
+                {/if}
+              {:else if hasRawOutput}
                 <div class="flex flex-col gap-1">
                   <span class="text-muted-foreground text-[11px]">{m.chat_tool_output()}</span>
                   <pre
                     class="bg-muted/40 max-h-40 overflow-auto rounded-md border p-2 font-mono text-[11px] whitespace-pre-wrap">{tool.rawOutput}</pre>
                 </div>
               {/if}
-
-              {#if result.truncated}
-                <span class="text-muted-foreground text-[10px]">
-                  {m.chat_tool_output_truncated()}
-                </span>
-              {/if}
-            {:else if hasRawOutput}
-              <div class="flex flex-col gap-1">
-                <span class="text-muted-foreground text-[11px]">{m.chat_tool_output()}</span>
-                <pre
-                  class="bg-muted/40 max-h-40 overflow-auto rounded-md border p-2 font-mono text-[11px] whitespace-pre-wrap">{tool.rawOutput}</pre>
-              </div>
-            {/if}
+            </div>
           </div>
         {/if}
       </div>

@@ -13,6 +13,9 @@
   import type { ChatTurn } from "#lib/chat-turns.ts";
   import { turnToolLabel } from "#lib/chat-turns.ts";
   import { m } from "#lib/paraglide/messages.js";
+  import { motion } from "#lib/motion.svelte.ts";
+  import { cn } from "#lib/utils.ts";
+  import { fade } from "svelte/transition";
   import ChevronUpIcon from "@lucide/svelte/icons/chevron-up";
 
   interface Props {
@@ -39,6 +42,8 @@
   interface Band {
     seq: number;
     top: number;
+    /** Position in `turns`, used to highlight the hovered tick. */
+    index: number;
   }
 
   interface Marker {
@@ -56,6 +61,8 @@
   let lastActiveIndex = -1;
   let hover = $state<{ index: number; y: number } | null>(null);
   let dragging = $state(false);
+  /** Rail-relative pointer position while scrubbing, for the playhead line. */
+  let scrubY = $state<number | null>(null);
 
   /** Content-space offsets of the visible turns (read from event handlers only). */
   let anchors: { top: number; end: number }[] = [];
@@ -95,7 +102,7 @@
       const end = next === undefined ? height : next.top - origin;
       const bandTop = toRail(top);
       nextAnchors.push({ top, end });
-      nextBands.push({ seq: Number(node.dataset.turnSeq), top: bandTop });
+      nextBands.push({ seq: Number(node.dataset.turnSeq), top: bandTop, index });
     });
 
     const nextMarkers: Marker[] = [];
@@ -205,6 +212,11 @@
     }
     if (dragging) {
       // Scrubbing is continuous and centers the point under the pointer.
+      const rail = railEl;
+      if (rail !== null) {
+        const rect = rail.getBoundingClientRect();
+        scrubY = Math.max(capHeight(), Math.min(rect.height, event.clientY - rect.top));
+      }
       scrollToContent(event.clientY, false);
       return;
     }
@@ -224,6 +236,7 @@
     pressTurn = null;
     moved = false;
     dragging = false;
+    scrubY = null;
   }
 
   function handleKeydown(event: KeyboardEvent): void {
@@ -338,18 +351,30 @@
     {/if}
 
     <div class="pointer-events-none absolute inset-0">
+      {#if dragging && scrubY !== null}
+        <div
+          class="bg-signal/60 absolute right-0 left-0 h-px -translate-y-1/2 rounded-full"
+          style:top="{scrubY}px"
+        ></div>
+      {/if}
+
       {#each bands as band (band.seq)}
         <div
-          class={band.seq === activeTurn?.seq
-            ? "bg-signal absolute left-1/2 h-[2.5px] w-[9px] -translate-x-1/2 rounded-full"
-            : "bg-ink/40 absolute left-1/2 h-[2px] w-[7px] -translate-x-1/2 rounded-full"}
+          class={cn(
+            "absolute left-1/2 -translate-x-1/2 rounded-full transition-[top,width,height,background-color] duration-[var(--motion-base)] ease-[var(--ease-out)]",
+            band.seq === activeTurn?.seq
+              ? "bg-signal h-[2.5px] w-[9px]"
+              : hover?.index === band.index
+                ? "bg-signal/70 h-[2.5px] w-[9px]"
+                : "bg-ink/40 h-[2px] w-[7px]",
+          )}
           style:top="{band.top}px"
         ></div>
       {/each}
 
       {#each markers as marker (marker.id)}
         <div
-          class="ring-background absolute left-1/2 size-[6px] -translate-x-1/2 -translate-y-1/2 rounded-full ring-[1.5px] {marker.tone ===
+          class="ring-background absolute left-1/2 size-[6px] -translate-x-1/2 -translate-y-1/2 rounded-full ring-[1.5px] transition-[top] duration-[var(--motion-base)] ease-[var(--ease-out)] {marker.tone ===
           'danger'
             ? 'bg-danger'
             : 'bg-warn'}"
@@ -360,6 +385,7 @@
 
     {#if hover !== null && hoverTurn !== null}
       <div
+        transition:fade|local={{ duration: motion.duration(120) }}
         class="bg-popover border-border pointer-events-none absolute right-full z-30 mr-2 w-56 -translate-y-1/2 rounded-lg border px-2.5 py-2 shadow-md"
         style:top="{hover.y}px"
       >

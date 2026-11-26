@@ -13,6 +13,7 @@
   import { formatRelativeTime } from "#lib/format.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
+  import { cn } from "#lib/utils.ts";
   import { toast } from "svelte-sonner";
   import CircleHelpIcon from "@lucide/svelte/icons/circle-help";
   import SendIcon from "@lucide/svelte/icons/send";
@@ -27,6 +28,7 @@
     requestedSchema,
     resolved = null,
     createdAt = null,
+    pulse = false,
   }: {
     sessionId: string;
     elicitationId: string;
@@ -38,6 +40,8 @@
       content: Record<string, ElicitationValue> | null;
     } | null;
     createdAt?: number | null;
+    /** One-shot ring when the card appears live (not when replaying history). */
+    pulse?: boolean;
   } = $props();
 
   const allProperties = $derived(Object.entries(requestedSchema.properties ?? {}));
@@ -183,7 +187,12 @@
   }
 </script>
 
-<div class="bg-card border-border flex flex-col gap-3 rounded-lg border p-3">
+<div
+  class={cn(
+    "bg-card border-border flex flex-col gap-3 rounded-lg border p-3",
+    pulse && "motion-attention-ripple",
+  )}
+>
   <div class="flex min-w-0 flex-col gap-1">
     <div class="flex items-center gap-2">
       <CircleHelpIcon class="text-signal size-4 shrink-0" />

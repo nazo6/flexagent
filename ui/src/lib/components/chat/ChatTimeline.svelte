@@ -12,6 +12,7 @@
   import ToolCallGroup from "./ToolCallGroup.svelte";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { SvelteSet } from "svelte/reactivity";
+  import { onDestroy, untrack } from "svelte";
   import {
     groupActivitySections,
     groupTimelineItems,
@@ -162,6 +163,22 @@
     }
   }
 
+  /** Earliest sequence in a rendered row (an activity row wraps several groups). */
+  function entryMinSeq(entry: TimelineEntry): number {
+    if (entry.kind === "activity") {
+      return Math.min(...entry.groups.map(groupMinSeq));
+    }
+    return groupMinSeq(entry);
+  }
+
+  /** Approvals and questions carry their own one-shot attention ring. */
+  function entryNeedsAttention(entry: TimelineEntry): boolean {
+    return (
+      entry.kind === "single" &&
+      (entry.item.kind === "permission" || entry.item.kind === "elicitation")
+    );
+  }
+
   /** Whether a `node_seq` falls inside a rendered group (inclusive). */
   function rangeContains(seq: number | null, start: number, end: number): boolean {
     return seq !== null && seq >= start && seq <= end;
@@ -188,6 +205,91 @@
   const liveEntryKey = $derived(
     status === "running" && !nested ? (timelineEntries.at(-1)?.key ?? null) : null,
   );
+
+  /**
+   * Rows appended live that should rise in once.
+   *
+   * History is rendered in one batch and must stay still: the gate below marks
+   * everything already present as known on the first non-empty render, and
+   * only later rows with a newer sequence are added to this set. Prepended
+   * history (load earlier) keeps its older sequence and therefore stays calm.
+   */
+  const enterEntries = new SvelteSet<string>();
+  const attentionEntries = new SvelteSet<string>();
+  const knownEntryKeys = new Set<string>();
+  const enterTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const attentionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  let enterSessionId = $state<string | null>(null);
+  let lastEntrySessionId: string | null = null;
+  let highestRenderedSeq = -1;
+  let entriesInitialized = false;
+
+  const renderedEntryCount = $derived(timelineEntries.length);
+
+  $effect(() => {
+    // Depend on the row count and session only. `timelineEntries` itself is
+    // rebuilt for every streaming chunk, and reading it reactively would make
+    // this scan run on each chunk instead of only when the list grows.
+    const count = renderedEntryCount;
+    const currentSessionId = sessionId;
+    const entries = untrack(() => timelineEntries);
+    enterSessionId = currentSessionId;
+    if (currentSessionId !== lastEntrySessionId) {
+      lastEntrySessionId = currentSessionId;
+      knownEntryKeys.clear();
+      enterEntries.clear();
+      attentionEntries.clear();
+      for (const timer of enterTimers.values()) clearTimeout(timer);
+      for (const timer of attentionTimers.values()) clearTimeout(timer);
+      enterTimers.clear();
+      attentionTimers.clear();
+      highestRenderedSeq = -1;
+      entriesInitialized = false;
+    }
+    if (count === 0) return;
+    if (!entriesInitialized) {
+      for (const entry of entries) knownEntryKeys.add(entry.key);
+      highestRenderedSeq = Math.max(...entries.map(entryMinSeq));
+      entriesInitialized = true;
+      return;
+    }
+    let nextHighest = highestRenderedSeq;
+    for (const entry of entries) {
+      if (knownEntryKeys.has(entry.key)) continue;
+      knownEntryKeys.add(entry.key);
+      const minSeq = entryMinSeq(entry);
+      if (minSeq > highestRenderedSeq) {
+        if (entryNeedsAttention(entry)) {
+          // Approvals get the ring instead of the message rise, so the card
+          // does not stack two motions on top of each other.
+          attentionEntries.add(entry.key);
+          const timer = setTimeout(() => {
+            attentionEntries.delete(entry.key);
+            attentionTimers.delete(entry.key);
+          }, 700);
+          attentionTimers.set(entry.key, timer);
+        } else {
+          enterEntries.add(entry.key);
+          // Drop the class after the animation so the finished message does not
+          // keep a transform / stacking context forever.
+          const timer = setTimeout(() => {
+            enterEntries.delete(entry.key);
+            enterTimers.delete(entry.key);
+          }, 220);
+          enterTimers.set(entry.key, timer);
+        }
+      }
+      nextHighest = Math.max(nextHighest, minSeq);
+    }
+    highestRenderedSeq = nextHighest;
+  });
+
+  onDestroy(() => {
+    for (const timer of enterTimers.values()) clearTimeout(timer);
+    for (const timer of attentionTimers.values()) clearTimeout(timer);
+    enterTimers.clear();
+    attentionTimers.clear();
+  });
 
   function endsWithFork(entry: TimelineEntry): boolean {
     if (forkFrom === null || forkAfterGroupKey === null) return false;
@@ -362,6 +464,7 @@
           resolved={item.resolved}
           createdAt={item.createdAt}
           {subagentTitle}
+          pulse={attentionEntries.has(group.key)}
         />
       </div>
     {:else if item.kind === "elicitation"}
@@ -373,6 +476,7 @@
           requestedSchema={item.requestedSchema}
           resolved={item.resolved}
           createdAt={item.createdAt}
+          pulse={attentionEntries.has(group.key)}
         />
       </div>
     {:else if item.kind === "plan"}
@@ -433,6 +537,9 @@
     <li
       data-seq={rowStart ?? undefined}
       data-seq-end={rowEnd ?? undefined}
+      class:motion-message-enter={!nested &&
+        enterSessionId === sessionId &&
+        enterEntries.has(entry.key)}
       class:seq-focus={rowStart !== null && rowEnd !== null
         ? rangeContains(highlightSeq, rowStart, rowEnd)
         : false}

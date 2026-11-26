@@ -7,7 +7,9 @@
   import { snippetSegments } from "#lib/search.ts";
   import { shortId } from "#lib/session-status.ts";
   import { connection, sync } from "#lib/stores/app.svelte.ts";
+  import { motion } from "#lib/motion.svelte.ts";
   import { toast } from "svelte-sonner";
+  import { fly } from "svelte/transition";
   import SearchIcon from "@lucide/svelte/icons/search";
 
   /** Results per page; the API clamps the total at 500. */
@@ -127,9 +129,16 @@
   {:else if hits.length > 0}
     <p class="text-muted-foreground text-[12px]">{m.search_result_count({ count: hits.length })}</p>
     <ul class="border-border flex list-none flex-col border-t p-0">
-      {#each hits as hit (hit.event_id)}
+      {#each hits as hit, index (hit.event_id)}
         {@const meta = hitMeta.get(hit.session_id)}
-        <li class="border-border flex flex-col gap-1 border-b py-3">
+        <li
+          in:fly|local={{
+            y: 4,
+            duration: motion.duration(140),
+            delay: motion.reduced ? 0 : Math.min(index, 5) * 15,
+          }}
+          class="border-border flex flex-col gap-1 border-b py-3"
+        >
           <div class="flex flex-wrap items-center gap-2 text-[11px]">
             <a class="text-[13px] font-medium hover:underline" href={hitHref(hit)}>
               {sessionTitle(hit.session_id)}

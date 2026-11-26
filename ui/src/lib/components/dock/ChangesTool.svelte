@@ -15,6 +15,8 @@
   import { m } from "#lib/paraglide/messages.js";
   import { cn } from "#lib/utils.ts";
   import type { TimelineItem } from "#lib/sync/reducer.ts";
+  import { SvelteSet } from "svelte/reactivity";
+  import { onDestroy } from "svelte";
   import ArrowDownToLineIcon from "@lucide/svelte/icons/arrow-down-to-line";
   import ArrowUpFromLineIcon from "@lucide/svelte/icons/arrow-up-from-line";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
@@ -38,6 +40,56 @@
   let commitMessage = $state("");
   let committing = $state(false);
   let syncAction = $state<"pull" | "push" | null>(null);
+
+  /**
+   * Paths that appeared after the current scope was already populated.
+   * Initial rows (and a scope switch) stay still; only new files slide in.
+   */
+  const newRows = new SvelteSet<string>();
+  const knownRows = new Set<string>();
+  const rowTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  let rowsScope: Scope | null = null;
+  let rowsInitialized = false;
+
+  $effect(() => {
+    const currentScope = scope;
+    const rows =
+      currentScope === "session"
+        ? sessionFiles.map((file) => `session:${file.path}`)
+        : currentScope === "uncommitted"
+          ? (status?.entries ?? []).map((entry) => `uncommitted:${entry.absolute_path}`)
+          : (branchDiff?.files ?? []).map((file) => `branch:${file.path}`);
+
+    if (currentScope !== rowsScope) {
+      rowsScope = currentScope;
+      knownRows.clear();
+      newRows.clear();
+      for (const timer of rowTimers.values()) clearTimeout(timer);
+      rowTimers.clear();
+      rowsInitialized = false;
+    }
+    if (rows.length === 0) return;
+    if (!rowsInitialized) {
+      for (const key of rows) knownRows.add(key);
+      rowsInitialized = true;
+      return;
+    }
+    for (const key of rows) {
+      if (knownRows.has(key)) continue;
+      knownRows.add(key);
+      newRows.add(key);
+      const timer = setTimeout(() => {
+        newRows.delete(key);
+        rowTimers.delete(key);
+      }, 220);
+      rowTimers.set(key, timer);
+    }
+  });
+
+  onDestroy(() => {
+    for (const timer of rowTimers.values()) clearTimeout(timer);
+    rowTimers.clear();
+  });
 
   const canCommit = $derived(
     scope === "uncommitted" &&
@@ -308,7 +360,10 @@
         {@const badge = statusByPath.get(absolute)}
         <button
           type="button"
-          class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
+          class={cn(
+            "hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]",
+            newRows.has(`session:${file.path}`) && "motion-change-row",
+          )}
           title={file.path}
           onclick={() => openDiff(absolute)}
           ondblclick={() => openDiff(absolute, "uncommitted", false)}
@@ -342,7 +397,10 @@
       {#each status.entries as entry (entry.absolute_path)}
         <button
           type="button"
-          class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
+          class={cn(
+            "hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]",
+            newRows.has(`uncommitted:${entry.absolute_path}`) && "motion-change-row",
+          )}
           title={entry.old_path === null ? entry.path : `${entry.old_path} → ${entry.path}`}
           onclick={() => openDiff(entry.absolute_path)}
           ondblclick={() => openDiff(entry.absolute_path, "uncommitted", false)}
@@ -371,7 +429,10 @@
       {@const absolute = branchAbsolute(file)}
       <button
         type="button"
-        class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
+        class={cn(
+          "hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]",
+          newRows.has(`branch:${file.path}`) && "motion-change-row",
+        )}
         title={file.path}
         onclick={() => openDiff(absolute, "branch_base")}
         ondblclick={() => openDiff(absolute, "branch_base", false)}

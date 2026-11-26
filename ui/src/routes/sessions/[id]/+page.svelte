@@ -1,7 +1,8 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import { onMount, tick, untrack } from "svelte";
+  import { onDestroy, onMount, tick, untrack } from "svelte";
+  import { fade, fly, slide } from "svelte/transition";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import ProvisioningLogCard from "#lib/components/ProvisioningLogCard.svelte";
   import ChatTimeline from "#lib/components/chat/ChatTimeline.svelte";
@@ -23,6 +24,7 @@
   import type { DockLauncherId } from "#lib/dock/registry.ts";
   import { dock } from "#lib/stores/dock.svelte.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
+  import { motion } from "#lib/motion.svelte.ts";
   import {
     provisioningLogLines,
     buildTimelineItems,
@@ -438,6 +440,32 @@
 
   let loadingOlder = $state(false);
 
+  /** Keep the skeleton mounted for one crossfade after the first page arrives. */
+  let showSkeleton = $state(untrack(() => timeline.historyLoading && items.length === 0));
+  let skeletonTimer: ReturnType<typeof setTimeout> | null = null;
+
+  $effect(() => {
+    const loading = timeline.historyLoading && items.length === 0;
+    if (loading) {
+      showSkeleton = true;
+      if (skeletonTimer !== null) {
+        clearTimeout(skeletonTimer);
+        skeletonTimer = null;
+      }
+      return;
+    }
+    if (showSkeleton && skeletonTimer === null) {
+      skeletonTimer = setTimeout(() => {
+        showSkeleton = false;
+        skeletonTimer = null;
+      }, motion.duration(100));
+    }
+  });
+
+  onDestroy(() => {
+    if (skeletonTimer !== null) clearTimeout(skeletonTimer);
+  });
+
   /**
    * Prepend the next older page of the session history and keep the reader's
    * position (the content above grows by the inserted height).
@@ -693,36 +721,51 @@
                 </Button>
               </div>
             {/if}
-            {#if timeline.historyLoading && items.length === 0}
-              <!-- First page still loading: avoid flashing the empty state. -->
-              <div class="flex flex-col gap-5 py-1" aria-busy="true">
-                {#each [0, 1, 2] as row (row)}
-                  <div class="flex gap-2.5">
-                    <Skeleton class="size-5 shrink-0 rounded-md" />
-                    <div class="flex min-w-0 flex-1 flex-col gap-2">
-                      <Skeleton class="h-3.5 w-4/5" />
-                      <Skeleton class="h-3.5 w-3/5" />
+            <div
+              class="relative"
+              class:min-h-[13rem]={timeline.historyLoading && items.length === 0}
+            >
+              {#if showSkeleton}
+                <!-- The skeleton overlays the incoming timeline for one crossfade.
+                     It is absolute so its own height never competes with the
+                     real content; the wrapper reserves a stable placeholder
+                     height while the first page is still loading. -->
+                <div
+                  class="pointer-events-none absolute inset-x-0 top-0 flex flex-col gap-5 py-1 transition-opacity duration-[100ms]"
+                  class:opacity-0={!timeline.historyLoading || items.length > 0}
+                  aria-busy="true"
+                >
+                  {#each [0, 1, 2] as row (row)}
+                    <div class="flex gap-2.5">
+                      <Skeleton class="size-5 shrink-0 rounded-md" />
+                      <div class="flex min-w-0 flex-1 flex-col gap-2">
+                        <Skeleton class="h-3.5 w-4/5" />
+                        <Skeleton class="h-3.5 w-3/5" />
+                      </div>
                     </div>
-                  </div>
-                {/each}
-              </div>
-            {:else}
-              <ChatTimeline
-                {sessionId}
-                {items}
-                status={currentStatus}
-                {forkScope}
-                forkFrom={session?.parent_session_id ?? null}
-                {forkFromTitle}
-                {forkAfterSeq}
-                {highlightSeq}
-                onfork={handleForkItem}
-                {canRevert}
-                onrevert={handleRevertItem}
-                onstopterminal={handleStopTerminal}
-                onsubagent={(childSessionId) => (selectedSubagentId = childSessionId)}
-              />
-            {/if}
+                  {/each}
+                </div>
+              {/if}
+              {#if !(timeline.historyLoading && items.length === 0)}
+                <div in:fade|local={{ duration: motion.duration(100) }}>
+                  <ChatTimeline
+                    {sessionId}
+                    {items}
+                    status={currentStatus}
+                    {forkScope}
+                    forkFrom={session?.parent_session_id ?? null}
+                    {forkFromTitle}
+                    {forkAfterSeq}
+                    {highlightSeq}
+                    onfork={handleForkItem}
+                    {canRevert}
+                    onrevert={handleRevertItem}
+                    onstopterminal={handleStopTerminal}
+                    onsubagent={(childSessionId) => (selectedSubagentId = childSessionId)}
+                  />
+                </div>
+              {/if}
+            </div>
           </div>
         </div>
 
@@ -797,6 +840,8 @@
       <button
         type="button"
         aria-label={m.dock_resize()}
+        in:fade|local={{ duration: motion.duration(120) }}
+        out:fade|local={{ duration: motion.duration(120) }}
         class={cn(
           "group z-10 -ml-px hidden w-1.5 cursor-col-resize shrink-0 items-center justify-center border-l border-border bg-transparent p-0 outline-none transition-colors select-none hover:bg-signal/50 focus-visible:ring-1 focus-visible:ring-signal active:bg-signal lg:flex",
           isResizing && "bg-signal",
@@ -820,6 +865,8 @@
       </button>
 
       <div
+        in:slide|local={{ axis: "x", duration: motion.duration(180) }}
+        out:slide|local={{ axis: "x", duration: motion.duration(180) }}
         class="hidden h-full shrink-0 flex-col overflow-hidden lg:flex"
         style="width: clamp(22rem, {dock.width}%, 75%);"
       >
@@ -847,11 +894,13 @@
           type="button"
           tabindex="-1"
           aria-label={m.session_close_panel()}
-          class="bg-background/60 animate-in fade-in absolute inset-0 cursor-default backdrop-blur-[2px] duration-150"
+          transition:fade|local={{ duration: motion.duration(150) }}
+          class="bg-background/60 absolute inset-0 cursor-default backdrop-blur-[2px]"
           onclick={() => dock.collapse()}
         ></button>
         <div
-          class="bg-card border-border animate-in fade-in slide-in-from-bottom-2 absolute inset-x-2 top-6 bottom-2 flex flex-col overflow-hidden rounded-xl border shadow-2xl duration-150"
+          transition:fly|local={{ y: 8, duration: motion.duration(160) }}
+          class="bg-card border-border absolute inset-x-2 top-6 bottom-2 flex flex-col overflow-hidden rounded-xl border shadow-2xl"
         >
           <DockHost {ctx} {items} mobile oncollapse={() => dock.collapse()} />
         </div>

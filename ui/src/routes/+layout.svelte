@@ -13,6 +13,7 @@
   import { Toaster } from "#lib/components/ui/sonner/index.ts";
   import { connection, initApp, sync } from "#lib/stores/app.svelte.ts";
   import { problems, type AppProblem } from "#lib/stores/problems.svelte.ts";
+  import { motion } from "#lib/motion.svelte.ts";
   import { theme } from "#lib/theme.svelte.ts";
   import type { RecoveryAction } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
@@ -58,6 +59,7 @@
 
   onMount(() => {
     theme.init();
+    motion.init();
     void initApp();
   });
 
@@ -135,9 +137,12 @@
 {#if !connection.ready}
   <div class="safe-area-shell bg-background text-muted-foreground flex min-h-svh flex-col">
     {@render wcoDragStrip()}
-    <div class="flex flex-1 items-center justify-center gap-2">
-      <LoaderCircleIcon class="size-4 animate-spin" />
-      {m.shell_checking_connection()}
+    <div class="flex flex-1 flex-col items-center justify-center gap-3">
+      <BrandIcon class="size-14" draw />
+      <div class="text-muted-foreground flex items-center gap-2">
+        <LoaderCircleIcon class="size-4 animate-spin" />
+        {m.shell_checking_connection()}
+      </div>
     </div>
   </div>
 {:else if connection.error !== null}

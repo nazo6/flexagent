@@ -415,7 +415,7 @@
     {#if hasMoreActions}
       <DropdownMenu.Root>
         <DropdownMenu.Trigger
-          class="text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring/40 inline-flex size-7 shrink-0 items-center justify-center rounded-full outline-none transition-colors focus-visible:ring-2"
+          class="text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring/40 inline-flex size-7 shrink-0 items-center justify-center rounded-full outline-none motion-press focus-visible:ring-2"
           title={m.composer_more_options()}
           aria-label={m.composer_more_options()}
         >

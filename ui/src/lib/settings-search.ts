@@ -168,6 +168,12 @@ export const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   {
     scope: "browser",
     tab: "appearance",
+    label: "Motion",
+    keywords: "motion animation reduced motion accessibility speed",
+  },
+  {
+    scope: "browser",
+    tab: "appearance",
     label: "Color palette",
     keywords: "palette colors colour bone graphite moss",
   },

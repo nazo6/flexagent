@@ -10,6 +10,8 @@
   import type { Snippet } from "svelte";
   import type { ActivitySection } from "#lib/chat-groups.ts";
   import { m } from "#lib/paraglide/messages.js";
+  import { motion } from "#lib/motion.svelte.ts";
+  import { fade, slide } from "svelte/transition";
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
   import LayersIcon from "@lucide/svelte/icons/layers";
@@ -67,8 +69,13 @@
   </button>
 
   {#if isOpen}
-    <div class="border-line mt-1.5 rounded-md border p-2.5">
-      {@render children()}
+    <div transition:slide|local={{ duration: motion.duration(160) }} class="mt-1.5">
+      <div
+        transition:fade|local={{ duration: motion.duration(160) }}
+        class="border-line rounded-md border p-2.5"
+      >
+        {@render children()}
+      </div>
     </div>
   {/if}
 </div>

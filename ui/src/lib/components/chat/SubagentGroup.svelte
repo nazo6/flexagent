@@ -2,8 +2,10 @@
   import type { Snippet } from "svelte";
   import type { SubagentItem } from "#lib/chat-groups.ts";
   import { m } from "#lib/paraglide/messages.js";
+  import { motion } from "#lib/motion.svelte.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
+  import { fade, slide } from "svelte/transition";
   import BotIcon from "@lucide/svelte/icons/bot";
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
@@ -85,8 +87,13 @@
     {/if}
   </div>
   {#if open}
-    <div class="border-border border-t px-3 py-3">
-      {@render children()}
+    <div transition:slide|local={{ duration: motion.duration(160) }}>
+      <div
+        transition:fade|local={{ duration: motion.duration(160) }}
+        class="border-border border-t px-3 py-3"
+      >
+        {@render children()}
+      </div>
     </div>
   {/if}
 </div>

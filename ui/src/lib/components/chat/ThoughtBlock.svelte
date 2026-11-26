@@ -10,7 +10,9 @@
   import MarkdownText from "#lib/components/MarkdownText.svelte";
   import MessageAttachments from "./MessageAttachments.svelte";
   import { m } from "#lib/paraglide/messages.js";
+  import { motion } from "#lib/motion.svelte.ts";
   import type { TimelineItem } from "#lib/sync/reducer.ts";
+  import { fade, slide } from "svelte/transition";
   import BrainIcon from "@lucide/svelte/icons/brain";
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
@@ -106,12 +108,15 @@
   </button>
 
   {#if isOpen}
-    <div
-      bind:this={body}
-      class="text-muted-foreground border-line mt-1.5 max-h-64 overflow-y-auto rounded-md border p-2.5 text-[13px] leading-relaxed"
-    >
-      <MessageAttachments attachments={item.attachments} />
-      <MarkdownText text={item.text} {streaming} />
+    <div transition:slide|local={{ duration: motion.duration(160) }} class="mt-1.5">
+      <div
+        transition:fade|local={{ duration: motion.duration(160) }}
+        class="text-muted-foreground border-line max-h-64 overflow-y-auto rounded-md border p-2.5 text-[13px] leading-relaxed"
+        bind:this={body}
+      >
+        <MessageAttachments attachments={item.attachments} />
+        <MarkdownText text={item.text} {streaming} />
+      </div>
     </div>
   {/if}
 </div>

@@ -106,7 +106,7 @@
   });
 </script>
 
-<header class="wco-titlebar bg-card/85 border-border shrink-0 border-b backdrop-blur">
+<header class="wco-titlebar bg-card/85 border-border relative shrink-0 border-b backdrop-blur">
   <!-- In an installed desktop PWA this row also serves as the window title bar
        (Window Controls Overlay); see the `.wco-*` rules in app.css. -->
   <div class="wco-titlebar-row flex h-12 items-center gap-2 px-3 lg:px-4">
@@ -268,4 +268,39 @@
       class="min-w-0 flex-1 justify-start"
     />
   </div>
+
+  {#if status === "running"}
+    <span class="motion-running-sweep" aria-hidden="true"></span>
+  {/if}
 </header>
+
+<style>
+  /* A 1px signal line along the header edge while the turn is running. It sits
+     above the normal border and never changes layout. */
+  .motion-running-sweep {
+    position: absolute;
+    inset-inline: 0;
+    bottom: 0;
+    height: 1px;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .motion-running-sweep::after {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    width: 38%;
+    background: linear-gradient(90deg, transparent, var(--signal), transparent);
+    animation: motion-running-sweep 2.4s linear infinite;
+  }
+
+  @keyframes motion-running-sweep {
+    from {
+      transform: translateX(-110%);
+    }
+    to {
+      transform: translateX(360%);
+    }
+  }
+</style>
