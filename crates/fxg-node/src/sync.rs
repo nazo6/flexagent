@@ -900,8 +900,8 @@ pub(crate) async fn handle_server_message(
     Ok(())
 }
 
-/// Handles a remote workspace-terminal open request (applies the
-/// `allow_remote_pty` policy inside `DaemonState::pty_open`).
+/// Handles a remote workspace-terminal open request (the node validates the
+/// workspace path inside `DaemonState::pty_open`).
 #[allow(clippy::too_many_arguments)]
 async fn handle_remote_pty_spawn(
     state: &DaemonState,

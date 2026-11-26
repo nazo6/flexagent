@@ -74,16 +74,16 @@ CLI のコマンド・引数の正は `fxg --help` / `fxg <noun> --help` と
 所有者の DB に型付き構造で保存し、`node.toml` / `hub.toml` にはプロセス起動時に
 必要な値だけを残します。
 
-| 設定                                                                              | 所有者 / 保存場所                                                | 変更手段                                          |
-| :-------------------------------------------------------------------------------- | :--------------------------------------------------------------- | :------------------------------------------------ |
-| 待受アドレス・ログ・`allowed_hosts` / `allowed_origins`                           | `node.toml` / `hub.toml` / `FXG_*` / CLI                         | ファイル編集 + 再起動（Web UI は読み取り専用）    |
-| ハブ接続先・ペアリングトークン                                                    | `node.db` (`node_pairing`) + `<data>/node/node_token` (`0600`)   | Client API / Web UI（ハブは対象ノードへプロキシ） |
-| `node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray` / `vapid_subject` | `node.db` (`node_settings`)                                      | Client API（ハブは対象ノードへプロキシ）          |
-| エージェント既定値・エイリアス・カスタム定義                                      | `node.db` (`agent_settings` / `agent_aliases` / `custom_agents`) | Client API                                        |
-| 明示的な `project_key`                                                            | `node.db` (`project_path_links`)                                 | Client API / Web UI                               |
-| VAPID subject（ハブ用）・Provisioner                                              | `hub.db`                                                         | ハブ Web UI                                       |
-| 秘密の値                                                                          | `<data>/{node,hub}/secrets/<id>` (`0600`)                        | Secret API（書き込み専用）                        |
-| 言語・テーマ・ピン留め                                                            | ブラウザ `localStorage`                                          | Web UI                                            |
+| 設定                                                         | 所有者 / 保存場所                                                | 変更手段                                          |
+| :----------------------------------------------------------- | :--------------------------------------------------------------- | :------------------------------------------------ |
+| 待受アドレス・ログ・`allowed_hosts` / `allowed_origins`      | `node.toml` / `hub.toml` / `FXG_*` / CLI                         | ファイル編集 + 再起動（Web UI は読み取り専用）    |
+| ハブ接続先・ペアリングトークン                               | `node.db` (`node_pairing`) + `<data>/node/node_token` (`0600`)   | Client API / Web UI（ハブは対象ノードへプロキシ） |
+| `node.name` / `project_scan_dirs` / `tray` / `vapid_subject` | `node.db` (`node_settings`)                                      | Client API（ハブは対象ノードへプロキシ）          |
+| エージェント既定値・エイリアス・カスタム定義                 | `node.db` (`agent_settings` / `agent_aliases` / `custom_agents`) | Client API                                        |
+| 明示的な `project_key`                                       | `node.db` (`project_path_links`)                                 | Client API / Web UI                               |
+| VAPID subject（ハブ用）・Provisioner                         | `hub.db`                                                         | ハブ Web UI                                       |
+| 秘密の値                                                     | `<data>/{node,hub}/secrets/<id>` (`0600`)                        | Secret API（書き込み専用）                        |
+| 言語・テーマ・ピン留め                                       | ブラウザ `localStorage`                                          | Web UI                                            |
 
 ### 2.1 データディレクトリ構成
 
@@ -200,7 +200,7 @@ format = "text"
 no_color = false
 ```
 
-`node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray` / `vapid_subject`、
+`node.name` / `project_scan_dirs` / `tray` / `vapid_subject`、
 `[agents]`、ハブ接続先は `node.db` で、`[provisioners]` とハブ用 `vapid_subject` は
 `hub.db` で管理します。`node.toml` / `hub.toml` は起動設定のみを持ち、未知のキーを拒否するため、
 タイポが残っている場合は起動時に解析エラーになります。

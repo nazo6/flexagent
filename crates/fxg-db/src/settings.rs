@@ -53,8 +53,8 @@ pub async fn ensure_node_settings(
     sqlx::query!(
         r#"
         INSERT INTO node_settings
-            (id, name, allow_remote_pty, project_scan_dirs_json, tray, vapid_subject, revision, updated_at)
-        VALUES (1, ?, 0, '[]', NULL, NULL, 1, ?)
+            (id, name, project_scan_dirs_json, tray, vapid_subject, revision, updated_at)
+        VALUES (1, ?, '[]', NULL, NULL, 1, ?)
         ON CONFLICT(id) DO NOTHING
         "#,
         default_name,
@@ -71,7 +71,7 @@ pub async fn ensure_node_settings(
 pub async fn get_node_settings(pool: &SqlitePool) -> Result<Option<NodeSettings>, DbError> {
     let row = sqlx::query!(
         r#"
-        SELECT name, allow_remote_pty, project_scan_dirs_json, tray, vapid_subject, revision, updated_at
+        SELECT name, project_scan_dirs_json, tray, vapid_subject, revision, updated_at
           FROM node_settings
          WHERE id = 1
         "#,
@@ -82,7 +82,6 @@ pub async fn get_node_settings(pool: &SqlitePool) -> Result<Option<NodeSettings>
     let project_scan_dirs: Vec<String> = serde_json::from_str(&row.project_scan_dirs_json)?;
     Ok(Some(NodeSettings {
         name: row.name,
-        allow_remote_pty: row.allow_remote_pty != 0,
         project_scan_dirs,
         tray: row.tray.map(|value| value != 0),
         vapid_subject: row.vapid_subject,
@@ -103,7 +102,6 @@ pub async fn update_node_settings(
         r#"
         UPDATE node_settings
            SET name = ?,
-               allow_remote_pty = ?,
                project_scan_dirs_json = ?,
                tray = ?,
                vapid_subject = ?,
@@ -112,7 +110,6 @@ pub async fn update_node_settings(
          WHERE id = 1 AND revision = ?
         "#,
         request.name,
-        request.allow_remote_pty,
         scan_dirs_json,
         tray,
         request.vapid_subject,

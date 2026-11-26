@@ -126,7 +126,6 @@ Web ターミナルは `ghostty-web`（WASM 版 `libghostty-vt` + Canvas 2D）�
 - **IME 入力の不変条件**: `ghostty-web` は入力用の隠し `textarea` ではなく `contenteditable` なラッパーにフォーカスし、ラッパーで `beforeinput` を打ち消す（`textarea` からバブリングする分も止まる）上に、変換中 (`isComposing` / `keyCode === 229`) のキーをすべて破棄する。このため `GhosttyWebAdapter` がフォーカスを `textarea` へ移し、`beforeinput` を `textarea` で止めて挿入を許可したうえで、挿入されたテキストを `input`（`compositionend` が先に来る場合の取りこぼしも）から 1 回だけ送る。変換中テキストはカーソルセルに自前で描画する。
 - ウィンドウ幅がデスクトップ / モバイルの境界（`64rem`）をまたいで再マウントされても、dispose は detach のみなので PTY は作り直されません。
 - モバイル向けに仮想キーバー（`Ctrl`, `Esc`, `Tab`, 矢印キー等）を提供。
-- ノード側で `allow_remote_pty = false`（ハブ経由時）の場合は、ローカル端末（`localhost:7860` / CLI）からの利用を案内するフォールバック表示を行う。
 
 ---
 

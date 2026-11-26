@@ -114,13 +114,6 @@ UI のエラーバナー「Details」からは、このページの対応する�
 - **確認**: `details` / `params` の `session_id`。
 - **復旧**: 「Resume with history」で再開してから送信する。ワークスペースは変更されていない。
 
-## PTY_DISABLED
-
-- **原因**: ノードのセキュリティ設定でリモート PTY が無効。
-- **確認**: ノードの `allow_remote_pty` 設定。
-- **復旧**: ローカル端末で操作するか、ノードの「設定 > ノード > 一般」で
-  `allow_remote_pty` を有効にする（設定は即時反映されます）。
-
 ## COMMAND_DUPLICATE
 
 - **原因**: 同じ `command_id` のコマンドが既に処理された（冪等再送）。

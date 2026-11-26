@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT name, allow_remote_pty, project_scan_dirs_json, tray, vapid_subject, revision, updated_at\n          FROM node_settings\n         WHERE id = 1\n        ",
+  "query": "\n        SELECT name, project_scan_dirs_json, tray, vapid_subject, revision, updated_at\n          FROM node_settings\n         WHERE id = 1\n        ",
   "describe": {
     "columns": [
       {
@@ -15,19 +15,8 @@
         }
       },
       {
-        "name": "allow_remote_pty",
-        "ordinal": 1,
-        "type_info": "Integer",
-        "origin": {
-          "Table": {
-            "table": "node_settings",
-            "name": "allow_remote_pty"
-          }
-        }
-      },
-      {
         "name": "project_scan_dirs_json",
-        "ordinal": 2,
+        "ordinal": 1,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -38,7 +27,7 @@
       },
       {
         "name": "tray",
-        "ordinal": 3,
+        "ordinal": 2,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -49,7 +38,7 @@
       },
       {
         "name": "vapid_subject",
-        "ordinal": 4,
+        "ordinal": 3,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -60,7 +49,7 @@
       },
       {
         "name": "revision",
-        "ordinal": 5,
+        "ordinal": 4,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -71,7 +60,7 @@
       },
       {
         "name": "updated_at",
-        "ordinal": 6,
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -87,12 +76,11 @@
     "nullable": [
       false,
       false,
-      false,
       true,
       true,
       false,
       false
     ]
   },
-  "hash": "d9b8e2c435de38083e3aaf7ca206ecc61754aa3d2232e50713b8f1452d646d6a"
+  "hash": "472c61a7f073a9167132fce052531e5e548d62d1e50cc224015b7e842d7eaa9c"
 }

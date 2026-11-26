@@ -21,8 +21,7 @@ use crate::{CommandId, NodeId, ProjectId, SessionId};
 pub enum ErrorCode {
     /// Missing or mismatching authentication token (HTTP `401 Unauthorized`)
     Unauthorized,
-    /// `Host` / `Origin` validation failure or policy violation (HTTP `403 Forbidden`.
-    /// Distinct from `PTY_DISABLED`, which means remote PTY is disabled)
+    /// `Host` / `Origin` validation failure or policy violation (HTTP `403 Forbidden`)
     Forbidden,
     /// The target node is disconnected from the hub (returned immediately, not queued)
     NodeOffline,
@@ -47,8 +46,6 @@ pub enum ErrorCode {
     /// The agent requires authentication before a session can be created.
     /// The advertised methods are carried in [`ErrorInfo::details`].
     AuthRequired,
-    /// Remote PTY is disabled by the security policy
-    PtyDisabled,
     /// Duplicate `command_id` submission (double tap / WS resend)
     CommandDuplicate,
     /// The target was not found
@@ -115,7 +112,6 @@ impl ErrorCode {
         Self::ForkScopeUnsupported,
         Self::HistoryUnavailable,
         Self::AuthRequired,
-        Self::PtyDisabled,
         Self::CommandDuplicate,
         Self::NotFound,
         Self::Internal,
@@ -157,7 +153,6 @@ impl ErrorCode {
             Self::ForkScopeUnsupported => "FORK_SCOPE_UNSUPPORTED",
             Self::HistoryUnavailable => "HISTORY_UNAVAILABLE",
             Self::AuthRequired => "AUTH_REQUIRED",
-            Self::PtyDisabled => "PTY_DISABLED",
             Self::CommandDuplicate => "COMMAND_DUPLICATE",
             Self::NotFound => "NOT_FOUND",
             Self::Internal => "INTERNAL",
@@ -221,7 +216,6 @@ impl FromStr for ErrorCode {
             "FORK_SCOPE_UNSUPPORTED" => Ok(Self::ForkScopeUnsupported),
             "HISTORY_UNAVAILABLE" => Ok(Self::HistoryUnavailable),
             "AUTH_REQUIRED" => Ok(Self::AuthRequired),
-            "PTY_DISABLED" => Ok(Self::PtyDisabled),
             "COMMAND_DUPLICATE" => Ok(Self::CommandDuplicate),
             "NOT_FOUND" => Ok(Self::NotFound),
             "INTERNAL" => Ok(Self::Internal),
@@ -552,7 +546,7 @@ mod tests {
         let troubleshooting = std::fs::read_to_string(workspace.join("docs/troubleshooting.md"))
             .expect("read docs/troubleshooting.md");
 
-        assert_eq!(ErrorCode::ALL.len(), 37, "update ALL when adding a code");
+        assert_eq!(ErrorCode::ALL.len(), 36, "update ALL when adding a code");
         for code in ErrorCode::ALL {
             let snake = code.as_str().to_ascii_lowercase();
             let message_key = format!("error_{snake}");

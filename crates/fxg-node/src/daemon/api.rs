@@ -1151,11 +1151,6 @@ impl ClientApiBackend for DaemonState {
                 self.node_id()
             )));
         }
-        if params.remote && !self.node_settings().allow_remote_pty {
-            return Err(PtyChannelError::disabled(
-                "Remote PTY is disabled on this node by security policy",
-            ));
-        }
         let path = self
             .validate_terminal_path(&params.path)
             .await

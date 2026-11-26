@@ -218,8 +218,6 @@ pub struct HubBootstrapView {
 pub struct NodeSettings {
     /// Display name in the UI
     pub name: String,
-    /// Whether remote (through the hub) Web PTY sessions are allowed
-    pub allow_remote_pty: bool,
     /// Directories scanned by `fxg project scan` when no directory is given
     pub project_scan_dirs: Vec<String>,
     /// Tray residency on start-up (`None` = default: disabled)
@@ -238,8 +236,6 @@ pub struct NodeSettings {
 pub struct UpdateNodeSettingsRequest {
     /// Display name
     pub name: String,
-    /// Remote PTY policy
-    pub allow_remote_pty: bool,
     /// Default project scan directories
     pub project_scan_dirs: Vec<String>,
     /// Tray residency

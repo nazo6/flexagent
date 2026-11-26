@@ -16,7 +16,6 @@ async fn db() -> Db {
 fn node_settings_request(revision: u64, name: &str) -> UpdateNodeSettingsRequest {
     UpdateNodeSettingsRequest {
         name: name.to_owned(),
-        allow_remote_pty: true,
         project_scan_dirs: vec!["/src".to_owned()],
         tray: Some(false),
         vapid_subject: Some("mailto:node@example.com".to_owned()),
@@ -37,7 +36,6 @@ async fn node_settings_use_optimistic_revision() {
         .await
         .expect("update");
     assert_eq!(updated.name, "Renamed");
-    assert!(updated.allow_remote_pty);
     assert_eq!(
         updated.vapid_subject.as_deref(),
         Some("mailto:node@example.com")

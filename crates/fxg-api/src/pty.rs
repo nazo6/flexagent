@@ -24,8 +24,8 @@ pub const PTY_CHANNEL_CAPACITY: usize = 1024;
 /// PTY channel specific error (the code is a string rather than an `ErrorCode`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PtyChannelError {
-    /// Error code string (`FORBIDDEN` / `PTY_DISABLED` / `NOT_FOUND` /
-    /// `NODE_OFFLINE` / `INVALID_STATE` / `INTERNAL`)
+    /// Error code string (`FORBIDDEN` / `NOT_FOUND` / `NODE_OFFLINE` /
+    /// `INVALID_STATE` / `INTERNAL`)
     pub code: String,
     /// Human-readable message
     pub message: String,
@@ -43,11 +43,6 @@ impl PtyChannelError {
     /// `FORBIDDEN` (policy rejection / unsupported operation)
     pub fn forbidden(message: impl Into<String>) -> Self {
         Self::new("FORBIDDEN", message)
-    }
-
-    /// `PTY_DISABLED` (remote PTY disabled by node configuration)
-    pub fn disabled(message: impl Into<String>) -> Self {
-        Self::new("PTY_DISABLED", message)
     }
 
     /// `NOT_FOUND`
@@ -120,7 +115,7 @@ pub struct PtyOpenParams {
     pub rows: u16,
     /// Replace a running terminal with a new shell
     pub new: bool,
-    /// Whether the request arrives through the hub (applies `allow_remote_pty`)
+    /// Whether the request arrives through the hub (used for the audit source)
     pub remote: bool,
 }
 

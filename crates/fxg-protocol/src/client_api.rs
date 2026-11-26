@@ -1103,9 +1103,7 @@ pub enum ServerWsMessage {
 /// PWA directly to the ConPTY / Unix PTY on the node. Terminals are scoped to a
 /// workspace (`node_id` + `path`) and a client-side terminal ID: opening the
 /// same combination again attaches to the running shell instead of starting
-/// another one, while different terminal IDs are separate shells. When the node
-/// setting `allow_remote_pty = false` is in effect, `open` from remote (through
-/// the hub) is rejected.
+/// another one, while different terminal IDs are separate shells.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[specta(collect)]
@@ -1182,7 +1180,7 @@ pub enum PtyServerMessage {
     /// Error notification.
     ///
     /// `code` is not an `ErrorCode` but a string specific to the PTY channel
-    /// (e.g. `"PTY_DISABLED"` when remote PTY is disabled).
+    /// (e.g. `"FORBIDDEN"` or `"NOT_FOUND"`).
     Error {
         /// Error code string
         code: String,
@@ -1882,7 +1880,7 @@ mod tests {
 
         let server = PtyServerMessage::Error {
             code: "FORBIDDEN".into(),
-            message: "Remote PTY is disabled on this node by security policy".into(),
+            message: "The terminal is already attached".into(),
         };
         let json = serde_json::to_value(&server).unwrap();
         assert_eq!(json["op"], "error");

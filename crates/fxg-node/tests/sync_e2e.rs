@@ -1464,7 +1464,6 @@ async fn hub_relays_workspace_terminal_and_replays_output() {
     use base64::Engine as _;
     use futures_util::{SinkExt, StreamExt};
     use fxg_protocol::client_api::{PtyClientMessage, PtyServerMessage, TerminalsResponse};
-    use fxg_protocol::settings::UpdateNodeSettingsRequest;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
@@ -1512,24 +1511,6 @@ async fn hub_relays_workspace_terminal_and_replays_output() {
             .await
     })
     .await;
-
-    // Remote PTY is disabled by default; enable it for this node.
-    let snapshot = node
-        .state()
-        .node_settings_snapshot()
-        .await
-        .expect("node settings");
-    node.state()
-        .update_node_settings(&UpdateNodeSettingsRequest {
-            name: snapshot.node.name.clone(),
-            allow_remote_pty: true,
-            project_scan_dirs: snapshot.node.project_scan_dirs.clone(),
-            tray: snapshot.node.tray,
-            vapid_subject: snapshot.node.vapid_subject.clone(),
-            expected_revision: snapshot.node.revision,
-        })
-        .await
-        .expect("enable remote pty");
 
     node.state()
         .resolve_and_register_project(repo.path())

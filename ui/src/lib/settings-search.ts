@@ -90,12 +90,6 @@ export const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   {
     scope: "node",
     tab: "general",
-    label: "Allow remote Web PTY",
-    keywords: "terminal pty remote shell",
-  },
-  {
-    scope: "node",
-    tab: "general",
     label: "VAPID subject",
     keywords: "vapid push notification contact email mailto",
   },

@@ -31,7 +31,7 @@
     onregister?: (kill: () => void) => void;
   } = $props();
 
-  type Status = "disconnected" | "connecting" | "connected" | "exited" | "blocked" | "failed";
+  type Status = "disconnected" | "connecting" | "connected" | "exited" | "failed";
 
   let status = $state<Status>("disconnected");
   let statusMessage = $state<string | null>(null);
@@ -102,11 +102,7 @@
         });
         break;
       case "error":
-        if (message.code === "PTY_DISABLED" || message.code === "FORBIDDEN") {
-          status = "blocked";
-        } else {
-          status = "failed";
-        }
+        status = "failed";
         statusMessage = message.message;
         break;
     }
@@ -279,8 +275,6 @@
         {m.terminal_status_disconnected()}
       {:else if status === "exited"}
         {m.terminal_status_exited()}
-      {:else if status === "blocked"}
-        {m.terminal_status_blocked()}
       {:else}
         {m.terminal_status_error()}
       {/if}
@@ -297,18 +291,7 @@
     </Button>
   </div>
 
-  {#if status === "blocked"}
-    <div class="text-destructive flex items-start gap-2 rounded-lg border p-3 text-sm">
-      <TriangleAlertIcon class="mt-0.5 size-4 shrink-0" />
-      <p>
-        {m.terminal_blocked_notice_before()}<code>localhost:7860</code
-        >{m.terminal_blocked_notice_after()}
-        {#if statusMessage !== null}
-          <span class="text-muted-foreground block text-[13px]">{statusMessage}</span>
-        {/if}
-      </p>
-    </div>
-  {:else if status === "failed" || status === "exited" || status === "disconnected"}
+  {#if status === "failed" || status === "exited" || status === "disconnected"}
     <div class="flex items-start gap-2 rounded-lg border p-3 text-sm">
       <TriangleAlertIcon class="text-muted-foreground mt-0.5 size-4 shrink-0" />
       <p>{statusMessage ?? m.terminal_no_connection()}</p>

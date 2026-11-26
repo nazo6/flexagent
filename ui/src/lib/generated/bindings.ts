@@ -818,10 +818,7 @@ RawJson;
 export type ErrorCode =
 /**  Missing or mismatching authentication token (HTTP `401 Unauthorized`) */
 "UNAUTHORIZED" |
-/**
- *  `Host` / `Origin` validation failure or policy violation (HTTP `403 Forbidden`.
- *  Distinct from `PTY_DISABLED`, which means remote PTY is disabled)
- */
+/**  `Host` / `Origin` validation failure or policy violation (HTTP `403 Forbidden`) */
 "FORBIDDEN" |
 /**  The target node is disconnected from the hub (returned immediately, not queued) */
 "NODE_OFFLINE" |
@@ -854,8 +851,6 @@ export type ErrorCode =
  *  The advertised methods are carried in [`ErrorInfo::details`].
  */
 "AUTH_REQUIRED" |
-/**  Remote PTY is disabled by the security policy */
-"PTY_DISABLED" |
 /**  Duplicate `command_id` submission (double tap / WS resend) */
 "COMMAND_DUPLICATE" |
 /**  The target was not found */
@@ -1255,8 +1250,6 @@ export type NodeProjectReport = {
 export type NodeSettings = {
 	/**  Display name in the UI */
 	name: string,
-	/**  Whether remote (through the hub) Web PTY sessions are allowed */
-	allow_remote_pty: boolean,
 	/**  Directories scanned by `fxg project scan` when no directory is given */
 	project_scan_dirs: string[],
 	/**  Tray residency on start-up (`None` = default: disabled) */
@@ -1684,9 +1677,7 @@ export type PruneWorktreesRequest = {
  *  PWA directly to the ConPTY / Unix PTY on the node. Terminals are scoped to a
  *  workspace (`node_id` + `path`) and a client-side terminal ID: opening the
  *  same combination again attaches to the running shell instead of starting
- *  another one, while different terminal IDs are separate shells. When the node
- *  setting `allow_remote_pty = false` is in effect, `open` from remote (through
- *  the hub) is rejected.
+ *  another one, while different terminal IDs are separate shells.
  */
 export type PtyClientMessage =
 /**  Open the terminal of a workspace (idempotent: attaches when it is running). */
@@ -1750,7 +1741,7 @@ exit_code: number | null } |
  *  Error notification.
  *
  *  `code` is not an `ErrorCode` but a string specific to the PTY channel
- *  (e.g. `"PTY_DISABLED"` when remote PTY is disabled).
+ *  (e.g. `"FORBIDDEN"` or `"NOT_FOUND"`).
  */
 { op: "error";
 /**  Error code string */
@@ -2939,8 +2930,6 @@ export type UpdateHubSettingsRequest = {
 export type UpdateNodeSettingsRequest = {
 	/**  Display name */
 	name: string,
-	/**  Remote PTY policy */
-	allow_remote_pty: boolean,
 	/**  Default project scan directories */
 	project_scan_dirs: string[],
 	/**  Tray residency */

@@ -45,8 +45,6 @@ export function errorCodeMessage(
       return m.error_resume_required();
     case "AUTH_REQUIRED":
       return m.error_auth_required({ agent: params?.agent_id ?? "the agent" });
-    case "PTY_DISABLED":
-      return m.error_pty_disabled();
     case "COMMAND_DUPLICATE":
       return m.error_command_duplicate();
     case "NOT_FOUND":

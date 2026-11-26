@@ -36,7 +36,7 @@ use crate::{CommandId, NodeId, ProjectId, SecretId, SessionId};
 /// The node and the hub must come from the same `fxg` release. A node
 /// with a mismatching protocol version is rejected at `NodeHello`; backward
 /// compatibility shims are intentionally not provided.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 /// Synchronization state of a session held by the node (reported in `NodeHello`).
 ///
 /// The hub compares it with `last_node_seq` in its own DB and returns
@@ -695,10 +695,7 @@ pub enum NodeToHubMsg {
         exit_code: Option<i32>,
     },
     /// Failure notification for starting or operating a PTY (the error code is a
-    /// string, e.g. `PTY_DISABLED`).
-    ///
-    /// When the node setting `allow_remote_pty = false` is in effect, a remote
-    /// `PtySpawn` gets `PTY_DISABLED` (design: docs/01 §7.4).
+    /// string, e.g. `FORBIDDEN` or `NOT_FOUND`).
     PtyError {
         /// PTY ID
         pty_id: String,

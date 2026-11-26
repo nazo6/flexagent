@@ -34,7 +34,6 @@
   // Node settings form
   let nodeForm = $state({
     name: "",
-    allow_remote_pty: false,
     project_scan_dirs: "",
     tray: "" as "" | "true" | "false",
     vapid_subject: "",
@@ -115,7 +114,6 @@
     if (!nodeSnapshot) return;
     nodeForm = {
       name: nodeSnapshot.node.name,
-      allow_remote_pty: nodeSnapshot.node.allow_remote_pty,
       project_scan_dirs: nodeSnapshot.node.project_scan_dirs.join("\n"),
       tray: nodeSnapshot.node.tray === null ? "" : nodeSnapshot.node.tray ? "true" : "false",
       vapid_subject: nodeSnapshot.node.vapid_subject ?? "",
@@ -138,7 +136,6 @@
     }
     const request = {
       name: nodeForm.name.trim(),
-      allow_remote_pty: nodeForm.allow_remote_pty,
       project_scan_dirs: nodeForm.project_scan_dirs
         .split("\n")
         .map((line) => line.trim())
@@ -457,10 +454,6 @@
               </Select.Content>
             </Select.Root>
           </div>
-          <label class="flex items-center gap-2 text-sm">
-            <input type="checkbox" bind:checked={nodeForm.allow_remote_pty} />
-            Allow remote Web PTY
-          </label>
           <div class="grid gap-1.5 sm:col-span-2">
             <Label for="node-vapid-subject">VAPID subject</Label>
             <Input

@@ -51,9 +51,7 @@ impl ApiError {
     pub fn from_code(code: ErrorCode, message: impl Into<String>) -> Self {
         let status = match code {
             ErrorCode::Unauthorized => StatusCode::UNAUTHORIZED,
-            ErrorCode::Forbidden | ErrorCode::PtyDisabled | ErrorCode::PermissionDenied => {
-                StatusCode::FORBIDDEN
-            }
+            ErrorCode::Forbidden | ErrorCode::PermissionDenied => StatusCode::FORBIDDEN,
             ErrorCode::NodeOffline
             | ErrorCode::SyncBacklog
             | ErrorCode::VersionMismatch
