@@ -20,6 +20,8 @@ pub struct ApiError {
     pub code: ErrorCode,
     /// English human-readable fallback message
     pub message: String,
+    /// Parameters for message interpolation (path, agent_id, exit_code, ...)
+    pub params: std::collections::BTreeMap<String, String>,
     /// Technical details for the expandable "details" section
     pub details: Option<Box<RawJson>>,
     /// Whether retrying may succeed without a state change
@@ -30,6 +32,8 @@ pub struct ApiError {
     pub request_id: Option<Box<str>>,
     /// What happened to the user's data
     pub data_safety: Option<DataSafety>,
+    /// Link to the troubleshooting documentation anchor
+    pub docs: Option<String>,
 }
 
 impl ApiError {
@@ -39,11 +43,13 @@ impl ApiError {
             status,
             code,
             message: message.into(),
+            params: std::collections::BTreeMap::new(),
             details: None,
             retryable: code.is_retryable(),
             recovery: Vec::new(),
             request_id: None,
             data_safety: None,
+            docs: None,
         }
     }
 
@@ -94,6 +100,18 @@ impl ApiError {
         self
     }
 
+    /// Adds an interpolation parameter for the localized message.
+    pub fn with_param(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.params.insert(key.into(), value.into());
+        self
+    }
+
+    /// Links the error to its troubleshooting anchor.
+    pub fn with_docs(mut self, docs: impl Into<String>) -> Self {
+        self.docs = Some(docs.into());
+        self
+    }
+
     /// Adds a recovery action.
     pub fn with_recovery(mut self, action: RecoveryAction) -> Self {
         self.recovery.push(action);
@@ -114,12 +132,25 @@ impl ApiError {
 
     /// Builds from a structured error returned by a node.
     pub fn from_info(info: ErrorInfo) -> Self {
-        let mut api = Self::from_code(info.code, info.message);
-        api.details = info.details.map(Box::new);
-        api.retryable = info.retryable;
-        api.recovery = info.recovery;
-        api.request_id = info.request_id.map(String::into_boxed_str);
-        api.data_safety = info.data_safety;
+        let ErrorInfo {
+            code,
+            message,
+            params,
+            details,
+            retryable,
+            recovery,
+            request_id,
+            data_safety,
+            docs,
+        } = info;
+        let mut api = Self::from_code(code, message);
+        api.params = params;
+        api.details = details.map(Box::new);
+        api.retryable = retryable;
+        api.recovery = recovery;
+        api.request_id = request_id.map(String::into_boxed_str);
+        api.data_safety = data_safety;
+        api.docs = docs;
         api
     }
 
@@ -140,7 +171,7 @@ impl ApiError {
         ErrorInfo {
             code: self.code,
             message: self.message,
-            params: std::collections::BTreeMap::new(),
+            params: self.params,
             details: self.details.map(|details| *details),
             retryable: self.retryable,
             recovery: self.recovery,
@@ -149,7 +180,7 @@ impl ApiError {
                 .map(String::from)
                 .or_else(request_context::current_request_id),
             data_safety: self.data_safety,
-            docs: None,
+            docs: self.docs,
         }
     }
 
@@ -208,5 +239,26 @@ impl IntoResponse for ApiError {
         let status = self.status;
         let info = self.into_info();
         (status, Json(ApiErrorResponse { error: info })).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_info_roundtrip_preserves_all_error_fields() {
+        let mut info = ErrorInfo::new(ErrorCode::AuthRequired, "authentication required")
+            .with_param("agent_id", "agy")
+            .with_details(serde_json::json!({ "methods": ["terminal"] }))
+            .with_recovery(RecoveryAction::LoginAgent {
+                agent_id: "agy".to_owned(),
+            })
+            .with_data_safety(DataSafety::Preserved);
+        info.docs = Some("AUTH_REQUIRED".to_owned());
+
+        let restored = ApiError::from_info(info.clone()).into_info();
+
+        assert_eq!(restored, info);
     }
 }

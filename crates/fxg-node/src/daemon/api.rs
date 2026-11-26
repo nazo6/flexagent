@@ -42,7 +42,7 @@ const PTY_CHANNEL_CAPACITY: usize = 1024;
 
 /// Converts a node error into an API error.
 fn api_error(err: NodeError) -> ApiError {
-    ApiError::from_code(err.error_code(), err.to_string())
+    ApiError::from_info(err.info())
 }
 
 /// Converts an OpenCode management failure into an API error.
