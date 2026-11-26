@@ -1,9 +1,13 @@
 //! Hub REST API client (for the CLI).
 //!
-//! Operations that only the hub provides —
-//! starting an ephemeral VM provisioner (`fxg session new --provisioner`) — call the
-//! hub API named by the local node's pairing (`node.db`) directly (design:
-//! docs/05 §1.1; unavailable while the hub is stopped).
+//! Two resolutions are kept apart on purpose:
+//!
+//! - **Local hub**: `fxg hub ...` manages the hub process **on this host**.
+//!   The base comes only from `<state>/hub/hub.addr`, never from the node's
+//!   pairing (which may point at a remote hub).
+//! - **Connected hub**: client operations that target the hub a node is paired
+//!   with (`fxg session new --provisioner`). The base is resolved with
+//!   `--hub` → `hub.addr` → the node's pairing → `hub.toml`.
 //!
 //! Authentication uses the Bearer token from the hub's
 //! `<data>/hub/auth_token`. When the CLI runs on the same host as the
@@ -22,20 +26,38 @@ pub struct HubClient {
 }
 
 impl HubClient {
-    /// Build a client for the hub reachable from this host.
+    /// Build a client for the hub process **on this host**.
+    ///
+    /// `fxg hub ...` commands use this. The address comes from
+    /// `<state>/hub/hub.addr`; the node's pairing is deliberately ignored.
+    /// The token is read from the same host without creating one (a running
+    /// hub always wrote it at startup).
+    pub async fn local(env: EnvLookup<'_>) -> Result<Self> {
+        let base = local_hub_base(env)?;
+        let token = fxg_api::auth::load_token(&Paths::resolve(env, Role::Hub).auth_token_path())
+            .context("failed to load the hub's auth_token")?;
+        Ok(Self::new(base, token))
+    }
+
+    /// Build a client for the hub a client operation explicitly targets
+    /// (for example `fxg session new --provisioner`).
     ///
     /// Resolution: `hub` → `hub.addr` → the local node's pairing →
     /// `hub.toml` `listen_addr`.
-    pub async fn local(env: EnvLookup<'_>, hub: Option<&str>) -> Result<Self> {
-        let base = resolve_hub_base(env, hub).await?;
+    pub async fn connected(env: EnvLookup<'_>, hub: Option<&str>) -> Result<Self> {
+        let base = resolve_connected_hub_base(env, hub).await?;
         let token =
             fxg_api::auth::load_or_create_token(&Paths::resolve(env, Role::Hub).auth_token_path())
-                .context("failed to load the hub's auth_token")?;
-        Ok(Self {
+                .context("failed to load the hub's auth_token (run the CLI on the hub host)")?;
+        Ok(Self::new(base, token))
+    }
+
+    fn new(base: String, token: String) -> Self {
+        Self {
             base,
             token,
             http: reqwest::Client::new(),
-        })
+        }
     }
 
     /// Base URL of the connected hub (`http://host:port`).
@@ -140,14 +162,54 @@ pub(crate) fn normalize_listen(addr: &str) -> String {
     }
 }
 
-/// Base URL of the hub reachable from this host.
+/// Base URL of the hub process on this host.
+///
+/// `hub.addr` is written when the hub starts and removed when it shuts down, so
+/// its presence is the liveness signal for local `fxg hub ...` commands.
+pub fn local_hub_base(env: EnvLookup<'_>) -> Result<String> {
+    match read_local_hub_addr(env) {
+        Some(addr) => Ok(format!("http://{addr}")),
+        None => bail!("the local hub is not running; start it with `fxg hub start --detach`"),
+    }
+}
+
+/// Reads the bound address of the local hub (`<state>/hub/hub.addr`).
+///
+/// Returns `None` when the hub is not running or the file is empty.
+pub fn read_local_hub_addr(env: EnvLookup<'_>) -> Option<String> {
+    let addr_path = Paths::resolve(env, Role::Hub).addr_path();
+    let raw = std::fs::read_to_string(addr_path).ok()?;
+    let addr = raw.trim();
+    if addr.is_empty() {
+        return None;
+    }
+    Some(normalize_listen(addr))
+}
+
+/// Base URL the local hub is configured to listen on (`hub.toml`).
+///
+/// Used by `fxg hub status` when the hub is stopped; it is not a connection
+/// target (the hub's presence is detected through `hub.addr`).
+pub fn configured_hub_base(env: EnvLookup<'_>) -> Result<String> {
+    let config = HubConfig::load(env).context("failed to load hub.toml")?;
+    Ok(format!(
+        "http://{}",
+        normalize_listen(config.resolved_listen_addr())
+    ))
+}
+
+/// Base URL of the hub a client operation targets (possibly remote).
 ///
 /// Resolution order:
 /// 1. `hub` (a `--hub` CLI override)
 /// 2. `hub.addr` (a hub running on this host)
 /// 3. the local node's pairing (`node.db`, read through the client API)
 /// 4. `hub.toml` `listen_addr`
-pub async fn resolve_hub_base(env: EnvLookup<'_>, hub: Option<&str>) -> Result<String> {
+///
+/// This is for hub-targeting client operations such as
+/// `fxg session new --provisioner`; `fxg hub ...` process commands must use
+/// [`local_hub_base`] instead.
+pub async fn resolve_connected_hub_base(env: EnvLookup<'_>, hub: Option<&str>) -> Result<String> {
     if let Some(url) = hub.map(str::trim).filter(|url| !url.is_empty()) {
         return hub_http_url(url);
     }
@@ -191,6 +253,32 @@ pub fn hub_http_url(server_url: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn portable_env(home: &std::path::Path) -> impl Fn(&str) -> Option<String> + '_ {
+        move |key: &str| {
+            (key == fxg_protocol::paths::ENV_FXG_HOME).then(|| home.display().to_string())
+        }
+    }
+
+    #[test]
+    fn local_hub_base_uses_only_hub_addr() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let home = dir.path().join("home");
+        let env = portable_env(&home);
+        let paths = Paths::portable(&home, Role::Hub);
+
+        assert!(read_local_hub_addr(&env).is_none());
+        assert!(local_hub_base(&env).is_err());
+
+        std::fs::create_dir_all(paths.state_dir()).expect("mkdir state");
+        std::fs::write(paths.addr_path(), "0.0.0.0:8080\n").expect("write addr");
+
+        assert_eq!(read_local_hub_addr(&env).as_deref(), Some("127.0.0.1:8080"));
+        assert_eq!(
+            local_hub_base(&env).expect("local base"),
+            "http://127.0.0.1:8080"
+        );
+    }
 
     #[test]
     fn normalize_listen_replaces_wildcard_hosts_with_loopback() {

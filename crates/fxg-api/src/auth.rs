@@ -51,12 +51,26 @@ pub fn hash_token(token: &str) -> String {
     hash
 }
 
+/// Loads a token from a file (a missing or empty file is an error).
+pub fn load_token(path: &Path) -> std::io::Result<String> {
+    let token = std::fs::read_to_string(path)?;
+    let token = token.trim();
+    if token.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "the token file is empty",
+        ));
+    }
+    Ok(token.to_owned())
+}
+
 /// Loads a token from a file (generating and saving one if absent).
 pub fn load_or_create_token(path: &Path) -> std::io::Result<String> {
-    match std::fs::read_to_string(path) {
-        Ok(token) if !token.trim().is_empty() => return Ok(token.trim().to_owned()),
-        Ok(_) => { /* regenerate an empty file */ }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+    match load_token(path) {
+        Ok(token) => return Ok(token),
+        Err(err)
+            if err.kind() == std::io::ErrorKind::NotFound
+                || err.kind() == std::io::ErrorKind::InvalidData => {}
         Err(err) => return Err(err),
     }
     let token = generate_token();
@@ -114,6 +128,23 @@ mod tests {
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
         assert_eq!(hash_token("").len(), 64);
+    }
+
+    #[test]
+    fn load_token_rejects_missing_and_empty_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("auth_token");
+        assert_eq!(
+            load_token(&path).expect_err("missing").kind(),
+            std::io::ErrorKind::NotFound
+        );
+        std::fs::write(&path, "  \n").expect("write empty");
+        assert_eq!(
+            load_token(&path).expect_err("empty").kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        std::fs::write(&path, " abc \n").expect("write token");
+        assert_eq!(load_token(&path).expect("load"), "abc");
     }
 
     #[test]

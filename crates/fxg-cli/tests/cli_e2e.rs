@@ -225,6 +225,64 @@ async fn cli_reports_missing_node() {
     );
 }
 
+#[tokio::test]
+async fn hub_status_ignores_the_node_pairing() {
+    use fxg_protocol::paths::{Paths, Role};
+
+    let mut env = TestEnv::new();
+    // Pair the node with a hub that is not on this host. `fxg hub ...` must
+    // keep targeting the local hub only.
+    {
+        let node = Paths::portable(&env.home, Role::Node);
+        let db = fxg_db::Db::open(&node.db_path(), Role::Node)
+            .await
+            .expect("open node db");
+        let pairing = db.ensure_node_pairing().await.expect("ensure pairing");
+        db.set_node_pairing_hub_url(
+            Some("ws://192.0.2.10:8080/api/v1/node/ws"),
+            pairing.revision,
+        )
+        .await
+        .expect("set pairing");
+    }
+    env.start_node().await;
+
+    let output = env.run(&["hub", "status", "--json"], None);
+    let json: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("valid json");
+    assert_eq!(json["running"], false);
+    let address = json["address"].as_str().expect("address");
+    assert!(
+        address.starts_with("http://127.0.0.1:"),
+        "hub status must show the locally configured loopback address: {json}"
+    );
+    assert!(
+        !address.contains("192.0.2.10"),
+        "hub status must not report the paired remote hub: {json}"
+    );
+    assert!(
+        !Paths::portable(&env.home, Role::Hub)
+            .auth_token_path()
+            .exists(),
+        "hub status must not create the hub auth_token"
+    );
+
+    env.stop_node();
+}
+
+#[tokio::test]
+async fn node_status_uses_the_configured_address_when_stopped() {
+    let env = TestEnv::new();
+
+    let output = env.run(&["node", "status", "--json"], None);
+    let json: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("valid json");
+    assert_eq!(json["running"], false);
+    let address = json["address"].as_str().expect("address");
+    assert!(
+        address.starts_with("http://127.0.0.1:"),
+        "node status must show the configured loopback address: {json}"
+    );
+}
+
 /// Verify that the Phase 3 session commands (`session
 /// show|prompt|stop|kill|resume|fork` / `attach`) return errors
 /// correctly through HTTP.

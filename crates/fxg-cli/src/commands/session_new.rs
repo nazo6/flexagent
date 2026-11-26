@@ -151,7 +151,7 @@ async fn run_with_provisioner(
     cwd: &Path,
     env: fxg_protocol::config::EnvLookup<'_>,
 ) -> Result<()> {
-    let hub = crate::hub_api::HubClient::local(env, args.hub.as_deref()).await?;
+    let hub = crate::hub_api::HubClient::connected(env, args.hub.as_deref()).await?;
 
     // Resolve the logical project of the current directory (the Git remote is
     // the source of truth)

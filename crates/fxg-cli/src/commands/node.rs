@@ -353,6 +353,7 @@ impl usage::RunAsync for NodeStatusArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
+        let env = fxg_protocol::config::process_env;
         let service_installed = crate::service::is_installed(ServiceTarget::Node);
         let running = match NodeClient::connect().await {
             Ok(mut client) => {
@@ -363,13 +364,15 @@ impl usage::RunAsync for NodeStatusArgs {
         };
         let address = match running.as_ref() {
             Some((address, _)) => Some(address.clone()),
-            None => match crate::client::local_node_base(&fxg_protocol::config::process_env) {
-                Ok(address) => Some(address),
-                Err(err) => {
-                    tracing::debug!("failed to resolve the local node address: {err}");
-                    None
-                }
-            },
+            None => crate::client::read_local_node_addr(&env)
+                .map(|addr| format!("http://{addr}"))
+                .or_else(|| match crate::client::configured_node_base(&env) {
+                    Ok(address) => Some(address),
+                    Err(err) => {
+                        tracing::debug!("failed to resolve the configured node address: {err}");
+                        None
+                    }
+                }),
         };
 
         if self.json {

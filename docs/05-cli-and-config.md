@@ -29,12 +29,16 @@ CLI のコマンド・引数の正は `fxg --help` / `fxg <noun> --help` と
 
 - `fxg`: サブコマンドを指定せずに実行するとヘルプを表示する（プロセスは起動しない）。
 - `fxg node web` / `fxg hub web`: トークン付き URL を表示し、既定ブラウザで
-  それぞれの Web UI を開く。
+  それぞれの Web UI を開く。`fxg hub web` はその PC のハブだけを開く。
 - `fxg session ...`: セッションの作成・一覧・表示・プロンプト・停止・再開・
   Fork・Import・Archive・Delete。
 - `fxg node ...`: ローカルノードの起動・停止・状態・ペアリング・Web
-  アクセストークン。
+  アクセストークン。ノードの接続先は `<state>/node/node.addr` だけで解決し、
+  設定ファイルのアドレスは停止時の表示にだけ使う。
 - `fxg hub ...`: ハブの起動・停止・状態・ノードペアリングトークン。
+  これらは**その PC のハブプロセスだけ**を対象にし、ノードがペアリングして
+  いるハブ（リモートを含む）は操作しない。接続先ハブの解決は
+  `fxg session new --provisioner` などハブへ直接接続する操作に限る。
 - `fxg service ...`: OS ログイン時の自動起動登録。
 - `fxg logs` / `fxg doctor`: ログ・自己診断。
 - `fxg agents login|logout`: ACP エージェントの認証。

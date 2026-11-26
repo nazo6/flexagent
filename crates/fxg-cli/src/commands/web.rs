@@ -32,17 +32,16 @@ impl usage::RunAsync for HubWebArgs {
 
     async fn run_async(self) -> Self::Output {
         let env = fxg_protocol::config::process_env;
-        let base = crate::hub_api::resolve_hub_base(&env, None).await?;
+        // The hub process on this host only; a paired remote hub is not opened
+        // implicitly and has a different access token.
+        let base = crate::hub_api::local_hub_base(&env)?;
         let paths = fxg_protocol::paths::Paths::resolve(&env, fxg_protocol::paths::Role::Hub);
-        // Only attach the local token when the hub runs on this host: a remote
-        // hub (resolved through the node's pairing) has a different token.
-        let url = if paths.addr_path().is_file()
-            && let Ok(token) = std::fs::read_to_string(paths.auth_token_path())
-            && !token.trim().is_empty()
-        {
-            format!("{base}/?token={}", token.trim())
-        } else {
-            base
+        let url = match fxg_api::auth::load_token(&paths.auth_token_path()) {
+            Ok(token) => format!("{base}/?token={token}"),
+            Err(err) => {
+                tracing::debug!("failed to load the hub's auth_token: {err}");
+                base
+            }
         };
         open_web_ui("hub", &url);
         Ok(())

@@ -130,7 +130,7 @@ impl usage::RunAsync for HubStartArgs {
         let config_file =
             fxg_protocol::config::HubConfig::load(&env).context("failed to load hub.toml")?;
 
-        if let Ok(client) = HubClient::local(&fxg_protocol::config::process_env, None).await
+        if let Ok(client) = HubClient::local(&fxg_protocol::config::process_env).await
             && client.system_info().await.is_ok()
         {
             println!("hub is already running");
@@ -274,7 +274,12 @@ impl usage::RunAsync for HubStopArgs {
             println!("hub stopped (service)");
             return Ok(());
         }
-        let client = HubClient::local(&fxg_protocol::config::process_env, None).await?;
+        let env = fxg_protocol::config::process_env;
+        if crate::hub_api::read_local_hub_addr(&env).is_none() {
+            println!("hub is not running");
+            return Ok(());
+        }
+        let client = HubClient::local(&env).await?;
         match client.shutdown().await {
             Ok(()) => println!("hub stopped"),
             Err(_) => println!("hub is not running"),
@@ -296,10 +301,11 @@ impl usage::RunAsync for HubRestartArgs {
             println!("hub restarted (service)");
             return Ok(());
         }
-        if let Ok(client) = HubClient::local(&fxg_protocol::config::process_env, None).await {
+        let env = fxg_protocol::config::process_env;
+        if crate::hub_api::read_local_hub_addr(&env).is_some() {
+            let client = HubClient::local(&env).await?;
             fxg_protocol::discard_with!(client.shutdown().await, "stop the hub before restarting");
         }
-        let env = fxg_protocol::config::process_env;
         let config_file =
             fxg_protocol::config::HubConfig::load(&env).context("failed to load hub.toml")?;
         let listen_addr = config_file.resolved_listen_addr().to_owned();
@@ -336,22 +342,41 @@ impl usage::RunAsync for HubStatusArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
+        let env = fxg_protocol::config::process_env;
         let service_installed = crate::service::is_installed(ServiceTarget::Hub);
-        let client = HubClient::local(&fxg_protocol::config::process_env, None).await?;
-        let address = client.base().to_owned();
-        let info = match client.system_info().await {
-            Ok(info) => Some(info),
-            Err(err) => {
-                tracing::debug!("hub system info unavailable: {err}");
-                None
-            }
+        let client = match crate::hub_api::read_local_hub_addr(&env) {
+            Some(_) => Some(HubClient::local(&env).await?),
+            None => None,
         };
-        let nodes = match client.nodes().await {
-            Ok(nodes) => Some(nodes),
-            Err(err) => {
-                tracing::debug!("hub nodes unavailable: {err}");
-                None
-            }
+        let address = client
+            .as_ref()
+            .map(|client| client.base().to_owned())
+            .or_else(|| match crate::hub_api::configured_hub_base(&env) {
+                Ok(address) => Some(address),
+                Err(err) => {
+                    tracing::debug!("failed to resolve the configured hub address: {err}");
+                    None
+                }
+            });
+        let info = match &client {
+            Some(client) => match client.system_info().await {
+                Ok(info) => Some(info),
+                Err(err) => {
+                    tracing::debug!("hub system info unavailable: {err}");
+                    None
+                }
+            },
+            None => None,
+        };
+        let nodes = match &client {
+            Some(client) => match client.nodes().await {
+                Ok(nodes) => Some(nodes),
+                Err(err) => {
+                    tracing::debug!("hub nodes unavailable: {err}");
+                    None
+                }
+            },
+            None => None,
         };
 
         if self.json {
@@ -360,7 +385,7 @@ impl usage::RunAsync for HubStatusArgs {
                 "running": info.is_some(),
                 "address": address,
                 "info": info,
-                "nodes": nodes.map(|nodes| nodes.nodes),
+                "nodes": nodes.as_ref().map(|nodes| &nodes.nodes),
             });
             println!("{}", serde_json::to_string_pretty(&value)?);
             return Ok(());
@@ -376,11 +401,12 @@ impl usage::RunAsync for HubStatusArgs {
                 },
             )
             .field("running:", if info.is_some() { "yes" } else { "no" })
-            .field("address:", address);
-        if let Some(info) = info {
-            list = list.field("version:", info.version).field(
+            .field("address:", address.as_deref().unwrap_or("-"));
+        if let Some(info) = &info {
+            list = list.field("version:", info.version.clone()).field(
                 "nodes:",
                 nodes
+                    .as_ref()
                     .map(|nodes| nodes.nodes.len())
                     .unwrap_or(0)
                     .to_string(),

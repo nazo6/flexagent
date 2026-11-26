@@ -50,19 +50,37 @@ pub struct NodeClient {
     node_id: String,
 }
 
-/// Base URL of the local node (`node.addr`, then `node.toml` `listen_addr`, then
-/// the default loopback address).
+/// Base URL of the local node (`node.addr` only).
+///
+/// `node.addr` is written when the node starts and removed when it shuts down,
+/// so its presence is the liveness signal for commands that connect to the node.
 ///
 /// A wildcard bind address is replaced with loopback: the CLI always talks to the
 /// process on this machine, never through the LAN address it may also listen on.
 pub(crate) fn local_node_base(env: EnvLookup<'_>) -> Result<String> {
-    let paths = Paths::resolve(env, Role::Node);
-    if let Ok(addr) = std::fs::read_to_string(paths.addr_path()) {
-        let addr = addr.trim();
-        if !addr.is_empty() {
-            return Ok(format!("http://{}", crate::hub_api::normalize_listen(addr)));
-        }
+    match read_local_node_addr(env) {
+        Some(addr) => Ok(format!("http://{addr}")),
+        None => bail!("the local node is not running; start it with `fxg node start --detach`"),
     }
+}
+
+/// Reads the bound address of the local node (`<state>/node/node.addr`).
+///
+/// Returns `None` when the node is not running or the file is empty.
+pub(crate) fn read_local_node_addr(env: EnvLookup<'_>) -> Option<String> {
+    let addr = std::fs::read_to_string(Paths::resolve(env, Role::Node).addr_path()).ok()?;
+    let addr = addr.trim();
+    if addr.is_empty() {
+        return None;
+    }
+    Some(crate::hub_api::normalize_listen(addr))
+}
+
+/// Base URL the local node is configured to listen on (`node.toml`).
+///
+/// Used by `fxg node status` when the node is stopped (it is not a connection
+/// target; the node's presence is detected through `node.addr`).
+pub(crate) fn configured_node_base(env: EnvLookup<'_>) -> Result<String> {
     let config = NodeConfig::load(env).context("failed to load node.toml")?;
     Ok(format!(
         "http://{}",
