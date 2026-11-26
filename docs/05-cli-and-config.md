@@ -35,7 +35,8 @@ CLI のコマンド・引数の正は `fxg --help` / `fxg <noun> --help` と
 - `fxg node ...`: ローカルノードの起動・停止・状態・ペアリング・Web
   アクセストークン。ノードの接続先は `<state>/node/node.addr` だけで解決し、
   設定ファイルのアドレスは停止時の表示にだけ使う。
-- `fxg hub ...`: ハブの起動・停止・状態・ノードペアリングトークン。
+- `fxg hub ...`: ハブの起動・停止・状態・Web アクセストークン・
+  ノードペアリングトークン。
   これらは**その PC のハブプロセスだけ**を対象にし、ノードがペアリングして
   いるハブ（リモートを含む）は操作しない。接続先ハブの解決は
   `fxg session new --provisioner` などハブへ直接接続する操作に限る。
@@ -139,18 +140,18 @@ Linux では XDG にログ用のクラスがないため、`<logs>` は `<state>
 <cache>/node/registry.json  # ACP Registry キャッシュ
 ```
 
-| ファイル / ディレクトリ      | 用途                                                                           | 所有者・設定方法                                             |
-| :--------------------------- | :----------------------------------------------------------------------------- | :----------------------------------------------------------- |
-| `node.toml` / `hub.toml`     | 待受アドレス、ログ、`allowed_hosts` など起動時だけ必要な設定                   | 手動編集 + 再起動                                            |
-| `<data>/<role>/auth_token`   | Web UI / CLI が **そのロールの** API にログインするための Web アクセストークン | 初回起動時に自動生成。`fxg node access-token show`（ノード） |
-| `<data>/node/node_token`     | ノードが hub に接続するための **ノードペアリングトークン**                     | `fxg hub pairing-token issue` → Web UI / `fxg node pair`     |
-| `<data>/<role>/<role>.db`    | 実行時設定、セッション、監査ログ、プロジェクト投影                             | Client API / Web UI                                          |
-| `<state>/<role>/<role>.addr` | 起動中プロセスの実際の待受アドレス                                             | 実行時のみ。削除しても再生成される                           |
-| `<data>/<role>/vapid.json`   | Web Push の VAPID 鍵ペア                                                       | 各ロールが初回起動時に生成                                   |
-| `<data>/<role>/secrets/<id>` | エージェント・Git などの秘密値（書き込み専用、`0600`）                         | Secret API                                                   |
-| `<data>/node/worktrees/`     | fxg が作成した Git Worktree                                                    | `fxg session new -w` / `fork -w`                             |
-| `<cache>/node/`              | ACP Registry のキャッシュ                                                      | 自動                                                         |
-| `<logs>/<role>/<role>.log`   | プロセスのログ                                                                 | 自動                                                         |
+| ファイル / ディレクトリ      | 用途                                                                           | 所有者・設定方法                                                                                  |
+| :--------------------------- | :----------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------ |
+| `node.toml` / `hub.toml`     | 待受アドレス、ログ、`allowed_hosts` など起動時だけ必要な設定                   | 手動編集 + 再起動                                                                                 |
+| `<data>/<role>/auth_token`   | Web UI / CLI が **そのロールの** API にログインするための Web アクセストークン | 初回起動時に自動生成。`fxg node access-token show`（ノード）/ `fxg hub access-token show`（ハブ） |
+| `<data>/node/node_token`     | ノードが hub に接続するための **ノードペアリングトークン**                     | `fxg hub pairing-token issue` → Web UI / `fxg node pair`                                          |
+| `<data>/<role>/<role>.db`    | 実行時設定、セッション、監査ログ、プロジェクト投影                             | Client API / Web UI                                                                               |
+| `<state>/<role>/<role>.addr` | 起動中プロセスの実際の待受アドレス                                             | 実行時のみ。削除しても再生成される                                                                |
+| `<data>/<role>/vapid.json`   | Web Push の VAPID 鍵ペア                                                       | 各ロールが初回起動時に生成                                                                        |
+| `<data>/<role>/secrets/<id>` | エージェント・Git などの秘密値（書き込み専用、`0600`）                         | Secret API                                                                                        |
+| `<data>/node/worktrees/`     | fxg が作成した Git Worktree                                                    | `fxg session new -w` / `fork -w`                                                                  |
+| `<cache>/node/`              | ACP Registry のキャッシュ                                                      | 自動                                                                                              |
+| `<logs>/<role>/<role>.log`   | プロセスのログ                                                                 | 自動                                                                                              |
 
 ### 2.1.1 どのトークンを使うか
 
@@ -159,7 +160,7 @@ Linux では XDG にログ用のクラスがないため、`<logs>` は `<state>
 
 | 呼び名                       | ファイル / 環境変数          | 何のため                                                            | 入手・設定方法                                                                                                                        |
 | :--------------------------- | :--------------------------- | :------------------------------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------ |
-| **Web アクセストークン**     | `<data>/<role>/auth_token`   | ブラウザや CLI が **そのロールの** hub / node の API にログインする | 自動生成。ノードは `fxg node access-token show`、hub は hub ホストの `<data>/hub/auth_token`                                          |
+| **Web アクセストークン**     | `<data>/<role>/auth_token`   | ブラウザや CLI が **そのロールの** hub / node の API にログインする | 自動生成。`fxg node access-token show` / `fxg hub access-token show`（それぞれのホスト上）                                            |
 | **ノードペアリングトークン** | `<data>/node/node_token`     | **ノードを hub に登録する**（hub ⇔ node 間）                        | hub で `fxg hub pairing-token issue <node-id>` → ノードの Web UI（設定 > ハブ接続）または `fxg node pair --hub <URL> --token <TOKEN>` |
 | その他の秘密                 | `<data>/<role>/secrets/<id>` | エージェントの API キー、Git 認証など                               | Secret API（値は書き込み専用）                                                                                                        |
 

@@ -33,6 +33,8 @@ pub enum HubCommands {
     Status(HubStatusArgs),
     /// Open the hub's Web UI in the default browser
     Web(HubWebArgs),
+    /// Web access tokens for browsers and CLI clients
+    AccessToken(HubAccessTokenArgs),
     /// Node pairing tokens (one per node)
     PairingToken(HubPairingTokenArgs),
 }
@@ -413,6 +415,71 @@ impl usage::RunAsync for HubStatusArgs {
             );
         }
         print_block(&list.render(theme()));
+        Ok(())
+    }
+}
+
+// ----------------------------------------------------------------------
+// fxg hub access-token
+// ----------------------------------------------------------------------
+
+/// `fxg hub access-token <command>`
+#[derive(Debug, Args)]
+#[usage(run_async, arg_required_else_help)]
+pub struct HubAccessTokenArgs {
+    #[usage(subcommand)]
+    command: HubAccessTokenCommands,
+}
+
+/// Web access token operations (for browsers and CLI clients).
+#[derive(Debug, Subcommands)]
+#[usage(run_async)]
+pub enum HubAccessTokenCommands {
+    /// Show the Web access token
+    Show(HubAccessTokenShowArgs),
+    /// Regenerate the Web access token
+    Rotate(HubAccessTokenRotateArgs),
+}
+
+/// `fxg hub access-token show`
+#[derive(Debug, Args)]
+pub struct HubAccessTokenShowArgs {}
+
+impl usage::RunAsync for HubAccessTokenShowArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let paths = fxg_protocol::paths::Paths::resolve(
+            &fxg_protocol::config::process_env,
+            fxg_protocol::paths::Role::Hub,
+        );
+        // The token is the local hub's file, so this works while the hub is
+        // stopped and never creates a token as a side effect.
+        let token = fxg_api::auth::load_token(&paths.auth_token_path()).with_context(|| {
+            format!(
+                "the local hub has no Web access token ({}); start it once with `fxg hub start`",
+                paths.auth_token_path().display()
+            )
+        })?;
+        println!("{token}");
+        Ok(())
+    }
+}
+
+/// `fxg hub access-token rotate`
+#[derive(Debug, Args)]
+pub struct HubAccessTokenRotateArgs {}
+
+impl usage::RunAsync for HubAccessTokenRotateArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = HubClient::local(&fxg_protocol::config::process_env).await?;
+        let token = client.rotate_auth_token().await?;
+        println!("{token}");
+        eprintln!(
+            "regenerated the Web access token (browsers and other clients must enter it again)"
+        );
         Ok(())
     }
 }

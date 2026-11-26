@@ -550,7 +550,7 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
 
 1. **暗号論的トークンの自動生成**:
    - 初回起動時（または
-     `fxg node access-token rotate`）、安全な64文字のランダム文字列（`auth_token`）を生成し、ノードは `<data>/node/auth_token`、ハブは `<data>/hub/auth_token`
+     `fxg node access-token rotate` / `fxg hub access-token rotate`）、安全な64文字のランダム文字列（`auth_token`）を生成し、ノードは `<data>/node/auth_token`、ハブは `<data>/hub/auth_token`
      にパーミッション `0600` で保存します。
 2. **Web UI 初回アクセスとCookieの安全な設定**:
    - ローカルCLIから `fxg node web` を実行すると、`node.addr` のアドレスを使った

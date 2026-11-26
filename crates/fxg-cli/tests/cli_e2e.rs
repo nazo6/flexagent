@@ -270,6 +270,34 @@ async fn hub_status_ignores_the_node_pairing() {
 }
 
 #[tokio::test]
+async fn hub_access_token_show_reads_the_local_token() {
+    use fxg_protocol::paths::{Paths, Role};
+
+    let env = TestEnv::new();
+    let paths = Paths::portable(&env.home, Role::Hub);
+
+    // No token yet: fail without creating one.
+    let output = env.run(&["hub", "access-token", "show"], None);
+    assert!(!output.status.success());
+    assert!(
+        !paths.auth_token_path().exists(),
+        "show must not create a token"
+    );
+
+    // The local file is readable while the hub is stopped.
+    std::fs::create_dir_all(paths.data_dir()).expect("mkdir hub data");
+    std::fs::write(paths.auth_token_path(), "hub-access-token\n").expect("write token");
+    let output = env.run(&["hub", "access-token", "show"], None);
+    assert_eq!(stdout_of(&output).trim(), "hub-access-token");
+
+    // Regenerating requires the running hub (it updates the in-memory token).
+    let output = env.run(&["hub", "access-token", "rotate"], None);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("local hub is not running"), "got: {stderr}");
+}
+
+#[tokio::test]
 async fn node_status_uses_the_configured_address_when_stopped() {
     let env = TestEnv::new();
 

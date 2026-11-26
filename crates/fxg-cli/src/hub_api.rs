@@ -14,7 +14,9 @@
 //! hub, that file matches the hub token, so authentication works as-is.
 
 use anyhow::{Context, Result, bail};
-use fxg_protocol::client_api::{ApiErrorResponse, CreateSessionRequest, CreateSessionResponse};
+use fxg_protocol::client_api::{
+    ApiErrorResponse, CreateSessionRequest, CreateSessionResponse, RotateAuthTokenResponse,
+};
 use fxg_protocol::config::{EnvLookup, HubConfig};
 use fxg_protocol::paths::{Paths, Role};
 
@@ -114,6 +116,18 @@ impl HubClient {
             .post("/api/v1/system/shutdown", &serde_json::json!({}))
             .await?;
         Ok(())
+    }
+
+    /// `POST /api/v1/auth/rotate-token`
+    ///
+    /// The hub saves the new token and updates its in-memory copy, so later
+    /// requests from this client use it too.
+    pub async fn rotate_auth_token(&mut self) -> Result<String> {
+        let response: RotateAuthTokenResponse = self
+            .post("/api/v1/auth/rotate-token", &serde_json::json!({}))
+            .await?;
+        self.token = response.token.clone();
+        Ok(response.token)
     }
 
     /// `POST /api/v1/sessions`
