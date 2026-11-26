@@ -7,19 +7,27 @@
   import SessionStatusBadge from "#lib/components/SessionStatusBadge.svelte";
   import { ApiError } from "#lib/api/errors.ts";
   import { errorCodeMessage, errorMessage } from "#lib/api/error-messages.ts";
+  import {
+    externalPathBasename,
+    externalProjectPaths,
+    groupExternalSessions,
+    type ExternalSessionGroup,
+  } from "#lib/external-sessions.ts";
   import { formatRelativeTime } from "#lib/format.ts";
   import type {
     ExternalSessionAgentInfo,
     ExternalSessionListResponse,
     ExternalSessionSummary,
-    ProjectSummary,
   } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { connection, sync } from "#lib/stores/app.svelte.ts";
   import { randomUuid } from "#lib/uuid.ts";
   import { toast } from "svelte-sonner";
+  import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
+  import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
   import DownloadIcon from "@lucide/svelte/icons/download";
   import FolderGit2Icon from "@lucide/svelte/icons/folder-git-2";
+  import FolderIcon from "@lucide/svelte/icons/folder";
   import HistoryIcon from "@lucide/svelte/icons/history";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
@@ -30,6 +38,12 @@
 
   /** Refresh a cached scan in the background once it is older than this. */
   const CACHE_REFRESH_AFTER_MS = 30_000;
+  /** Sessions rendered per group before the first "Show more". */
+  const GROUP_PAGE_SIZE = 20;
+  /** Sessions revealed per "Show more" click. */
+  const GROUP_MORE_STEP = 50;
+  /** Per-device memory of collapsed groups. */
+  const COLLAPSED_GROUPS_KEY = "fxg:external_collapsed_groups";
 
   let response = $state<ExternalSessionListResponse | null>(null);
   let loading = $state(false);
@@ -42,6 +56,9 @@
   let busyKey = $state<string | null>(null);
   let pendingRefresh = $state<ExternalSessionSummary | null>(null);
   let refreshOpen = $state(false);
+  let collapsedGroups = $state<Record<string, boolean>>(loadCollapsedGroups());
+  /** Extra sessions revealed per group on top of `GROUP_PAGE_SIZE`. */
+  let revealedCounts = $state<Record<string, number>>({});
   let loadGeneration = 0;
   let autoLoaded = false;
 
@@ -61,52 +78,9 @@
 
   const sessions = $derived(response?.sessions ?? []);
 
-  interface ProjectPath {
-    projectId: string;
-    name: string;
-    path: string;
-  }
-
-  const projectPaths = $derived.by(() => {
-    const paths: ProjectPath[] = [];
-    for (const project of sync.projects) {
-      addProjectPaths(paths, project, targetNodeId);
-    }
-    return paths;
-  });
-
-  function addProjectPaths(paths: ProjectPath[], project: ProjectSummary, nodeId: string): void {
-    for (const binding of project.bindings) {
-      if (binding.node_id !== nodeId) continue;
-      paths.push({
-        projectId: project.project_id,
-        name: project.name,
-        path: normalizePath(binding.local_path),
-      });
-    }
-  }
-
-  function normalizePath(path: string): string {
-    const normalized = path.replaceAll("\\", "/").replace(/\/+$/, "");
-    return caseInsensitivePaths ? normalized.toLowerCase() : normalized;
-  }
-
-  function projectFor(session: ExternalSessionSummary): ProjectPath | null {
-    const cwd = normalizePath(session.cwd);
-    let best: ProjectPath | null = null;
-    for (const candidate of projectPaths) {
-      const matches = cwd === candidate.path || cwd.startsWith(`${candidate.path}/`);
-      if (matches && (best === null || candidate.path.length > best.path.length)) {
-        best = candidate;
-      }
-    }
-    return best;
-  }
-
-  function pathBasename(path: string): string {
-    const parts = path.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : path;
-  }
+  const projectPaths = $derived(
+    externalProjectPaths(sync.projects, targetNodeId, caseInsensitivePaths),
+  );
 
   function parseTimestamp(value: string | null | undefined): number | null {
     if (!value) return null;
@@ -177,28 +151,63 @@
     }),
   );
 
-  interface SessionGroup {
-    key: string;
-    name: string;
-    sessions: ExternalSessionSummary[];
+  const groupedSessions = $derived(
+    groupExternalSessions(filteredSessions, projectPaths, caseInsensitivePaths),
+  );
+
+  /** A group is only collapsed while the full list is shown, never while searching. */
+  function isGroupCollapsed(key: string): boolean {
+    return query.trim() === "" && (collapsedGroups[key] ?? false);
   }
 
-  const groupedSessions = $derived.by(() => {
-    const groups = new Map<string, SessionGroup>();
-    for (const session of filteredSessions) {
-      const project = projectFor(session);
-      const key = project?.projectId ?? `agent:${session.agent_id}`;
-      const name =
-        project?.name ?? `${agentName(session.agent_id)} · ${m.external_sessions_other_folders()}`;
-      const group = groups.get(key);
-      if (group) {
-        group.sessions.push(session);
-      } else {
-        groups.set(key, { key, name, sessions: [session] });
+  function toggleGroup(key: string): void {
+    collapsedGroups[key] = !collapsedGroups[key];
+    saveCollapsedGroups();
+  }
+
+  /**
+   * Sessions rendered for one group. A search shows every match so a result
+   * cannot hide behind "Show more"; otherwise the list uses staged rendering to
+   * keep the DOM small even when an agent has thousands of sessions.
+   */
+  function visibleSessions(group: ExternalSessionGroup): ExternalSessionSummary[] {
+    if (query.trim() !== "") return group.sessions;
+    return group.sessions.slice(0, GROUP_PAGE_SIZE + (revealedCounts[group.key] ?? 0));
+  }
+
+  function hasHiddenSessions(group: ExternalSessionGroup): boolean {
+    return visibleSessions(group).length < group.sessions.length;
+  }
+
+  function revealMoreSessions(key: string): void {
+    revealedCounts[key] = (revealedCounts[key] ?? 0) + GROUP_MORE_STEP;
+  }
+
+  function loadCollapsedGroups(): Record<string, boolean> {
+    if (typeof localStorage === "undefined") return {};
+    try {
+      const stored: unknown = JSON.parse(localStorage.getItem(COLLAPSED_GROUPS_KEY) ?? "[]");
+      if (!Array.isArray(stored)) return {};
+      const collapsed: Record<string, boolean> = {};
+      for (const key of stored) {
+        if (typeof key === "string") collapsed[key] = true;
       }
+      return collapsed;
+    } catch {
+      // Storage may be disabled or hold an old shape; start expanded.
+      return {};
     }
-    return [...groups.values()].toSorted((a, b) => a.name.localeCompare(b.name));
-  });
+  }
+
+  function saveCollapsedGroups(): void {
+    if (typeof localStorage === "undefined") return;
+    try {
+      const keys = Object.keys(collapsedGroups).filter((key) => collapsedGroups[key]);
+      localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify(keys));
+    } catch {
+      // Ignore quota/storage errors; collapsing still works for this render.
+    }
+  }
 
   function pickNode(): string {
     if (!isHub) return "";
@@ -458,113 +467,163 @@
               : m.external_sessions_no_matches()}
       </p>
     {:else}
-      <div class="flex flex-col gap-5">
+      <div class="flex flex-col gap-4">
         {#each groupedSessions as group (group.key)}
-          <section class="flex flex-col gap-2">
-            <header class="flex items-center gap-2 px-0.5">
-              <FolderGit2Icon class="text-muted-foreground size-4" />
-              <h2 class="text-[13px] font-semibold">{group.name}</h2>
-              <span class="text-muted-foreground text-[11px]">{group.sessions.length}</span>
+          {@const collapsed = isGroupCollapsed(group.key)}
+          {@const shown = visibleSessions(group)}
+          <section class="flex flex-col gap-1.5">
+            <header class="px-0.5">
+              <button
+                type="button"
+                class="hover:bg-muted/40 flex w-full min-w-0 items-center gap-2 rounded-md px-1 py-1 text-left transition-colors select-none"
+                aria-expanded={!collapsed}
+                onclick={() => toggleGroup(group.key)}
+              >
+                <span class="text-muted-foreground shrink-0">
+                  {#if collapsed}
+                    <ChevronRightIcon class="size-4" />
+                  {:else}
+                    <ChevronDownIcon class="size-4" />
+                  {/if}
+                </span>
+                {#if group.path}
+                  <FolderIcon class="text-muted-foreground size-4 shrink-0" />
+                {:else}
+                  <FolderGit2Icon class="text-muted-foreground size-4 shrink-0" />
+                {/if}
+                <span class="min-w-0 truncate text-[13px] font-semibold">{group.name}</span>
+                {#if group.path}
+                  <span
+                    class="text-muted-foreground min-w-0 flex-1 truncate font-mono text-[11px]"
+                    title={group.path}
+                  >
+                    {group.path}
+                  </span>
+                {:else}
+                  <span class="flex-1"></span>
+                {/if}
+                <span class="text-muted-foreground shrink-0 text-[11px]">
+                  {group.sessions.length}
+                </span>
+              </button>
             </header>
-            <div class="flex flex-col gap-1.5">
-              {#each group.sessions as session (session.agent_id + ":" + session.agent_session_id)}
-                {@const importedId = session.imported_session_id}
-                {@const key = session.agent_id + ":" + session.agent_session_id}
-                {@const busy = busyKey === key}
-                {@const history = supportsHistory(session.agent_id)}
-                <div
-                  class="bg-card/60 hover:bg-accent/30 border-border flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors"
-                >
-                  <div class="min-w-0 flex-1">
-                    <div class="flex min-w-0 flex-wrap items-center gap-1.5">
-                      <p class="min-w-0 truncate text-sm font-medium">
-                        {importedId
-                          ? (session.imported_title ??
-                            session.title ??
-                            m.external_sessions_untitled())
-                          : (session.title ?? m.external_sessions_untitled())}
-                      </p>
-                      <Badge variant="outline" class="font-mono text-[10px]">
-                        {agentName(session.agent_id)}
-                      </Badge>
-                      {#if importedId && session.imported_status}
-                        <SessionStatusBadge status={session.imported_status} />
-                      {/if}
-                      {#if session.needs_sync && importedId}
-                        <Badge
-                          variant="secondary"
-                          class="border-warn/30 bg-warn-soft text-warn text-[10px]"
-                        >
-                          <TriangleAlertIcon class="size-3" />
-                          {m.external_sessions_needs_sync()}
+            {#if !collapsed}
+              <div class="flex flex-col gap-1">
+                {#each shown as session (session.agent_id + ":" + session.agent_session_id)}
+                  {@const importedId = session.imported_session_id}
+                  {@const key = session.agent_id + ":" + session.agent_session_id}
+                  {@const busy = busyKey === key}
+                  {@const history = supportsHistory(session.agent_id)}
+                  {@const updated = updatedLabel(session)}
+                  <div
+                    class="bg-card/60 hover:bg-accent/30 border-border flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 transition-colors"
+                  >
+                    <div class="min-w-0 flex-1">
+                      <div class="flex min-w-0 items-center gap-1.5">
+                        <p class="min-w-0 flex-1 truncate text-sm font-medium">
+                          {importedId
+                            ? (session.imported_title ??
+                              session.title ??
+                              m.external_sessions_untitled())
+                            : (session.title ?? m.external_sessions_untitled())}
+                        </p>
+                        <Badge variant="outline" class="shrink-0 font-mono text-[10px]">
+                          {agentName(session.agent_id)}
                         </Badge>
-                      {/if}
-                    </div>
-                    <p class="text-muted-foreground truncate font-mono text-[11px]">
-                      {pathBasename(session.cwd)} · {session.cwd}
-                    </p>
-                    <div
-                      class="text-muted-foreground flex flex-wrap items-center gap-2 text-[11px]"
-                    >
-                      {#if updatedLabel(session)}
-                        <span>{updatedLabel(session)}</span>
-                      {/if}
-                      {#if importedId && session.title && session.title !== session.imported_title}
-                        <span class="truncate">
-                          {m.external_sessions_agent_title({ title: session.title })}
+                        {#if importedId && session.imported_status}
+                          <SessionStatusBadge status={session.imported_status} />
+                        {/if}
+                        {#if session.needs_sync && importedId}
+                          <Badge
+                            variant="secondary"
+                            class="border-warn/30 bg-warn-soft text-warn shrink-0 text-[10px]"
+                          >
+                            <TriangleAlertIcon class="size-3" />
+                            {m.external_sessions_needs_sync()}
+                          </Badge>
+                        {/if}
+                      </div>
+                      <div
+                        class="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-2 text-[11px]"
+                      >
+                        <span class="truncate font-mono" title={session.cwd}>
+                          {externalPathBasename(session.cwd)}
                         </span>
-                      {/if}
-                      {#if !history}
-                        <span title={m.external_sessions_history_unavailable_hint()}>
-                          {m.external_sessions_history_unavailable()}
-                        </span>
-                      {/if}
+                        {#if updated}
+                          <span class="shrink-0">{updated}</span>
+                        {/if}
+                        {#if importedId && session.title && session.title !== session.imported_title}
+                          <span class="truncate" title={session.title}>
+                            {m.external_sessions_agent_title({ title: session.title })}
+                          </span>
+                        {/if}
+                        {#if !history}
+                          <span
+                            class="shrink-0"
+                            title={m.external_sessions_history_unavailable_hint()}
+                          >
+                            {m.external_sessions_history_unavailable()}
+                          </span>
+                        {/if}
+                      </div>
                     </div>
-                  </div>
-                  <div class="flex shrink-0 flex-wrap items-center gap-1.5">
-                    {#if importedId}
+                    <div class="flex shrink-0 flex-wrap items-center gap-1.5">
+                      {#if importedId}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={busy || !history}
+                          title={history
+                            ? m.external_sessions_refresh()
+                            : m.external_sessions_refresh_unavailable()}
+                          aria-label={m.external_sessions_refresh()}
+                          onclick={() => askRefresh(session)}
+                        >
+                          {#if busy}
+                            <LoaderCircleIcon class="size-4 animate-spin" />
+                          {:else}
+                            <RefreshCwIcon class="size-4" />
+                          {/if}
+                          {#if session.needs_sync}
+                            {m.external_sessions_refresh()}
+                          {/if}
+                        </Button>
+                      {/if}
                       <Button
-                        variant="outline"
                         size="sm"
-                        disabled={busy || !history}
-                        title={history
-                          ? m.external_sessions_refresh()
-                          : m.external_sessions_refresh_unavailable()}
-                        aria-label={m.external_sessions_refresh()}
-                        onclick={() => askRefresh(session)}
+                        variant={importedId || history ? "default" : "outline"}
+                        disabled={busy}
+                        title={!history && !importedId
+                          ? m.external_sessions_history_unavailable_hint()
+                          : undefined}
+                        onclick={() => void openSession(session)}
                       >
                         {#if busy}
                           <LoaderCircleIcon class="size-4 animate-spin" />
+                        {:else if importedId}
+                          <FolderGit2Icon class="size-4" />
                         {:else}
-                          <RefreshCwIcon class="size-4" />
+                          <DownloadIcon class="size-4" />
                         {/if}
-                        {#if session.needs_sync}
-                          {m.external_sessions_refresh()}
-                        {/if}
+                        {importedId ? m.external_sessions_open() : m.external_sessions_import()}
                       </Button>
-                    {/if}
-                    <Button
-                      size="sm"
-                      variant={importedId || history ? "default" : "outline"}
-                      disabled={busy}
-                      title={!history && !importedId
-                        ? m.external_sessions_history_unavailable_hint()
-                        : undefined}
-                      onclick={() => void openSession(session)}
-                    >
-                      {#if busy}
-                        <LoaderCircleIcon class="size-4 animate-spin" />
-                      {:else if importedId}
-                        <FolderGit2Icon class="size-4" />
-                      {:else}
-                        <DownloadIcon class="size-4" />
-                      {/if}
-                      {m.external_sessions_open()}
-                    </Button>
+                    </div>
                   </div>
-                </div>
-              {/each}
-            </div>
+                {/each}
+                {#if hasHiddenSessions(group)}
+                  <button
+                    type="button"
+                    class="text-muted-foreground hover:text-foreground hover:bg-accent flex items-center justify-center gap-1 rounded-md py-1.5 text-[11px] transition-colors select-none"
+                    onclick={() => revealMoreSessions(group.key)}
+                  >
+                    <ChevronDownIcon class="size-3" />
+                    {m.external_sessions_show_more({
+                      count: Math.min(GROUP_MORE_STEP, group.sessions.length - shown.length),
+                    })}
+                  </button>
+                {/if}
+              </div>
+            {/if}
           </section>
         {/each}
       </div>
