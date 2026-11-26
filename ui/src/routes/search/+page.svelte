@@ -63,6 +63,25 @@
     );
   }
 
+  /** Project / node label per hit (the sidebar list is paginated, so both may be missing). */
+  const hitMeta = $derived.by(() => {
+    const meta = new Map<string, { project: string | null; node: string | null }>();
+    for (const hit of hits) {
+      if (meta.has(hit.session_id)) continue;
+      const session = sync.sessions.find((entry) => entry.session_id === hit.session_id);
+      const project =
+        session === undefined
+          ? null
+          : (sync.projects.find((entry) => entry.project_id === session.project_id)?.name ?? null);
+      const node =
+        session === undefined
+          ? null
+          : (sync.nodes.find((entry) => entry.node_id === session.node_id)?.name ?? null);
+      meta.set(hit.session_id, { project, node });
+    }
+    return meta;
+  });
+
   /** Deep link to the matched event (the session page loads and flashes it). */
   function hitHref(hit: SearchHit): string {
     return `/sessions/${hit.session_id}?seq=${hit.node_seq}`;
@@ -101,16 +120,26 @@
   </form>
 
   {#if searched && hits.length === 0}
-    <p class="text-muted-foreground text-[13px]">{m.search_empty()}</p>
+    <div class="flex flex-col gap-1">
+      <p class="text-[13px]">{m.search_empty_for({ query: lastQuery })}</p>
+      <p class="text-muted-foreground text-[12px]">{m.search_empty_hint()}</p>
+    </div>
   {:else if hits.length > 0}
     <p class="text-muted-foreground text-[12px]">{m.search_result_count({ count: hits.length })}</p>
     <ul class="border-border flex list-none flex-col border-t p-0">
       {#each hits as hit (hit.event_id)}
+        {@const meta = hitMeta.get(hit.session_id)}
         <li class="border-border flex flex-col gap-1 border-b py-3">
           <div class="flex flex-wrap items-center gap-2 text-[11px]">
             <a class="text-[13px] font-medium hover:underline" href={hitHref(hit)}>
               {sessionTitle(hit.session_id)}
             </a>
+            {#if meta?.project}
+              <span class="text-muted-foreground max-w-[16rem] truncate">{meta.project}</span>
+            {/if}
+            {#if meta?.node}
+              <span class="text-muted-foreground max-w-[12rem] truncate">{meta.node}</span>
+            {/if}
             <span class="text-muted-foreground desk-mono">#{hit.node_seq}</span>
             <span class="text-muted-foreground desk-mono">{hit.event_type}</span>
             <span class="text-muted-foreground desk-mono ml-auto">
