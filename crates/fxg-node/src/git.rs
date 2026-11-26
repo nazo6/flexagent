@@ -337,6 +337,10 @@ pub async fn workspace_diff_file(
     }
 
     let mut args: Vec<String> = vec![
+        // Keep non-ASCII paths readable in the unified diff. Quoted paths are
+        // still possible (control bytes), so the parser unquotes them below.
+        "-c".to_owned(),
+        "core.quotePath=false".to_owned(),
         "diff".to_owned(),
         "--no-color".to_owned(),
         "--no-ext-diff".to_owned(),
@@ -473,6 +477,7 @@ pub fn parse_unified_diff(diff: &str) -> Vec<FileDiff> {
         header: String,
         additions: u32,
         deletions: u32,
+        in_hunk: bool,
         text: String,
     }
 
@@ -487,6 +492,7 @@ pub fn parse_unified_diff(diff: &str) -> Vec<FileDiff> {
                 header: header.to_owned(),
                 additions: 0,
                 deletions: 0,
+                in_hunk: false,
                 text: String::new(),
             });
             current_old_path = None;
@@ -499,17 +505,26 @@ pub fn parse_unified_diff(diff: &str) -> Vec<FileDiff> {
         let Some(file) = files.last_mut() else {
             continue;
         };
-        if let Some(rest) = line.strip_prefix("--- ") {
-            current_old_path = (rest != "/dev/null").then(|| strip_prefix_path(rest, "a/"));
-        } else if let Some(rest) = line.strip_prefix("+++ ") {
-            let new_path = (rest != "/dev/null").then(|| strip_prefix_path(rest, "b/"));
-            file.path = new_path.or(current_old_path.clone()).unwrap_or_default();
+        // Only the header before the first hunk contains `---` / `+++` paths.
+        // A hunk line that starts with `---` / `+++` is content (a removed line
+        // beginning with `-- ` or an added line beginning with `++ `).
+        if !file.in_hunk {
+            if let Some(rest) = line.strip_prefix("--- ") {
+                current_old_path = diff_path(rest, "a/");
+            } else if let Some(rest) = line.strip_prefix("+++ ") {
+                let new_path = diff_path(rest, "b/");
+                file.path = new_path.or(current_old_path.clone()).unwrap_or_default();
+            } else if line.starts_with("@@") {
+                file.in_hunk = true;
+            }
         }
         if let Some(file) = files.last_mut() {
-            if line.starts_with('+') && !line.starts_with("+++") {
-                file.additions += 1;
-            } else if line.starts_with('-') && !line.starts_with("---") {
-                file.deletions += 1;
+            if file.in_hunk {
+                if line.starts_with('+') {
+                    file.additions += 1;
+                } else if line.starts_with('-') {
+                    file.deletions += 1;
+                }
             }
             file.text.push_str(line);
             file.text.push('\n');
@@ -521,14 +536,10 @@ pub fn parse_unified_diff(diff: &str) -> Vec<FileDiff> {
         .map(|mut file| {
             if file.path.is_empty() {
                 // When there is no `+++` line, as in binary diffs, infer the path
-                // from the `diff --git` header (`a/<path> b/<path>`)
-                if let Some((left, right)) = file.header.rsplit_once(" b/") {
-                    let _ = left;
-                    file.old_path = Some(strip_prefix_path(left, "a/"));
-                    file.path = right.to_owned();
-                } else {
-                    file.path = file.header.clone();
-                }
+                // from the `diff --git` header (`a/<path> b/<path>`).
+                let (old_path, path) = paths_from_diff_header(&file.header);
+                file.old_path = old_path;
+                file.path = path;
             }
             FileDiff {
                 path: file.path,
@@ -542,8 +553,69 @@ pub fn parse_unified_diff(diff: &str) -> Vec<FileDiff> {
         .collect()
 }
 
+/// Returns the path on a `---` / `+++` line, without the `a/` / `b/` prefix.
+///
+/// Git appends a tab before an optional timestamp, and in practice also when
+/// the path contains a space. Paths that need C-style quoting (control bytes,
+/// or non-ASCII when `core.quotePath` is enabled) are unquoted with Git's own
+/// rules.
+fn diff_path(raw: &str, prefix: &str) -> Option<String> {
+    let path = decode_diff_path(raw)?;
+    if path == "/dev/null" {
+        return None;
+    }
+    Some(path.strip_prefix(prefix).unwrap_or(&path).to_owned())
+}
+
+/// Decodes one path from a diff line (`"a/..."`, `a/with space.txt\t`, ...).
+fn decode_diff_path(raw: &str) -> Option<String> {
+    let raw = raw.strip_suffix('\r').unwrap_or(raw);
+    if raw.starts_with('"') {
+        return decode_quoted_path(raw).map(|(path, _consumed)| path);
+    }
+    // The first tab starts the optional timestamp (or is the delimiter Git adds
+    // for paths containing spaces).
+    Some(
+        raw.split_once('\t')
+            .map_or(raw, |(path, _)| path)
+            .to_owned(),
+    )
+}
+
+/// Unquotes a Git C-style quoted path and returns it with the consumed length.
+fn decode_quoted_path(input: &str) -> Option<(String, usize)> {
+    let (unquoted, consumed) = match gix_quote::ansi_c::undo(input.as_bytes().into()) {
+        Ok(decoded) => decoded,
+        Err(err) => {
+            tracing::debug!(error = ?err, "failed to unquote a diff path");
+            return None;
+        }
+    };
+    let bytes: &[u8] = unquoted.as_ref();
+    Some((String::from_utf8_lossy(bytes).into_owned(), consumed))
+}
+
+/// Extracts the old / new path from a `diff --git` header.
+fn paths_from_diff_header(header: &str) -> (Option<String>, String) {
+    if header.starts_with('"')
+        && let Some((left, consumed)) = decode_quoted_path(header)
+        && let Some(right) = decode_diff_path(header.get(consumed..).unwrap_or("").trim_start())
+    {
+        return (
+            Some(strip_path_prefix(&left, "a/")),
+            strip_path_prefix(&right, "b/"),
+        );
+    }
+    // `core.quotePath=false` leaves spaces unquoted, so split at the last ` b/`
+    // (only ambiguous when the path itself contains that sequence).
+    if let Some((left, right)) = header.rsplit_once(" b/") {
+        return (Some(strip_path_prefix(left, "a/")), right.to_owned());
+    }
+    (None, header.to_owned())
+}
+
 /// Strips the `a/` / `b/` prefix.
-fn strip_prefix_path(path: &str, prefix: &str) -> String {
+fn strip_path_prefix(path: &str, prefix: &str) -> String {
     path.strip_prefix(prefix).unwrap_or(path).to_owned()
 }
 
@@ -702,6 +774,65 @@ new file mode 100644\n\
         assert_eq!(files[1].deletions, 0);
     }
 
+    #[test]
+    fn parse_unified_diff_strips_path_tabs_and_keeps_non_ascii() {
+        let diff = "diff --git a/日本語 ファイル.txt b/日本語 ファイル.txt\n\
+index 1234567..89abcde 100644\n\
+--- a/日本語 ファイル.txt\t\n\
++++ b/日本語 ファイル.txt\t\n\
+@@ -1 +1,2 @@\n\
+ one\n\
++two\n";
+        let files = parse_unified_diff(diff);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "日本語 ファイル.txt");
+        assert_eq!(files[0].additions, 1);
+        assert_eq!(files[0].deletions, 0);
+    }
+
+    #[test]
+    fn parse_unified_diff_unquotes_c_style_paths() {
+        let diff = "diff --git \"a/\\346\\227\\245.txt\" \"b/\\346\\227\\245.txt\"\n\
+index 1234567..89abcde 100644\n\
+--- \"a/\\346\\227\\245.txt\"\n\
++++ \"b/\\346\\227\\245.txt\"\n\
+@@ -1 +1,2 @@\n\
+ one\n\
++two\n";
+        let files = parse_unified_diff(diff);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "日.txt");
+        assert_eq!(files[0].additions, 1);
+    }
+
+    #[test]
+    fn parse_unified_diff_counts_hunk_lines_that_look_like_headers() {
+        let diff = "diff --git a/a.txt b/a.txt\n\
+--- a/a.txt\n\
++++ b/a.txt\n\
+@@ -1,2 +1,2 @@\n\
+--- removed content that starts with two dashes\n\
++++ added content that starts with two pluses\n";
+        let files = parse_unified_diff(diff);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "a.txt");
+        assert_eq!(files[0].additions, 1);
+        assert_eq!(files[0].deletions, 1);
+    }
+
+    #[test]
+    fn parse_unified_diff_infers_binary_paths_from_the_header() {
+        let with_spaces = "diff --git a/with space.bin b/with space.bin\n\
+Binary files a/with space.bin and b/with space.bin differ\n";
+        let files = parse_unified_diff(with_spaces);
+        assert_eq!(files[0].path, "with space.bin");
+
+        let quoted = "diff --git \"a/\\346\\227\\245.bin\" \"b/\\346\\227\\245.bin\"\n\
+Binary files \"a/\\346\\227\\245.bin\" and \"b/\\346\\227\\245.bin\" differ\n";
+        let files = parse_unified_diff(quoted);
+        assert_eq!(files[0].path, "日.bin");
+    }
+
     #[tokio::test]
     async fn workspace_diff_reports_uncommitted_changes() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -729,6 +860,31 @@ new file mode 100644\n\
             .expect("readme diff");
         // Two lines are added: a blank line and "changed"
         assert_eq!(readme.additions, 2);
+    }
+
+    #[tokio::test]
+    async fn workspace_diff_reports_paths_with_spaces_and_non_ascii() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_test_repo(dir.path()).await;
+        let names = ["with space.txt", "日本語 ファイル.txt"];
+        for name in names {
+            std::fs::write(dir.path().join(name), "one\n").expect("write");
+        }
+        run_git(dir.path(), &["add", "-A"]).await.expect("git add");
+        run_git(dir.path(), &["commit", "-q", "-m", "add fixtures"])
+            .await
+            .expect("git commit");
+        for name in names {
+            std::fs::write(dir.path().join(name), "one\ntwo\n").expect("write");
+        }
+
+        let diff = workspace_diff(dir.path(), DiffScope::Uncommitted, None)
+            .await
+            .expect("diff");
+        let paths: Vec<&str> = diff.files.iter().map(|file| file.path.as_str()).collect();
+        for name in names {
+            assert!(paths.contains(&name), "files: {paths:?}");
+        }
     }
 
     #[tokio::test]
