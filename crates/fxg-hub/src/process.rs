@@ -26,7 +26,7 @@ pub struct Hub {
     listen_addr: SocketAddr,
     shutdown_tx: watch::Sender<bool>,
     task: JoinHandle<()>,
-    addr_file: std::path::PathBuf,
+    addr: Option<fxg_api::addr::AddressFile>,
 }
 
 impl std::fmt::Debug for Hub {
@@ -51,10 +51,17 @@ impl Hub {
 
         // Publish the bound address so `fxg hub status` / `stop` / `web hub`
         // can reach a hub started with a CLI `--listen` / `--port` override.
-        let addr_file = state.options().paths.addr_path();
-        if let Err(err) = std::fs::write(&addr_file, bound.to_string()) {
-            tracing::warn!(path = %addr_file.display(), "failed to write the hub address file: {err}");
-        }
+        let addr_path = state.options().paths.addr_path();
+        let addr = match fxg_api::addr::AddressFile::publish(&addr_path, &bound.to_string()) {
+            Ok(addr) => Some(addr),
+            Err(err) => {
+                tracing::warn!(
+                    path = %addr_path.display(),
+                    "failed to write the hub address file: {err}"
+                );
+                None
+            }
+        };
 
         let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
         state.set_shutdown_sender(shutdown_tx.clone());
@@ -105,7 +112,7 @@ impl Hub {
             listen_addr: bound,
             shutdown_tx,
             task,
-            addr_file,
+            addr,
         })
     }
 
@@ -149,10 +156,23 @@ impl Hub {
             .await;
 
         await_shutdown_task("server", self.task, std::time::Duration::from_secs(3)).await;
-        fxg_protocol::discard_with!(
-            std::fs::remove_file(&self.addr_file),
-            "remove the hub address file"
-        );
+        if let Some(addr) = &self.addr {
+            match addr.withdraw() {
+                Ok(true) => {}
+                Ok(false) => {
+                    tracing::debug!(
+                        path = %addr.path().display(),
+                        "hub address file was replaced by another daemon"
+                    );
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        path = %addr.path().display(),
+                        "failed to remove the hub address file: {err}"
+                    );
+                }
+            }
+        }
         tracing::info!("fxg hub start stopped");
     }
 

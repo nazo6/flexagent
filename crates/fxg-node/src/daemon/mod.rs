@@ -835,7 +835,7 @@ pub struct NodeDaemon {
     shutdown_tx: watch::Sender<bool>,
     http_task: tokio::task::JoinHandle<()>,
     sync_task: Option<tokio::task::JoinHandle<()>>,
-    addr_file: std::path::PathBuf,
+    addr: Option<fxg_api::addr::AddressFile>,
 }
 
 impl std::fmt::Debug for NodeDaemon {
@@ -918,10 +918,17 @@ impl NodeDaemon {
 
         // Publish the bound address so `fxg node web` / `session new` can open the
         // Web UI even when the node was started with a `--listen` override.
-        let addr_file = state.paths().addr_path();
-        if let Err(err) = std::fs::write(&addr_file, http_addr.to_string()) {
-            tracing::warn!(path = %addr_file.display(), "failed to write the node address file: {err}");
-        }
+        let addr_path = state.paths().addr_path();
+        let addr = match fxg_api::addr::AddressFile::publish(&addr_path, &http_addr.to_string()) {
+            Ok(addr) => Some(addr),
+            Err(err) => {
+                tracing::warn!(
+                    path = %addr_path.display(),
+                    "failed to write the node address file: {err}"
+                );
+                None
+            }
+        };
 
         let http_state = state.clone();
         let http_shutdown = shutdown_rx.clone();
@@ -950,7 +957,7 @@ impl NodeDaemon {
             shutdown_tx,
             http_task,
             sync_task,
-            addr_file,
+            addr,
         })
     }
 
@@ -1002,14 +1009,22 @@ impl NodeDaemon {
         }
         // Do not delete an address published by a replacement daemon (e.g.
         // `fxg node restart` starts the new process before the old one exits).
-        let owns_addr_file = std::fs::read_to_string(&self.addr_file)
-            .map(|addr| addr.trim() == self.http_addr.to_string())
-            .unwrap_or(false);
-        if owns_addr_file {
-            fxg_protocol::discard_with!(
-                std::fs::remove_file(&self.addr_file),
-                "remove the node address file"
-            );
+        if let Some(addr) = &self.addr {
+            match addr.withdraw() {
+                Ok(true) => {}
+                Ok(false) => {
+                    tracing::debug!(
+                        path = %addr.path().display(),
+                        "node address file was replaced by another daemon"
+                    );
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        path = %addr.path().display(),
+                        "failed to remove the node address file: {err}"
+                    );
+                }
+            }
         }
 
         let task_timeout = std::time::Duration::from_secs(3);
@@ -1312,6 +1327,31 @@ mod tests {
         assert_eq!(daemon.state().config().node_name, "Node");
         daemon.shutdown();
         daemon.wait().await;
+    }
+
+    #[tokio::test]
+    async fn shutdown_keeps_the_address_file_of_a_replacement_daemon() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = Paths::portable(dir.path(), Role::Node);
+        let addr_path = paths.addr_path();
+        let mut config = DaemonConfig::new(paths, "restarted-node", "Node");
+        config.listen_addr = "127.0.0.1:0".to_owned();
+        let old = NodeDaemon::start(config).await.expect("start old daemon");
+
+        // `fxg node restart` starts the replacement before the old process exits,
+        // and the replacement can bind the same address.
+        let replacement =
+            fxg_api::addr::AddressFile::publish(&addr_path, "127.0.0.1:7860").expect("publish");
+
+        old.shutdown();
+        old.wait().await;
+
+        assert!(
+            addr_path.exists(),
+            "the old daemon must not remove the replacement's address file"
+        );
+        assert!(replacement.withdraw().expect("withdraw replacement"));
+        assert!(!addr_path.exists());
     }
 
     #[tokio::test]

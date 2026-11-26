@@ -12,6 +12,7 @@
 //! - REST / WS error type: `error`
 //! - Client WS (`/api/v1/client/ws`): `ws`
 //! - PTY WS (`/api/v1/pty/ws`): `pty`
+//! - Address publication (`node.addr` / `hub.addr`): [`addr`]
 //! - Security (Host / Origin / Token validation): `security`
 //! - Token generation and comparison: [`auth`]
 //! - Web Push delivery: [`push`]
@@ -24,6 +25,7 @@
     reason = "type-safety migration baseline; see docs/06-type-safety.md"
 )]
 
+pub mod addr;
 pub mod auth;
 mod backend;
 mod counters;
