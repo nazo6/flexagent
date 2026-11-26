@@ -32,6 +32,7 @@
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import Minimize2Icon from "@lucide/svelte/icons/minimize-2";
   import MoreHorizontalIcon from "@lucide/svelte/icons/more-horizontal";
+  import RotateCcwIcon from "@lucide/svelte/icons/rotate-ccw";
   import ShieldCheckIcon from "@lucide/svelte/icons/shield-check";
   import SlashIcon from "@lucide/svelte/icons/slash";
 
@@ -119,6 +120,13 @@
     status === "running" || status === "waiting_permission" || status === "waiting_input",
   );
   const isStopped = $derived(status === "stopped" || status === "error");
+
+  /**
+   * With an empty prompt the send button cannot send anything, so while the
+   * session is stopped it becomes the explicit Resume action instead. Typing
+   * switches it back to Send (and sending resumes the session anyway).
+   */
+  const showResumeAction = $derived(isStopped && text.trim() === "" && attachments.length === 0);
 
   // Close the resume suggestion once the session becomes active
   $effect(() => {
@@ -287,29 +295,7 @@
 <ComposerCard>
   {#snippet above()}
     <div class="flex flex-col gap-2 px-1">
-      {#if isStopped}
-        <div
-          class="border-warn/25 bg-warn-soft/40 text-warn flex items-center gap-2 rounded-md border px-3 py-1 text-[13px]"
-        >
-          <AlertTriangleIcon class="size-3.5 shrink-0" />
-          <span class="min-w-0 flex-1 truncate" title={m.chat_stopped_notice()}>
-            {m.chat_stopped_notice()}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            class="h-6 shrink-0 text-[11px]"
-            disabled={sending || resuming}
-            title={m.chat_resume_title()}
-            onclick={() => void resumeSession()}
-          >
-            {#if resuming}
-              <LoaderCircleIcon class="size-3.5 animate-spin" />
-            {/if}
-            {resuming ? m.chat_resuming() : m.chat_resume()}
-          </Button>
-        </div>
-      {:else if node && !nodeAvail.isAvailable}
+      {#if node && !nodeAvail.isAvailable}
         <div
           class="border-danger/25 bg-danger-soft/50 text-danger flex items-center gap-2 rounded-md border px-3 py-1.5 text-[13px]"
         >
@@ -458,12 +444,30 @@
         {/if}
       </Button>
     {/if}
-    <ComposerSendButton
-      busy={sending}
-      disabled={sending || (text.trim() === "" && attachments.length === 0)}
-      title={sending ? m.chat_sending() : isRunning ? m.chat_queue() : m.chat_send()}
-      onclick={() => void send()}
-    />
+    {#if showResumeAction}
+      <Button
+        variant="outline"
+        size="icon-sm"
+        class="rounded-full border-signal/40 bg-signal-soft text-signal hover:border-signal/60 hover:bg-signal-soft hover:text-signal"
+        disabled={sending || resuming}
+        title={m.chat_resume_title()}
+        aria-label={resuming ? m.chat_resuming() : m.chat_resume()}
+        onclick={() => void resumeSession()}
+      >
+        {#if resuming}
+          <LoaderCircleIcon class="size-4 animate-spin" />
+        {:else}
+          <RotateCcwIcon class="size-4" />
+        {/if}
+      </Button>
+    {:else}
+      <ComposerSendButton
+        busy={sending}
+        disabled={sending || (text.trim() === "" && attachments.length === 0)}
+        title={sending ? m.chat_sending() : isRunning ? m.chat_queue() : m.chat_send()}
+        onclick={() => void send()}
+      />
+    {/if}
   {/snippet}
 
   <ComposerTextarea

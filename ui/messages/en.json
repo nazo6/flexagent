@@ -79,7 +79,6 @@
   "chat_session_resumed_replay": "Session resumed (continuing from the previous history)",
   "chat_stop": "Stop",
   "chat_stop_title": "Interrupt the agent run",
-  "chat_stopped_notice": "This session is stopped.",
   "chat_stopping": "Stopping…",
   "chat_terminal_stop": "Stop command",
   "chat_terminal_stop_failed": "Failed to stop the command.",

@@ -153,7 +153,9 @@
         {session?.title ?? m.session_title_fallback()}
       </h1>
       {#if status}
-        <SessionStatusBadge {status} />
+        <span role="status">
+          <SessionStatusBadge {status} />
+        </span>
       {/if}
     </div>
 
