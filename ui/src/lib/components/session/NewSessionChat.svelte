@@ -2,6 +2,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import AgentIcon from "#lib/components/agent/AgentIcon.svelte";
+  import BrandIcon from "#lib/components/BrandIcon.svelte";
   import * as Dialog from "#lib/components/ui/dialog/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
@@ -913,9 +914,7 @@
 >
   <div class="flex flex-col gap-5">
     <div class="flex flex-col items-center gap-2.5 text-center">
-      <div class="bg-signal-soft text-signal flex size-11 items-center justify-center rounded-xl">
-        <SparklesIcon class="size-5" />
-      </div>
+      <BrandIcon class="size-12" draw />
       <h1 class="text-2xl font-semibold tracking-tight">{m.new_session_title()}</h1>
       <p class="text-muted-foreground max-w-md text-[13px]">
         {m.new_session_description()}

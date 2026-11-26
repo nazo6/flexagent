@@ -1,41 +1,33 @@
-<script lang="ts">
-  import {
-    BRAND_ACCENT_BAR,
-    BRAND_FG_CIRCLES,
-    BRAND_FG_PATH_STRINGS,
-    BRAND_ICON_RADIUS,
-    BRAND_ICON_SIZE,
-    BRAND_STROKE_WIDTH,
-  } from "#lib/brand-icon.ts";
+<script module lang="ts">
   import { motion } from "#lib/motion.svelte.ts";
-  import { cn } from "#lib/utils.ts";
-  import { onMount } from "svelte";
 
-  let {
-    class: className = "size-7",
-    draw = false,
-  }: {
-    /** Size and layout classes applied to the root `<svg>`. */
-    class?: string;
-    /** Draw the strokes once; only used by the cold-start loading screen. */
-    draw?: boolean;
-  } = $props();
+  /**
+   * Whether the one-shot reveal already ran since this page loaded.
+   *
+   * The reveal is a brand moment, not a loading indicator: it plays once per
+   * app launch and does not replay on plain route changes.
+   */
+  let revealed = false;
 
-  const borderInset = 0.75;
-
-  let svg = $state<SVGSVGElement | null>(null);
-
-  onMount(() => {
-    if (!draw || svg === null) return;
+  /**
+   * Draw the strokes and slide the accent bar in. Returns a cleanup that
+   * cancels the animations.
+   *
+   * Without `force`, later mounts settle immediately so the reveal stays a
+   * single moment. `force` is for an explicit replay (the logo activation).
+   */
+  function playBrandDraw(svg: SVGSVGElement, force = false): () => void {
     const group = svg.querySelector<SVGGElement>(".brand-strokes");
     const bar = svg.querySelector<SVGRectElement>("[data-brand-bar]");
-    if (group === null || bar === null) return;
+    if (group === null || bar === null) return () => {};
 
-    if (motion.isReducedNow() || typeof bar.animate !== "function") {
+    if (motion.isReducedNow() || typeof bar.animate !== "function" || (!force && revealed)) {
+      revealed = true;
       group.style.opacity = "1";
       bar.style.opacity = "1";
-      return;
+      return () => {};
     }
+    revealed = true;
 
     const animations: Animation[] = [];
     const strokes = Array.from(svg.querySelectorAll<SVGGeometryElement>("[data-brand-stroke]"));
@@ -69,8 +61,47 @@
       ),
     );
 
+    // Cancelling on unmount rejects `finished`; nothing awaits it.
+    for (const animation of animations) animation.finished.catch(() => {});
+
     return () => {
       for (const animation of animations) animation.cancel();
+    };
+  }
+</script>
+
+<script lang="ts">
+  import {
+    BRAND_ACCENT_BAR,
+    BRAND_FG_CIRCLES,
+    BRAND_FG_PATH_STRINGS,
+    BRAND_ICON_RADIUS,
+    BRAND_ICON_SIZE,
+    BRAND_STROKE_WIDTH,
+  } from "#lib/brand-icon.ts";
+  import { cn } from "#lib/utils.ts";
+  import { onMount } from "svelte";
+
+  let {
+    class: className = "size-7",
+    draw = false,
+  }: {
+    /** Size and layout classes applied to the root `<svg>`. */
+    class?: string;
+    /** Request the brand reveal; it animates once per page load. */
+    draw?: boolean;
+  } = $props();
+
+  const borderInset = 0.75;
+
+  let svg = $state<SVGSVGElement | null>(null);
+  let stopDraw: (() => void) | null = null;
+
+  onMount(() => {
+    if (draw && svg !== null) stopDraw = playBrandDraw(svg);
+    return () => {
+      stopDraw?.();
+      stopDraw = null;
     };
   });
 </script>
