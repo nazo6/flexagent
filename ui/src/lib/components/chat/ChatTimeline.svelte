@@ -373,7 +373,9 @@
             class="bg-user-message text-foreground max-w-[82%] rounded-xl rounded-br-sm px-4 py-2.5"
           >
             <MessageAttachments attachments={item.attachments} inBubble />
-            <p class="text-sm whitespace-pre-wrap">{item.text}</p>
+            <p class="text-[15px] leading-relaxed whitespace-pre-wrap lg:text-[14px]">
+              {item.text}
+            </p>
           </div>
         </div>
         <MessageActions
@@ -403,7 +405,7 @@
             <MarkdownText
               text={item.text}
               streaming={item.streaming}
-              class="text-sm leading-relaxed"
+              class="text-[15px] leading-relaxed lg:text-[14px]"
             />
           </div>
         </div>

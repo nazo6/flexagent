@@ -3,6 +3,7 @@
   import { Button } from "#lib/components/ui/button/index.ts";
   import FolderPicker from "./FolderPicker.svelte";
   import type { QuickPath } from "#lib/folder-picker.ts";
+  import { registerOverlay } from "#lib/overlays.ts";
   import { m } from "#lib/paraglide/messages.js";
   import FolderOpenIcon from "@lucide/svelte/icons/folder-open";
 
@@ -38,6 +39,12 @@
     selectedPath = "";
     open = false;
   }
+
+  // The system back gesture closes the dialog instead of leaving the page.
+  $effect(() => {
+    if (!open) return;
+    return registerOverlay("folder-browser", close);
+  });
 
   function handleConfirm(): void {
     const target = selectedPath || pickerPath;

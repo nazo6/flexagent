@@ -587,6 +587,45 @@
 }
 
 /*
+ * Touch geometry.
+ *
+ * Coarse pointers get a larger hit area without changing the visual size of
+ * the icon or pill. These rules stay unlayered so `size-*` / `min-w-0`
+ * utilities cannot shrink the tappable box. Inputs use 16px so mobile Safari
+ * does not zoom the page when the composer or a picker search gets focus.
+ */
+@media (pointer: coarse) {
+  body {
+    font-size: 0.9375rem;
+    line-height: 1.6;
+  }
+  input,
+  textarea,
+  select {
+    font-size: 1rem;
+  }
+  .touch-target {
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+  }
+  .touch-target-lg {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+  .touch-target-sm {
+    min-width: 2.25rem;
+    min-height: 2.25rem;
+  }
+  .touch-target-xs {
+    min-width: 2rem;
+    min-height: 2rem;
+  }
+  .touch-row {
+    min-height: 2.75rem;
+  }
+}
+
+/*
  * Window Controls Overlay (installed desktop PWA).
  *
  * `display_override: ["window-controls-overlay", ...]` removes the operating

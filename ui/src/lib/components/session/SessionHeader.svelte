@@ -109,11 +109,11 @@
 <header class="wco-titlebar bg-card/85 border-border relative shrink-0 border-b backdrop-blur">
   <!-- In an installed desktop PWA this row also serves as the window title bar
        (Window Controls Overlay); see the `.wco-*` rules in app.css. -->
-  <div class="wco-titlebar-row flex h-12 items-center gap-2 px-3 lg:px-4">
+  <div class="wco-titlebar-row flex h-14 items-center gap-2 px-3 lg:h-12 lg:px-4">
     <!-- Mobile: open the session drawer -->
     <button
       type="button"
-      class="hover:bg-accent text-muted-foreground hover:text-foreground relative flex size-7 shrink-0 items-center justify-center rounded-md border lg:hidden"
+      class="hover:bg-accent touch-target text-muted-foreground hover:text-foreground relative flex size-7 shrink-0 items-center justify-center rounded-md border lg:hidden"
       onclick={() => layoutState.setMobileDrawer(true)}
       title={m.shell_open_menu()}
       aria-label={m.shell_open_menu()}
@@ -132,7 +132,7 @@
     {#if layoutState.sidebarCollapsed}
       <button
         type="button"
-        class="hover:bg-accent text-muted-foreground hover:text-foreground relative hidden size-7 shrink-0 items-center justify-center rounded-md border lg:flex"
+        class="hover:bg-accent touch-target text-muted-foreground hover:text-foreground relative hidden size-7 shrink-0 items-center justify-center rounded-md border lg:flex"
         onclick={() => layoutState.toggleSidebar()}
         title={m.shell_show_sidebar()}
         aria-label={m.shell_show_sidebar()}
@@ -149,7 +149,7 @@
     {/if}
 
     <div class="flex min-w-0 flex-1 items-center gap-2">
-      <h1 class="min-w-0 truncate text-[15px] font-semibold tracking-tight">
+      <h1 class="min-w-0 truncate text-[16px] font-semibold tracking-tight lg:text-[15px]">
         {session?.title ?? m.session_title_fallback()}
       </h1>
       {#if status}
@@ -176,7 +176,7 @@
         <button
           type="button"
           class={cn(
-            "flex size-7 shrink-0 items-center justify-center rounded-md border transition-colors",
+            "touch-target-xs flex size-7 shrink-0 items-center justify-center rounded-md border transition-colors",
             turnsOpen
               ? "border-signal/40 bg-signal-soft text-signal"
               : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -192,7 +192,9 @@
       <!-- On desktop the sidebar footer owns the badge; when the sidebar is
            collapsed this header is the only remaining place for it. -->
       <ProblemBadge
-        class={layoutState.sidebarCollapsed ? "size-7 px-0" : "size-7 px-0 lg:hidden"}
+        class={layoutState.sidebarCollapsed
+          ? "touch-target-xs size-7 px-0"
+          : "touch-target-xs size-7 px-0 lg:hidden"}
       />
       {#if session}
         <div
@@ -205,7 +207,7 @@
             <button
               type="button"
               class={cn(
-                "flex size-6 items-center justify-center rounded-sm transition-colors",
+                "touch-target-xs flex size-6 items-center justify-center rounded-sm transition-colors",
                 activeTool === tool.id
                   ? "bg-signal-soft text-signal"
                   : "text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -243,7 +245,7 @@
           {onResume}
           {onForceStop}
           {onDeleted}
-          buttonClass="size-7 rounded-md border border-border"
+          buttonClass="touch-target size-7 rounded-md border border-border"
           iconClass="size-4"
         />
       {/if}

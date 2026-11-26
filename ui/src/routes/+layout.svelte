@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { goto } from "$app/navigation";
+  import { beforeNavigate, goto } from "$app/navigation";
   import { onMount } from "svelte";
   import "../app.css";
   import AppSidebar from "#lib/components/layout/AppSidebar.svelte";
@@ -16,6 +16,7 @@
   import { motion } from "#lib/motion.svelte.ts";
   import { theme } from "#lib/theme.svelte.ts";
   import { initViewport } from "#lib/viewport.ts";
+  import { closeTopOverlay, registerOverlay } from "#lib/overlays.ts";
   import type { RecoveryAction } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { ModeWatcher } from "mode-watcher";
@@ -64,6 +65,24 @@
     const disposeViewport = initViewport();
     void initApp();
     return disposeViewport;
+  });
+
+  /**
+   * Close overlays before the system back gesture leaves the current route.
+   *
+   * SvelteKit restores the history entry when a popstate navigation is
+   * cancelled, so this behaves like a native modal stack: Back closes the
+   * sheet/dock first, and only the next Back navigates.
+   */
+  beforeNavigate((navigation) => {
+    if (navigation.type !== "popstate") return;
+    if (closeTopOverlay()) navigation.cancel();
+  });
+
+  // The mobile drawer is an overlay, not a route; register it while open.
+  $effect(() => {
+    if (!layoutState.mobileDrawerOpen) return;
+    return registerOverlay("mobile-drawer", () => layoutState.setMobileDrawer(false));
   });
 
   /**
@@ -227,7 +246,7 @@
         >
           <button
             type="button"
-            class="hover:bg-accent relative flex size-8 items-center justify-center rounded-md border text-muted-foreground"
+            class="hover:bg-accent touch-target relative flex size-8 items-center justify-center rounded-md border text-muted-foreground"
             onclick={() => layoutState.setMobileDrawer(true)}
             aria-label={m.shell_open_menu()}
           >
@@ -250,11 +269,11 @@
           </div>
 
           <div class="flex items-center gap-1">
-            <ProblemBadge class="size-8 px-0" />
+            <ProblemBadge class="size-8 px-0 touch-target" />
             {#if page.url.pathname === "/"}
               <a
                 href="/search"
-                class="hover:bg-accent flex size-8 items-center justify-center rounded-md border text-muted-foreground"
+                class="hover:bg-accent touch-target flex size-8 items-center justify-center rounded-md border text-muted-foreground"
                 title={m.shell_full_text_search()}
                 aria-label={m.shell_full_text_search()}
               >
@@ -263,7 +282,7 @@
             {:else}
               <a
                 href="/"
-                class="hover:bg-accent flex size-8 items-center justify-center rounded-md border text-muted-foreground"
+                class="hover:bg-accent touch-target flex size-8 items-center justify-center rounded-md border text-muted-foreground"
                 title={m.shell_new_session()}
                 aria-label={m.shell_new_session()}
               >

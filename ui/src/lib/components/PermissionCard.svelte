@@ -137,6 +137,7 @@
       {#each options as option (option.option_id)}
         <Button
           size="sm"
+          class="touch-target"
           variant={isAllowOption(option.kind) ? "default" : "outline"}
           disabled={busyOptionId !== null}
           onclick={() => void respond(option)}

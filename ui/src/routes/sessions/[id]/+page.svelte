@@ -37,6 +37,7 @@
   import { toast } from "svelte-sonner";
   import ArchiveIcon from "@lucide/svelte/icons/archive";
   import { layoutState } from "#lib/stores/layout.svelte.ts";
+  import { registerOverlay } from "#lib/overlays.ts";
   import ArrowDownIcon from "@lucide/svelte/icons/arrow-down";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import SkullIcon from "@lucide/svelte/icons/skull";
@@ -214,6 +215,21 @@
     dock.setContext(dockContext);
   });
 
+  // Mobile layers close on the system back gesture instead of leaving the
+  // session. The desktop dock is a split pane, so it is not in this stack.
+  $effect(() => {
+    if (!isDockOpen || desktopLayout) return;
+    return registerOverlay("session-dock", () => dock.collapse());
+  });
+  $effect(() => {
+    if (!turnsOpen) return;
+    return registerOverlay("turn-outline", () => (turnsOpen = false));
+  });
+  $effect(() => {
+    if (selectedSubagentId === null) return;
+    return registerOverlay("subagent-detail", () => (selectedSubagentId = null));
+  });
+
   // Make the session a priority target for WS delivery, and fall back to REST
   // loading when the history has not been fetched yet.
   $effect(() => {
@@ -303,6 +319,12 @@
 
   let killDialogOpen = $state(false);
   let killing = $state(false);
+
+  // The force-stop confirmation closes on the system back gesture.
+  $effect(() => {
+    if (!killDialogOpen) return;
+    return registerOverlay("session-kill", () => (killDialogOpen = false));
+  });
 
   // Execution state of Resume (restarting a stopped session)
   let resuming = $state(false);
@@ -899,8 +921,8 @@
           onclick={() => dock.collapse()}
         ></button>
         <div
-          transition:fly|local={{ y: 8, duration: motion.duration(160) }}
-          class="bg-card border-border absolute inset-x-2 top-6 bottom-2 flex flex-col overflow-hidden rounded-xl border shadow-2xl"
+          transition:fly|local={{ y: 24, duration: motion.duration(180) }}
+          class="bg-card absolute inset-0 flex flex-col overflow-hidden"
         >
           <DockHost {ctx} {items} mobile oncollapse={() => dock.collapse()} />
         </div>

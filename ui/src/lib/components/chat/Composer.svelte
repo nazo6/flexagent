@@ -317,7 +317,7 @@
           <Button
             variant="outline"
             size="sm"
-            class="ml-auto h-6 text-[11px]"
+            class="ml-auto h-6 text-[11px] touch-target-sm"
             disabled={sending || resuming}
             onclick={resumeAndSend}
           >
@@ -334,7 +334,7 @@
           {#each commandMatches as command (command.name)}
             <button
               type="button"
-              class="bg-chip hover:bg-chip-hover border-border flex items-center gap-1 rounded-md border px-2 py-1 text-[13px]"
+              class="bg-chip hover:bg-chip-hover border-border touch-target-sm flex items-center gap-1 rounded-md border px-2 py-1 text-[13px]"
               onclick={() => applyCommand(command.name)}
             >
               <SlashIcon class="size-3" />
@@ -389,7 +389,7 @@
     <Button
       variant="outline"
       size="sm"
-      class={`h-7 rounded-full px-2 text-xs gap-1 ${
+      class={`touch-target h-7 rounded-full px-2 text-xs gap-1 ${
         autoApprove ? "border-signal/40 bg-signal-soft text-signal hover:bg-signal-soft" : ""
       }`}
       disabled={controlBusy || sending}
@@ -433,7 +433,7 @@
       <Button
         variant="destructive"
         size="icon-sm"
-        class="rounded-full"
+        class="touch-target-lg rounded-full"
         disabled={controlBusy}
         title={m.chat_stop_title()}
         aria-label={controlBusy ? m.chat_stopping() : m.chat_stop()}
@@ -450,7 +450,7 @@
       <Button
         variant="outline"
         size="icon-sm"
-        class="rounded-full border-signal/40 bg-signal-soft text-signal hover:border-signal/60 hover:bg-signal-soft hover:text-signal"
+        class="touch-target rounded-full border-signal/40 bg-signal-soft text-signal hover:border-signal/60 hover:bg-signal-soft hover:text-signal"
         disabled={sending || resuming}
         title={m.chat_resume_title()}
         aria-label={resuming ? m.chat_resuming() : m.chat_resume()}

@@ -97,7 +97,7 @@
     <Button
       size="xs"
       variant="ghost"
-      class="text-muted-foreground hover:text-foreground gap-1 px-2 font-normal"
+      class="text-muted-foreground hover:text-foreground touch-target-sm gap-1 px-2 font-normal"
       title={m.chat_action_copy()}
       aria-label={m.chat_action_copy()}
       onclick={() => void copy()}
@@ -109,7 +109,7 @@
       <Button
         size="xs"
         variant="ghost"
-        class="text-muted-foreground hover:text-foreground gap-1 px-2 font-normal"
+        class="text-muted-foreground hover:text-foreground touch-target-sm gap-1 px-2 font-normal"
         title={revertTitle}
         aria-label={revertTitle}
         disabled={!canRevert}
@@ -123,7 +123,7 @@
       <Button
         size="xs"
         variant="ghost"
-        class="text-muted-foreground hover:text-foreground gap-1 px-2 font-normal"
+        class="text-muted-foreground hover:text-foreground touch-target-sm gap-1 px-2 font-normal"
         title={forkTitle}
         aria-label={forkTitle}
         disabled={!canFork}

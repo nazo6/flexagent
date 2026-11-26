@@ -36,6 +36,7 @@ PC ブラウザ、ローカル直結 (`node.addr`、既定 `localhost:7860`)、�
 - **表示規則**: 機械的文字列（branch / path / ID / model / 時刻）のみ mono フォント。ステータスは色だけでなくラベル・アイコンを併記する。ターミナルと Shiki コードテーマは可読性優先で固定テーマを維持する。
 - **選択・状態の表現**: 選択は `signal-soft` の塗りと文字ウェイト、要対応はインラインのステータスアイコンとピル、カードや折りたたみは 1px の全面ボーダーで示す。左端のアクセントバーは使わない。
 - **Motion**: 状態変化は 120ms（hover / press）/ 160ms（開閉・状態クロスフェード）/ 240ms（強調）を上限とし、`transform` と `opacity` を優先する。高さアニメは折りたたみパネルだけに限定し、履歴の初期描画・セッション切替・ページング・スクロールは動かさない。新着メッセージの入場とサイドバーの並べ替えは、ライブな変化に限って動かす。実行中スイープは `running` の間だけ、承認リングはカードがライブで現れたときの一度だけ、ロゴ描画はコールドスタート時だけ再生する。`prefers-reduced-motion` を尊重し、Browser > Appearance の `Motion: System / Full / Reduced`（`localStorage["fxg:motion"]`）で端末ごとに上書きできる。Reduced は装飾的なループと移動を止めるが、実行中を示すスピナーは残す。ターミナル / Monaco は対象外。
+- **モバイル密度**: `pointer: coarse` では本文 15px・入力 16px・最小ヒット領域 32–44px（`.touch-target*`）・リスト行 44px（`.touch-row`）に上げる。デスクトップのコンパクト密度をそのまま持ち込まず、指で押せることを優先する。
 
 ---
 
@@ -84,7 +85,7 @@ Settings 画面の中間パス（`/settings`, `/settings/hub`, `/settings/nodes`
    - **Workspace Dock（右レール / モバイルオーバーレイ）**:
      - 右ペインは workspace（`node_id` + canonical `local_path`）スコープのツールドック。外側のツールは **Files / Changes / Terminal の固定**で、切替はデスクトップのレールとモバイルのセッションヘッダーのアイコンで行う。アクティブツール・Files のツリー表示・開いているファイル・プレビューのモード・幅を workspace ごとに保持し、セッション切替では閉じない。workspace が変わったときだけ状態を入れ替える。
      - ドックのヘッダーはアクティブツール名と閉じるボタンだけを持ち、外側の可変タブは持たない。ドックを閉じるのはヘッダー / オーバーレイの閉じるボタンで、ツールを閉じる概念はない。
-     - モバイルではセッションヘッダーの Files / Changes / Terminal アイコンから 1 タップで開く。会話の上に背景を暗くしたオーバーレイとして表示し、背景タップまたは右上の閉じるボタンで畳む。会話は背後に残すが `inert` にして操作対象から外す。
+     - モバイルではセッションヘッダーの Files / Changes / Terminal アイコンから 1 タップで開く。会話の上に背景を暗くした全画面オーバーレイとして表示し、背景タップまたは右上の閉じるボタンで畳む。会話は背後に残すが `inert` にして操作対象から外す。
      - **Files**: workspace の Git toplevel（非 Git なら workspace パス）を起点にした遅延読み込みのツリーと、ファイルプレビューの 2 ペイン。`git status` の変更バッジ、隠しファイル / 重いディレクトリの表示切替、変更のみの一覧を持つ。ツリー上部のフィルタは `GET .../workspace/fs/search` による **ファイル名のクイックオープン** で、展開していないディレクトリのファイルも相対パスの部分一致で探してプレビューで開ける（Git では `git ls-files` の tracked + untracked - ignored、非 Git では上限付きの走査）。デスクトップではツリーを隠してプレビューを全幅にでき、分割比は境界のドラッグで変更できる（workspace ごとに保持）。モバイルではツリー ↔ プレビューを戻るボタンで切り替える。ハブ経由でも利用できる（ハブが対象ノードへ中継する）。
      - **File preview（Files 内）**: プレビュー上部にファイルタブ（可変・中クリックで閉じる）を持つ。タブには **プレビュー（一時）** と **固定** の 2 種があり、プレビュータブは常に最大 1 枚で、次のプレビューオープンがその位置を置き換える（タブは増えない）。ツリー / 変更一覧 / チャットのファイルリンクの単クリックはプレビュー、ダブルクリックは固定で開き、タブのダブルクリックでも固定できる（プレビューのヘッダーのピンボタンでも固定できる）。同じファイルを開き直したときはタブを増やさず内容と行を更新し、固定で開き直すとプレビューは固定へ昇格する。プレビュー状態は workspace ごとに保存・復元する。`View` は Shiki の読み取り専用表示（Markdown は Preview / Source を切替、PNG / JPEG / GIF / WebP / BMP / AVIF / ICO は画像プレビュー）、`Diff` は単一ファイルの diff（PC は `monaco-editor`、モバイルは `shiki`）。Git status バッジを表示し、バイナリ・大きすぎるファイル・削除済みファイルを区別する。**Phase 1 は読み取り専用**で、編集・保存は未対応（[`docs/backlog.md`](./backlog.md) §6）。
      - **Changes**: `Session`（セッション内の tool diff）/ `Worktree`（`git status`）/ `Branch`（base との累積 diff）の 3 スコープ。行をクリックすると Files ツールのプレビューにファイルを開く（Diff モード）。Session の編集差分はノードがオフラインでも閲覧できる。`Worktree` スコープでは変更一覧の下の入力欄から、worktree の全変更を `git add -A` で stage して 1 コミットを作成できる（メッセージ必須、部分 stage は対象外）。ヘッダーの Pull / Push から upstream と同期できる。Pull は fetch + `git merge --ff-only` のみで、merge commit の作成や conflict の解消は行わない。Push は force せず、upstream が未設定なら `origin` に初回 push して upstream を設定する。
@@ -135,6 +136,8 @@ Web ターミナルは `ghostty-web`（WASM 版 `libghostty-vt` + Canvas 2D）�
 - **`manifest.webmanifest`**: `"display": "standalone"`, `"display_override": ["window-controls-overlay", "standalone"]` を設定。
 - **Safe area**: `app.html` の `viewport-fit=cover` に対し、`app.css` の `--safe-*`（`env(safe-area-inset-*)`）を `.safe-area-shell`（アプリ全体の上下左右）と `.safe-area-portal`（body へ portal されるモバイルドロワー）に適用する。ノッチ・ステータスバー・ホームインジケータの下にヘッダー / コンポーザー / ナビゲーションを置かない。トーストも上端のインセット分だけ下げる。
 - **モバイル入力とスクロール**: `viewport` に `interactive-widget=resizes-content` を指定し、`innerHeight` と `visualViewport` の差から `--app-height` / `--keyboard-inset` を更新する。シェルとポータルは下インセットを `max(safe-area, keyboard)` で確保するため、composer がキーボードに隠れない。スクロール領域は `overscroll-behavior-y: contain` で scroll chaining と PWA の pull-to-refresh（アプリ再起動）を止め、タップ可能要素は `touch-action: manipulation` と透明な tap highlight で 300ms 待ち・二重タップズーム・グレーのフラッシュを避ける。
+- **戻る操作とオーバーレイ**: モバイルで開く drawer / dock / TurnOutline / SubagentDetail / Problem center / ピッカーシート / ダイアログは、開いている間だけ overlay stack に登録する。`beforeNavigate` の `popstate` で最上位を閉じて遷移をキャンセルするため、戻るは「最上位のシートを閉じる」、次の戻るが「前の画面へ」になる。オーバーレイのために番兵の履歴エントリは積まない。
+- **タッチ形状**: `pointer: coarse` では `.touch-target-lg`（44px）/ `.touch-target`（40px）/ `.touch-target-sm`（36px）/ `.touch-target-xs`（32px）で最小ヒット領域を確保し、`.touch-row` でリスト行を 44px 以上にする。入力欄は 16px にして iOS のフォーカスズームを避ける。`lg` 未満ではピッカーを vaul のボトムシート、workspace dock を全画面シートにする。
 - **タッチ向け先読み**: `data-sveltekit-preload-data="tap"` により、hover のないタッチ端末でもタップ開始時に遷移先のデータ / コードを取得する。
 - **履歴の置換**: セッション作成後の遷移は `replaceState` で行い、戻る操作が消費済みの新規作成画面ではなく元の画面へ戻るようにする。外部セッションの取り込みは一覧へ戻れるよう通常の push のままにする。
 - **Window Controls Overlay (WCO)**: インストール済みデスクトップ Chromium では `env(titlebar-area-*)` と `.wco-*` クラス（`ui/src/app.css`）により OS タイトルバーとアプリトップバーを統合する。

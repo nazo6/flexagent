@@ -362,7 +362,7 @@
     <div class="border-border flex h-9 shrink-0 items-center gap-0.5 border-b px-1.5">
       <button
         type="button"
-        class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 items-center justify-center rounded-md transition-colors disabled:opacity-50"
+        class="text-muted-foreground hover:bg-accent hover:text-foreground touch-target-xs flex size-7 items-center justify-center rounded-md transition-colors disabled:opacity-50"
         title={m.dock_files_refresh()}
         aria-label={m.dock_files_refresh()}
         disabled={loading}
@@ -373,7 +373,7 @@
       <button
         type="button"
         class={cn(
-          "flex size-7 items-center justify-center rounded-md transition-colors",
+          "touch-target-xs flex size-7 items-center justify-center rounded-md transition-colors",
           showHidden
             ? "bg-signal-soft text-signal"
             : "text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -392,7 +392,7 @@
       <button
         type="button"
         class={cn(
-          "flex size-7 items-center justify-center rounded-md transition-colors",
+          "touch-target-xs flex size-7 items-center justify-center rounded-md transition-colors",
           showIgnored
             ? "bg-signal-soft text-signal"
             : "text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -407,7 +407,7 @@
       <button
         type="button"
         class={cn(
-          "flex size-7 items-center justify-center rounded-md transition-colors",
+          "touch-target-xs flex size-7 items-center justify-center rounded-md transition-colors",
           changedOnly
             ? "bg-signal-soft text-signal"
             : "text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -423,7 +423,7 @@
         <button
           type="button"
           class={cn(
-            "flex size-7 items-center justify-center rounded-md transition-colors",
+            "touch-target-xs flex size-7 items-center justify-center rounded-md transition-colors",
             dock.treeVisible
               ? "text-muted-foreground hover:bg-accent hover:text-foreground"
               : "bg-signal-soft text-signal",
@@ -491,7 +491,7 @@
                 <button
                   type="button"
                   data-quick-open={match.relative_path}
-                  class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
+                  class="hover:bg-accent/60 touch-row flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
                   title={match.path}
                   onclick={() => openMatch(match)}
                 >
@@ -534,7 +534,7 @@
                 {#each status.entries as entry (entry.absolute_path)}
                   <button
                     type="button"
-                    class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
+                    class="hover:bg-accent/60 touch-row flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-[12px]"
                     title={entry.path}
                     onclick={() => openChanged(entry)}
                     ondblclick={() => openChangedPinned(entry)}
@@ -551,7 +551,7 @@
                 {@const badge = statusByPath.get(row.entry.path)}
                 <button
                   type="button"
-                  class="hover:bg-accent/60 flex w-full items-center gap-1.5 rounded-sm py-1 pr-1.5 text-left text-[12px]"
+                  class="hover:bg-accent/60 touch-row flex w-full items-center gap-1.5 rounded-sm py-1 pr-1.5 text-left text-[12px]"
                   style={`padding-left: ${row.depth * 12 + 6}px`}
                   title={row.entry.path}
                   onclick={() => openEntry(row.entry)}
