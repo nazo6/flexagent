@@ -77,13 +77,20 @@ Client ⇔ Hub / Local Node（HTTP / WebSocket）で共有する型を定義し�
 | `CompactionUpdated`                          | コンテキスト圧縮の進行状況。                                                                            |
 | `StatusChanged`                              | セッション状態。`sessions.status`。                                                                     |
 | `SessionArchived`                            | アーカイブ / 復元。`sessions.archived_at`。                                                             |
+| `SessionReverted`                            | 会話を戻した境界（`up_to_node_seq` / `files`）。UI は境界以降を非表示にする。                           |
 | `SessionDeleted`                             | 削除 tombstone。本文イベントと承認 / 質問をパージする。                                                 |
 
 ### 1.4 制御アクション
 
 `SessionControlAction` は `set_mode` / `set_config` / `set_permission_policy` /
-`cancel` / `kill_terminal` / `kill` / `dispose` を持ちます。
+`revert` / `compact` / `cancel` / `kill_terminal` / `kill` / `dispose` を持ちます。
 
+- `set_mode` / `set_config` / `set_permission_policy`: モード・設定・承認ポリシーを
+  変更する。
+- `revert`: 指定した `up_to_node_seq` まで会話を戻す。native driver では
+  `files = true` により workspace のファイルも復元でき、`SessionReverted` が
+  記録される。
+- `compact`: エージェントのコンテキストを手動で圧縮する。
 - `cancel`: 実行中のターンだけを中断する。協調的な中断であり、エージェントが
   実行中のツールを止めるかはエージェント側の判断に委ねる。
 - `kill_terminal`: エージェントが開始した 1 つのターミナル（ACP
@@ -97,9 +104,10 @@ Client ⇔ Hub / Local Node（HTTP / WebSocket）で共有する型を定義し�
 
 `ErrorCode` の全 variant と UI 文言の対応は `ErrorCode::ALL` と
 `ui/messages/en.json` の契約テストで検証します。
-`ErrorInfo` は `code` / `message` / `details` / `retryable` / `recovery` /
-`data_safety` / `request_id` を運びます。REST / WS のエラー本文は
-`{ "error": { "code", "message", ... } }` に統一します。
+`ErrorInfo` は `code` / `message` / `params` / `details` / `retryable` /
+`recovery` / `data_safety` / `request_id` / `docs` を運びます。REST のエラー本文は
+`{ "error": { "code", "message", ... } }`、WS は
+`{ "op": "error", "error": { ... } }` で、`error` の中身は同じ `ErrorInfo` です。
 REST 応答には `x-request-id` ヘッダが付与され、ログ相関に使われます。
 クライアント側のエラー分類は本文の `error.code` を使います。
 
@@ -221,8 +229,8 @@ prune します。`sessions` は最大 1000 件で、超過時は
   （CSWSH 対策）。
 - 監査ログは、セッション起動、承認 / 質問の解決、kill switch、ノード停止、
   Worktree 操作、プロジェクト紐付け、エージェント管理、ノードトークン、
-  認証トークン再生成、設定更新、ペアリング、秘密管理を記録する。プロンプト送信は
-  `UserMessage` イベントとして `session_events` に残す。
+  認証トークン再生成、設定更新、ペアリング、秘密管理、一時VMプロビジョニングを
+  記録する。プロンプト送信は `UserMessage` イベントとして `session_events` に残す。
 
 ### 3.1 REST API
 
@@ -385,7 +393,7 @@ driver 側のキャッシュを無視する（UI の明示的な Refresh 用）�
 
 - 上り: `Subscribe` / `SendPrompt` / `ControlSession` / `Ping`。
 - 下り: `EventBatch` / `LiveStreamDelta` / `ProvisioningLog` / `CommandResult` /
-  `SystemStatus` / `Error` / `Pong`。
+  `SystemStatus` / `ProjectsUpdated` / `Error` / `Pong`。
 - 承認 / 質問の回答、Resume / Archive / Delete は REST 専用。
 - 受信イベントは `event_id` / `(session_id, node_seq)` で upsert し、
   `LiveStreamDelta` は `message_id` / `thought_id` でマージする。
