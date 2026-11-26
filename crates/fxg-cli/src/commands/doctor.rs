@@ -120,13 +120,14 @@ impl usage::RunAsync for DoctorArgs {
         };
         checks.push(("database".to_owned(), db_ok.0, db_ok.1));
 
+        let log_file = fxg_api::resolve_log_file(&node.log_path());
         checks.push((
             "logs".to_owned(),
             true,
-            if node.log_path().is_file() {
-                node.log_path().display().to_string()
+            if log_file.is_file() {
+                log_file.display().to_string()
             } else {
-                format!("{} (not created yet)", node.log_path().display())
+                format!("{} (not created yet)", log_file.display())
             },
         ));
 
