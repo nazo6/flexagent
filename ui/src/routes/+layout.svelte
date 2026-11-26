@@ -13,6 +13,7 @@
   import { Toaster } from "#lib/components/ui/sonner/index.ts";
   import { connection, initApp, sync } from "#lib/stores/app.svelte.ts";
   import { problems, type AppProblem } from "#lib/stores/problems.svelte.ts";
+  import { motion } from "#lib/motion.svelte.ts";
   import { theme } from "#lib/theme.svelte.ts";
   import type { RecoveryAction } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
@@ -58,6 +59,7 @@
 
   onMount(() => {
     theme.init();
+    motion.init();
     void initApp();
   });
 

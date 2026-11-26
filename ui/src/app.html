@@ -17,8 +17,12 @@
           if (palette === "bone" || palette === "graphite" || palette === "moss") {
             document.documentElement.dataset.palette = palette;
           }
+          var motion = localStorage.getItem("fxg:motion");
+          if (motion === "system" || motion === "full" || motion === "reduced") {
+            document.documentElement.dataset.motion = motion;
+          }
         } catch (error) {
-          /* localStorage can be unavailable; the default palette is fine. */
+          /* localStorage can be unavailable; the defaults are fine. */
         }
       })();
     </script>

@@ -8,6 +8,7 @@
   import { sync } from "#lib/stores/app.svelte.ts";
   import { pinned } from "#lib/stores/pinned.svelte.ts";
   import { prefs } from "#lib/stores/prefs.svelte.ts";
+  import { motion, type MotionPreference } from "#lib/motion.svelte.ts";
   import { PALETTES, theme, type PaletteId } from "#lib/theme.svelte.ts";
   import { cn } from "#lib/utils.ts";
   import { setMode, userPrefersMode } from "mode-watcher";
@@ -51,6 +52,17 @@
         return m.settings_appearance_palette_moss();
     }
   }
+
+  function motionLabel(value: MotionPreference): string {
+    switch (value) {
+      case "full":
+        return m.settings_appearance_motion_full();
+      case "reduced":
+        return m.settings_appearance_motion_reduced();
+      default:
+        return m.settings_appearance_motion_system();
+    }
+  }
 </script>
 
 {#if data.tab === "appearance"}
@@ -84,6 +96,50 @@
           </Select.Item>
           <Select.Item value="dark" label={m.settings_browser_theme_dark()} class="text-[13px]">
             {m.settings_browser_theme_dark()}
+          </Select.Item>
+        </Select.Content>
+      </Select.Root>
+    </div>
+  </Card>
+
+  <Card class="gap-4 p-5">
+    <div class="flex flex-col gap-1">
+      <h2 class="text-sm font-semibold">{m.settings_appearance_motion()}</h2>
+      <p class="text-muted-foreground text-[13px]">
+        {m.settings_appearance_motion_note()}
+      </p>
+    </div>
+    <div class="grid max-w-sm gap-1.5">
+      <Select.Root
+        type="single"
+        value={motion.preference}
+        onValueChange={(value) => motion.setPreference(value as MotionPreference)}
+      >
+        <Select.Trigger
+          id="browser-motion"
+          size="sm"
+          class="w-full text-[13px]"
+          aria-label={m.settings_appearance_motion()}
+        >
+          <span>{motionLabel(motion.preference)}</span>
+        </Select.Trigger>
+        <Select.Content>
+          <Select.Item
+            value="system"
+            label={m.settings_appearance_motion_system()}
+            class="text-[13px]"
+          >
+            {m.settings_appearance_motion_system()}
+          </Select.Item>
+          <Select.Item value="full" label={m.settings_appearance_motion_full()} class="text-[13px]">
+            {m.settings_appearance_motion_full()}
+          </Select.Item>
+          <Select.Item
+            value="reduced"
+            label={m.settings_appearance_motion_reduced()}
+            class="text-[13px]"
+          >
+            {m.settings_appearance_motion_reduced()}
           </Select.Item>
         </Select.Content>
       </Select.Root>
