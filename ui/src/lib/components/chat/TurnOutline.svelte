@@ -14,7 +14,6 @@
   import { snippetSegments } from "#lib/search.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { cn } from "#lib/utils.ts";
-  import { untrack } from "svelte";
   import ListIcon from "@lucide/svelte/icons/list";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import SearchIcon from "@lucide/svelte/icons/search";
@@ -52,13 +51,10 @@
   /** Drops out-of-order responses when the query changes while a search runs. */
   let searchToken = 0;
 
-  // A new query starts from the first page.
-  $effect(() => {
-    const needle = query;
-    untrack(() => {
-      if (needle !== "") searchLimit = SEARCH_PAGE_SIZE;
-    });
-  });
+  /** A new query starts from the first page. */
+  function resetSearchLimit(): void {
+    searchLimit = SEARCH_PAGE_SIZE;
+  }
 
   $effect(() => {
     const needle = query.trim();
@@ -176,6 +172,7 @@
       <input
         type="search"
         bind:value={query}
+        oninput={resetSearchLimit}
         placeholder={m.chat_turns_search_placeholder()}
         aria-label={m.chat_turns_search_placeholder()}
         class="placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-[12px] outline-none"
@@ -186,7 +183,10 @@
           class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-5 shrink-0 items-center justify-center rounded-md"
           title={m.chat_turns_search_clear()}
           aria-label={m.chat_turns_search_clear()}
-          onclick={() => (query = "")}
+          onclick={() => {
+            query = "";
+            resetSearchLimit();
+          }}
         >
           <XIcon class="size-3" />
         </button>

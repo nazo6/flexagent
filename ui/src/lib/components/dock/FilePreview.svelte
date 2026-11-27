@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { untrack } from "svelte";
   import CodeView from "#lib/components/dock/CodeView.svelte";
   import GitStatusBadge from "#lib/components/dock/GitStatusBadge.svelte";
   import DiffViewer from "#lib/components/diff/DiffViewer.svelte";
@@ -43,15 +42,23 @@
   const scope = $derived<DockDiffScope>(tab.scope);
   const isMarkdown = $derived(/\.(md|markdown|mdx)$/i.test(path));
 
-  let markdownPreview = $state(untrack(() => tab.line === null));
-  let previewKey = untrack(() => `${tab.path}\u0000${tab.line ?? ""}`);
-  // A chat link with a line opens in source view; keep the toggle available.
-  $effect(() => {
-    const key = `${tab.path}\u0000${tab.line ?? ""}`;
-    if (key === previewKey) return;
-    previewKey = key;
-    markdownPreview = tab.line === null;
-  });
+  /**
+   * A chat link with a line opens in source view; keep the toggle available.
+   * The toggle is an explicit override keyed by the tab, so opening another
+   * file falls back to the default without an effect copying the prop.
+   */
+  const previewKey = $derived(`${tab.path}\u0000${tab.line ?? ""}`);
+  let previewOverride = $state<{ key: string; value: boolean } | null>(null);
+  const markdownPreview = $derived(
+    previewOverride !== null && previewOverride.key === previewKey
+      ? previewOverride.value
+      : tab.line === null,
+  );
+
+  function togglePreview(): void {
+    previewOverride = { key: previewKey, value: !markdownPreview };
+  }
+
   let view = $state<WorkspaceFileView | null>(null);
   let diff = $state<WorkspaceDiffResponse | null>(null);
   let viewLoading = $state(false);
@@ -175,7 +182,7 @@
       class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md transition-colors"
       title={markdownPreview ? m.dock_file_source() : m.dock_file_preview()}
       aria-label={markdownPreview ? m.dock_file_source() : m.dock_file_preview()}
-      onclick={() => (markdownPreview = !markdownPreview)}
+      onclick={togglePreview}
     >
       {#if markdownPreview}
         <FileCodeIcon class="size-3.5" />
