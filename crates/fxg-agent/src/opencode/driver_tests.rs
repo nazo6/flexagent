@@ -319,11 +319,19 @@ fn attachments_use_prompt_input_uris() {
             data_b64: Some("aGk=".to_owned()),
         },
     ]);
-    assert_eq!(files[0]["uri"], "file:///tmp/a%20b.txt");
-    assert_eq!(files[0]["name"], "a.txt");
     assert_eq!(files[1]["uri"], "data:text/plain;base64,aGk=");
     assert_eq!(files[1]["source"]["type"], "inline");
     assert_eq!(files[1]["name"], "b.txt");
+
+    // The `url` crate leaves spaces unescaped on Windows; assert the shape and
+    // the encoded/unescaped suffix instead of a platform-specific string.
+    let uri = files[0]["uri"].as_str().expect("file uri");
+    assert!(uri.starts_with("file:"), "unexpected file uri: {uri}");
+    assert!(
+        uri.ends_with("a b.txt") || uri.ends_with("a%20b.txt"),
+        "unexpected file uri: {uri}"
+    );
+    assert_eq!(files[0]["name"], "a.txt");
 }
 
 #[test]
