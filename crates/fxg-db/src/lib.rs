@@ -29,6 +29,7 @@
 #![warn(missing_docs)]
 
 pub mod audit;
+pub mod drafts;
 pub mod error;
 pub mod events;
 pub mod outbox;

@@ -238,6 +238,29 @@ mod tests {
         builder.body(Body::from(body.to_owned())).expect("request")
     }
 
+    fn patch_json(host: &str, uri: &str, token: Option<&str>, body: &str) -> HttpRequest<Body> {
+        let mut builder = HttpRequest::builder()
+            .method("PATCH")
+            .uri(uri)
+            .header(header::HOST, host)
+            .header(header::CONTENT_TYPE, "application/json");
+        if let Some(token) = token {
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
+        }
+        builder.body(Body::from(body.to_owned())).expect("request")
+    }
+
+    fn delete(host: &str, uri: &str, token: Option<&str>) -> HttpRequest<Body> {
+        let mut builder = HttpRequest::builder()
+            .method("DELETE")
+            .uri(uri)
+            .header(header::HOST, host);
+        if let Some(token) = token {
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
+        }
+        builder.body(Body::empty()).expect("request")
+    }
+
     #[tokio::test]
     async fn login_issues_session_cookie_and_logout_clears_it() {
         let (daemon, _dir) = test_daemon().await;
@@ -1325,6 +1348,102 @@ mod tests {
             health[0].state,
             fxg_protocol::common::ComponentState::NotMeasured
         );
+
+        daemon.shutdown();
+        tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())
+            .await
+            .expect("stop");
+    }
+
+    #[tokio::test]
+    async fn rest_drafts_crud_and_revision_conflict() {
+        let (daemon, _dir) = test_daemon().await;
+        let app = router(daemon.state().clone(), daemon.http_addr());
+        let host = host_of(&daemon);
+        let token = daemon.state().auth_token();
+
+        let create = serde_json::json!({
+            "body": "first",
+            "origin_device_id": "test-device",
+        });
+        let response = app
+            .clone()
+            .oneshot(post_json(
+                &host,
+                "/api/v1/drafts",
+                Some(&token),
+                &create.to_string(),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let created = body_json(response).await;
+        let draft_id = created["draft_id"].as_str().expect("draft id").to_owned();
+        assert_eq!(created["revision"], 1);
+        assert_eq!(created["body"], "first");
+
+        let response = app
+            .clone()
+            .oneshot(get(&host, "/api/v1/drafts?sessionless=true", Some(&token)))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let listed = body_json(response).await;
+        assert_eq!(listed["drafts"].as_array().expect("drafts").len(), 1);
+
+        let update = serde_json::json!({
+            "expected_revision": 1,
+            "body": "second",
+            "origin_device_id": "test-device",
+        });
+        let response = app
+            .clone()
+            .oneshot(patch_json(
+                &host,
+                &format!("/api/v1/drafts/{draft_id}"),
+                Some(&token),
+                &update.to_string(),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let updated = body_json(response).await;
+        assert_eq!(updated["body"], "second");
+        assert_eq!(updated["revision"], 2);
+
+        // A stale revision is a structured 409, not a 500.
+        let response = app
+            .clone()
+            .oneshot(patch_json(
+                &host,
+                &format!("/api/v1/drafts/{draft_id}"),
+                Some(&token),
+                &update.to_string(),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let conflict = body_json(response).await;
+        assert_eq!(conflict["error"]["code"], "REVISION_MISMATCH");
+
+        let response = app
+            .clone()
+            .oneshot(delete(
+                &host,
+                &format!("/api/v1/drafts/{draft_id}"),
+                Some(&token),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let response = app
+            .oneshot(get(&host, "/api/v1/drafts", Some(&token)))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let listed = body_json(response).await;
+        assert!(listed["drafts"].as_array().expect("drafts").is_empty());
 
         daemon.shutdown();
         tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())

@@ -10,14 +10,15 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::common::{
-    AgentAuthMethodInfo, AuditLogEntry, ClientSource, CommandResult, ConfigOptionInfo, DiffScope,
-    ElicitationAction, ElicitationContent, ElicitationRequestEntry, ErrorInfo, ModeInfo,
-    NodeSummary, PermissionRequestEntry, ProjectSummary, PromptInput, ResolvedBy, SearchHit,
-    SessionControlAction, SessionStatus, SessionSummary, StreamDeltaPayload, SystemStatus,
+    AgentAuthMethodInfo, AttachmentMeta, AuditLogEntry, ClientSource, CommandResult,
+    ConfigOptionInfo, DiffScope, ElicitationAction, ElicitationContent, ElicitationRequestEntry,
+    ErrorInfo, ModeInfo, NodeSummary, PermissionRequestEntry, ProjectSummary, PromptInput,
+    ResolvedBy, SearchHit, SessionControlAction, SessionStatus, SessionSummary, StreamDeltaPayload,
+    SystemStatus,
 };
 use crate::events::{SessionEventBatch, SessionEventEnvelope};
 use crate::settings::{CustomAgentConfig, ProjectIdentity};
-use crate::{CommandId, NodeId, ProjectId, SecretId, SessionId};
+use crate::{CommandId, DraftId, NodeId, ProjectId, SecretId, SessionId};
 
 /// Kind of endpoint (`GET /api/v1/system/info`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -993,6 +994,113 @@ pub struct KillSwitchResponse {
 pub struct AuditLogsResponse {
     /// Audit logs (newest first)
     pub logs: Vec<AuditLogEntry>,
+}
+
+/// One composer draft (`GET /api/v1/drafts`).
+///
+/// Drafts are user-authored, mutable data. They are not part of the session
+/// event log; see `docs/proposals/2026-11-27-composer-drafts-and-sync.md`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct Draft {
+    /// Draft ID (UUID v7, stable across devices)
+    pub draft_id: DraftId,
+    /// Display title (empty = derive from the first line of `body`)
+    pub title: String,
+    /// Prompt body
+    pub body: String,
+    /// Optional session this draft is intended for
+    pub session_id: Option<SessionId>,
+    /// Optional project context for a session-less draft
+    pub project_id: Option<ProjectId>,
+    /// Optional execution node context for a session-less draft
+    pub node_id: Option<NodeId>,
+    /// Attachment metadata (v1: the payload stays on the device)
+    pub attachments: Vec<AttachmentMeta>,
+    /// Optimistic-lock revision
+    pub revision: u64,
+    /// Device that made the last change
+    pub origin_device_id: String,
+    /// Creation time (Unix epoch ms)
+    pub created_at: i64,
+    /// Last update time (Unix epoch ms)
+    pub updated_at: i64,
+}
+
+/// `GET /api/v1/drafts` response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct DraftListResponse {
+    /// Active (not deleted) drafts, newest first
+    pub drafts: Vec<Draft>,
+}
+
+/// `GET /api/v1/drafts` query.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct DraftListQuery {
+    /// Only drafts intended for this session
+    pub session_id: Option<SessionId>,
+    /// Only drafts without a session (the new-session screen)
+    pub sessionless: Option<bool>,
+    /// Only drafts with this project context
+    pub project_id: Option<ProjectId>,
+    /// Maximum number of drafts (default: 200, max: 1000)
+    pub limit: Option<u32>,
+}
+
+/// `POST /api/v1/drafts` request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct CreateDraftRequest {
+    /// Display title (empty = derive from the body)
+    #[serde(default)]
+    pub title: String,
+    /// Prompt body
+    #[serde(default)]
+    pub body: String,
+    /// Optional target session
+    #[serde(default)]
+    pub session_id: Option<SessionId>,
+    /// Optional project context
+    #[serde(default)]
+    pub project_id: Option<ProjectId>,
+    /// Optional execution node context
+    #[serde(default)]
+    pub node_id: Option<NodeId>,
+    /// Attachment metadata (the payload is not persisted in v1)
+    #[serde(default)]
+    pub attachments: Vec<AttachmentMeta>,
+    /// Device that created the draft
+    pub origin_device_id: String,
+}
+
+/// `PATCH /api/v1/drafts/{draft_id}` request (full replacement).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct UpdateDraftRequest {
+    /// Revision the client observed (`RevisionMismatch` on conflict)
+    pub expected_revision: u64,
+    /// Display title (empty = derive from the body)
+    #[serde(default)]
+    pub title: String,
+    /// Prompt body
+    #[serde(default)]
+    pub body: String,
+    /// Optional target session
+    #[serde(default)]
+    pub session_id: Option<SessionId>,
+    /// Optional project context
+    #[serde(default)]
+    pub project_id: Option<ProjectId>,
+    /// Optional execution node context
+    #[serde(default)]
+    pub node_id: Option<NodeId>,
+    /// Attachment metadata (the payload is not persisted in v1)
+    #[serde(default)]
+    pub attachments: Vec<AttachmentMeta>,
+    /// Device that made the change
+    pub origin_device_id: String,
 }
 
 /// Client -> Endpoint (`/api/v1/client/ws`) message.

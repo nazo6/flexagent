@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use fxg_protocol::client_api::{CreateDraftRequest, Draft, DraftListQuery, UpdateDraftRequest};
 use fxg_protocol::common::{
     AuditLogEntry, ElicitationRequestEntry, NodeSummary, PermissionRequestEntry, ProjectSummary,
     SearchHit, SessionSummary,
@@ -14,7 +15,7 @@ use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 
 use crate::error::DbError;
-use crate::{audit, events, outbox, queries, registration, settings};
+use crate::{audit, drafts, events, outbox, queries, registration, settings};
 
 /// SQLite DB handle (connection pool + execution role).
 ///
@@ -762,5 +763,38 @@ impl Db {
         project_id: &str,
     ) -> Result<u64, DbError> {
         registration::reassign_session_project(&self.pool, node_id, session_id, project_id).await
+    }
+
+    // ------------------------------------------------------------------
+    // Composer drafts
+    // ------------------------------------------------------------------
+
+    /// Lists active drafts, newest first.
+    pub async fn list_drafts(&self, query: &DraftListQuery) -> Result<Vec<Draft>, DbError> {
+        drafts::list_drafts(&self.pool, query).await
+    }
+
+    /// Loads one active draft.
+    pub async fn get_draft(&self, draft_id: &str) -> Result<Option<Draft>, DbError> {
+        drafts::get_draft(&self.pool, draft_id).await
+    }
+
+    /// Creates a draft.
+    pub async fn create_draft(&self, request: &CreateDraftRequest) -> Result<Draft, DbError> {
+        drafts::create_draft(&self.pool, request).await
+    }
+
+    /// Replaces a draft when `expected_revision` still matches.
+    pub async fn update_draft(
+        &self,
+        draft_id: &str,
+        request: &UpdateDraftRequest,
+    ) -> Result<Option<Draft>, DbError> {
+        drafts::update_draft(&self.pool, draft_id, request).await
+    }
+
+    /// Soft-deletes a draft (idempotent).
+    pub async fn delete_draft(&self, draft_id: &str) -> Result<bool, DbError> {
+        drafts::delete_draft(&self.pool, draft_id).await
     }
 }

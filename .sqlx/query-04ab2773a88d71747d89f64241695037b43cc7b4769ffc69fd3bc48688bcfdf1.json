@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO drafts\n            (draft_id, title, body, session_id, project_id, node_id, attachments_json,\n             revision, origin_device_id, created_at, updated_at)\n        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "04ab2773a88d71747d89f64241695037b43cc7b4769ffc69fd3bc48688bcfdf1"
+}

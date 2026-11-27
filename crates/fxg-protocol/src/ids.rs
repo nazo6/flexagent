@@ -95,6 +95,14 @@ string_id! {
 }
 
 string_id! {
+    /// ID of a composer draft (UUID v7).
+    ///
+    /// Stable across devices so the same draft can be edited from multiple
+    /// clients and replicated between a node and the hub.
+    DraftId
+}
+
+string_id! {
     /// Logical project ID.
     ///
     /// Either `user:<project_key>` from `project_path_links`, a normalized git

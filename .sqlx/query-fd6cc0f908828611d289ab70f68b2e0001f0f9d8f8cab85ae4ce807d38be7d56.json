@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE drafts\n           SET title = ?, body = ?, session_id = ?, project_id = ?, node_id = ?,\n               attachments_json = ?, revision = revision + 1, origin_device_id = ?,\n               updated_at = ?\n         WHERE draft_id = ? AND revision = ? AND deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "fd6cc0f908828611d289ab70f68b2e0001f0f9d8f8cab85ae4ce807d38be7d56"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE drafts\n           SET deleted_at = ?, revision = revision + 1\n         WHERE draft_id = ? AND deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "1534e93790d52913472091ffbfb863c03367a702e331f086116d84135c8e4567"
+}

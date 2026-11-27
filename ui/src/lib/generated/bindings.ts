@@ -538,6 +538,24 @@ export type ControlSessionRequest = {
 	action: SessionControlAction,
 };
 
+/**  `POST /api/v1/drafts` request. */
+export type CreateDraftRequest = {
+	/**  Display title (empty = derive from the body) */
+	title?: string,
+	/**  Prompt body */
+	body?: string,
+	/**  Optional target session */
+	session_id?: SessionId | null,
+	/**  Optional project context */
+	project_id?: ProjectId | null,
+	/**  Optional execution node context */
+	node_id?: NodeId | null,
+	/**  Attachment metadata (the payload is not persisted in v1) */
+	attachments?: AttachmentMeta[],
+	/**  Device that created the draft */
+	origin_device_id: string,
+};
+
 /**
  *  `POST /api/v1/sessions` request (start a new session).
  *
@@ -673,6 +691,63 @@ export type DiffScope =
 "uncommitted" |
 /**  Cumulative diff against the base branch (`git diff <base>...HEAD`) */
 "branch_base";
+
+/**
+ *  One composer draft (`GET /api/v1/drafts`).
+ *
+ *  Drafts are user-authored, mutable data. They are not part of the session
+ *  event log; see `docs/proposals/2026-11-27-composer-drafts-and-sync.md`.
+ */
+export type Draft = {
+	/**  Draft ID (UUID v7, stable across devices) */
+	draft_id: DraftId,
+	/**  Display title (empty = derive from the first line of `body`) */
+	title: string,
+	/**  Prompt body */
+	body: string,
+	/**  Optional session this draft is intended for */
+	session_id: SessionId | null,
+	/**  Optional project context for a session-less draft */
+	project_id: ProjectId | null,
+	/**  Optional execution node context for a session-less draft */
+	node_id: NodeId | null,
+	/**  Attachment metadata (v1: the payload stays on the device) */
+	attachments: AttachmentMeta[],
+	/**  Optimistic-lock revision */
+	revision: number,
+	/**  Device that made the last change */
+	origin_device_id: string,
+	/**  Creation time (Unix epoch ms) */
+	created_at: number,
+	/**  Last update time (Unix epoch ms) */
+	updated_at: number,
+};
+
+/**
+ *  ID of a composer draft (UUID v7).
+ *
+ *  Stable across devices so the same draft can be edited from multiple
+ *  clients and replicated between a node and the hub.
+ */
+export type DraftId = string;
+
+/**  `GET /api/v1/drafts` query. */
+export type DraftListQuery = {
+	/**  Only drafts intended for this session */
+	session_id: SessionId | null,
+	/**  Only drafts without a session (the new-session screen) */
+	sessionless: boolean | null,
+	/**  Only drafts with this project context */
+	project_id: ProjectId | null,
+	/**  Maximum number of drafts (default: 200, max: 1000) */
+	limit: number | null,
+};
+
+/**  `GET /api/v1/drafts` response. */
+export type DraftListResponse = {
+	/**  Active (not deleted) drafts, newest first */
+	drafts: Draft[],
+};
 
 /**  Dropped / retried delivery counters (reset when the process restarts). */
 export type DropCounters = {
@@ -2916,6 +2991,26 @@ export type UpdateAgentSettingsRequest = {
 	aliases: { [key in string]: string },
 	/**  Revision the client observed (`REVISION_MISMATCH` on conflict) */
 	expected_revision: number,
+};
+
+/**  `PATCH /api/v1/drafts/{draft_id}` request (full replacement). */
+export type UpdateDraftRequest = {
+	/**  Revision the client observed (`RevisionMismatch` on conflict) */
+	expected_revision: number,
+	/**  Display title (empty = derive from the body) */
+	title?: string,
+	/**  Prompt body */
+	body?: string,
+	/**  Optional target session */
+	session_id?: SessionId | null,
+	/**  Optional project context */
+	project_id?: ProjectId | null,
+	/**  Optional execution node context */
+	node_id?: NodeId | null,
+	/**  Attachment metadata (the payload is not persisted in v1) */
+	attachments?: AttachmentMeta[],
+	/**  Device that made the change */
+	origin_device_id: string,
 };
 
 /**  `PATCH /api/v1/hub/settings` request. */
