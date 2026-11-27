@@ -11,8 +11,11 @@ import type {
   CreateSessionRequest,
   CreateSessionResponse,
   CreateWorktreeRequest,
+  CreateDraftRequest,
   CustomAgentConfig,
   DiffScope,
+  Draft,
+  DraftListResponse,
   ErrorInfo,
   ExternalSessionListResponse,
   FsBrowseResponse,
@@ -73,6 +76,7 @@ import type {
   WorkspaceDiffResponse,
   TestPairingRequest,
   UpdateAgentSettingsRequest,
+  UpdateDraftRequest,
   UpdateNodeSettingsRequest,
   UpdateHubSettingsRequest,
   UpdatePairingRequest,
@@ -517,6 +521,48 @@ export class ApiClient {
       "POST",
       `/api/v1/provisioners/${encodeURIComponent(name)}/test`,
     );
+  }
+
+  // ------------------------------------------------------------------
+  // Composer drafts
+  // ------------------------------------------------------------------
+
+  /** `GET /api/v1/drafts` (newest first) */
+  async drafts(
+    filter: {
+      sessionId?: string | null;
+      /** Only drafts without a session (the new-session screen). */
+      sessionless?: boolean;
+      projectId?: string | null;
+      limit?: number;
+    } = {},
+  ): Promise<Draft[]> {
+    const response = await this.#request<DraftListResponse>("GET", "/api/v1/drafts", {
+      query: {
+        session_id: filter.sessionId,
+        sessionless: filter.sessionless,
+        project_id: filter.projectId,
+        limit: filter.limit,
+      },
+    });
+    return response.drafts;
+  }
+
+  /** `POST /api/v1/drafts` */
+  createDraft(request: CreateDraftRequest): Promise<Draft> {
+    return this.#request("POST", "/api/v1/drafts", { body: request });
+  }
+
+  /** `PATCH /api/v1/drafts/:id` (optimistic lock via `expected_revision`) */
+  updateDraft(draftId: string, request: UpdateDraftRequest): Promise<Draft> {
+    return this.#request("PATCH", `/api/v1/drafts/${encodeURIComponent(draftId)}`, {
+      body: request,
+    });
+  }
+
+  /** `DELETE /api/v1/drafts/:id` (idempotent) */
+  async deleteDraft(draftId: string): Promise<void> {
+    await this.#request("DELETE", `/api/v1/drafts/${encodeURIComponent(draftId)}`);
   }
 
   // ------------------------------------------------------------------

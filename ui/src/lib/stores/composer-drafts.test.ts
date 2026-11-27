@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { AttachmentMeta } from "#lib/generated/bindings.ts";
-import { ComposerDraftStore, loadComposerDraft, saveComposerDraft } from "./composer-drafts.ts";
+import type { ApiClient } from "#lib/api/client.ts";
+import { ApiError } from "#lib/api/errors.ts";
+import type { CreateDraftRequest, Draft, UpdateDraftRequest } from "#lib/generated/bindings.ts";
+import {
+  ComposerDraftStore,
+  draftScope,
+  draftTitle,
+  loadActiveDraftId,
+  loadDeviceId,
+  NEW_SESSION_SCOPE,
+  saveActiveDraftId,
+} from "./composer-drafts.ts";
 
 /** Minimal Storage implementation for tests (mimics localStorage in Node). */
 function memoryStorage(): Storage {
@@ -17,79 +27,180 @@ function memoryStorage(): Storage {
   };
 }
 
-const attachment: AttachmentMeta = {
-  file_name: "image.png",
-  mime_type: "image/png",
-  size_bytes: 4,
-  local_path: null,
-  data_b64: "AAAA",
-};
+function draft(overrides: Partial<Draft> = {}): Draft {
+  const now = Date.now();
+  return {
+    draft_id: `draft-${Math.random().toString(36).slice(2)}`,
+    title: "",
+    body: "",
+    session_id: null,
+    project_id: null,
+    node_id: null,
+    attachments: [],
+    revision: 1,
+    origin_device_id: "device-test",
+    created_at: now,
+    updated_at: now,
+    ...overrides,
+  };
+}
 
-describe("composer drafts", () => {
-  it("round-trips prompt text per composer", () => {
-    const storage = memoryStorage();
-    saveComposerDraft("session-a", "first", storage);
-    saveComposerDraft("session-b", "second", storage);
-    expect(loadComposerDraft("session-a", storage)).toBe("first");
-    expect(loadComposerDraft("session-b", storage)).toBe("second");
-    expect(loadComposerDraft("session-c", storage)).toBe("");
+/** In-memory API that mirrors the revision checks of the real endpoints. */
+function fakeApi(initial: Draft[] = []): ApiClient {
+  const drafts = [...initial];
+  const api = {
+    async drafts(filter: { sessionId?: string | null; sessionless?: boolean }) {
+      return drafts.filter((item) => {
+        if (filter.sessionId !== undefined) return item.session_id === filter.sessionId;
+        if (filter.sessionless === true) return item.session_id === null;
+        return true;
+      });
+    },
+    async createDraft(request: CreateDraftRequest) {
+      const created = draft({
+        ...request,
+        title: request.title ?? "",
+        body: request.body ?? "",
+        session_id: request.session_id ?? null,
+        project_id: request.project_id ?? null,
+        node_id: request.node_id ?? null,
+        attachments: request.attachments ?? [],
+      });
+      drafts.push(created);
+      return created;
+    },
+    async updateDraft(draftId: string, request: UpdateDraftRequest) {
+      const index = drafts.findIndex((item) => item.draft_id === draftId);
+      if (index < 0) throw new ApiError(404, { code: "NOT_FOUND", message: "missing" }, "missing");
+      const current = drafts[index];
+      if (current.revision !== request.expected_revision) {
+        throw new ApiError(409, { code: "REVISION_MISMATCH", message: "conflict" }, "conflict");
+      }
+      const updated: Draft = {
+        ...current,
+        title: request.title ?? "",
+        body: request.body ?? "",
+        session_id: request.session_id ?? null,
+        project_id: request.project_id ?? null,
+        node_id: request.node_id ?? null,
+        revision: current.revision + 1,
+        updated_at: Date.now(),
+      };
+      drafts[index] = updated;
+      return updated;
+    },
+    async deleteDraft(draftId: string) {
+      const index = drafts.findIndex((item) => item.draft_id === draftId);
+      if (index >= 0) drafts.splice(index, 1);
+    },
+  };
+  return api as unknown as ApiClient;
+}
 
-    saveComposerDraft("session-a", "", storage);
-    expect(loadComposerDraft("session-a", storage)).toBe("");
-    expect(loadComposerDraft("session-b", storage)).toBe("second");
+describe("composer draft helpers", () => {
+  it("maps session IDs to scopes", () => {
+    expect(draftScope(null)).toBe(NEW_SESSION_SCOPE);
+    expect(draftScope("")).toBe(NEW_SESSION_SCOPE);
+    expect(draftScope("session-a")).toBe("session:session-a");
   });
 
-  it("keeps text and attachments across store instances", () => {
-    const storage = memoryStorage();
-    const store = new ComposerDraftStore(storage);
-    store.setText("session-a", "draft prompt");
-    store.setAttachments("session-a", [attachment]);
-    expect(store.get("session-a")).toEqual({
-      text: "draft prompt",
-      attachments: [attachment],
-    });
-
-    // A new instance simulates remounting the app: text is restored, but
-    // attachments are intentionally memory-only.
-    const reloaded = new ComposerDraftStore(storage);
-    expect(reloaded.get("session-a")).toEqual({
-      text: "draft prompt",
-      attachments: [],
-    });
+  it("derives the title from the first non-empty line", () => {
+    expect(draftTitle({ title: "", body: "\n  first line  \nsecond" })).toBe("first line");
+    expect(draftTitle({ title: "Custom", body: "body" })).toBe("Custom");
+    expect(draftTitle({ title: "", body: "" })).not.toBe("");
   });
 
-  it("drops the draft once both text and attachments are empty", () => {
+  it("persists the device ID and the selected draft per scope", () => {
     const storage = memoryStorage();
+    const first = loadDeviceId(storage);
+    expect(loadDeviceId(storage)).toBe(first);
+    expect(first).not.toBe("");
+
+    saveActiveDraftId("session:a", "draft-1", storage);
+    expect(loadActiveDraftId("session:a", storage)).toBe("draft-1");
+    expect(loadActiveDraftId("session:b", storage)).toBeNull();
+  });
+});
+
+describe("ComposerDraftStore", () => {
+  it("creates the first draft and migrates the legacy localStorage text", async () => {
+    const storage = memoryStorage();
+    storage.setItem("fxg:composer_draft:session-a", "legacy prompt");
     const store = new ComposerDraftStore(storage);
-    store.setText("session-a", "draft prompt");
-    store.setAttachments("session-a", [attachment]);
+    const api = fakeApi();
 
-    store.setText("session-a", "");
-    expect(store.get("session-a").attachments).toEqual([attachment]);
+    const active = await store.ensure("session:session-a", "session-a", api);
 
-    store.setAttachments("session-a", []);
-    expect(store.get("session-a")).toEqual({ text: "", attachments: [] });
+    expect(active?.body).toBe("legacy prompt");
+    expect(store.list("session:session-a")).toHaveLength(1);
     expect(storage.getItem("fxg:composer_draft:session-a")).toBeNull();
+    expect(loadActiveDraftId("session:session-a", storage)).toBe(active?.draft_id);
   });
 
-  it("clears a composer draft explicitly", () => {
-    const storage = memoryStorage();
-    const store = new ComposerDraftStore(storage);
-    store.setText("session-a", "draft prompt");
-    store.setAttachments("session-a", [attachment]);
+  it("keeps multiple drafts per scope and switches between them", async () => {
+    const store = new ComposerDraftStore(memoryStorage());
+    const api = fakeApi();
+    const first = await store.ensure("session:session-a", "session-a", api);
+    const second = await store.create("session:session-a", "session-a", api);
 
-    store.clear("session-a");
-    expect(store.get("session-a")).toEqual({ text: "", attachments: [] });
-    expect(loadComposerDraft("session-a", storage)).toBe("");
+    expect(store.list("session:session-a")).toHaveLength(2);
+    expect(store.activeDraft("session:session-a")?.draft_id).toBe(second.draft_id);
+
+    store.select("session:session-a", first?.draft_id ?? "");
+    expect(store.activeDraft("session:session-a")?.draft_id).toBe(first?.draft_id);
   });
 
-  it("ignores empty composer ids and unavailable storage", () => {
-    const storage = memoryStorage();
-    saveComposerDraft("", "text", storage);
-    expect(storage.length).toBe(0);
-    expect(loadComposerDraft("", storage)).toBe("");
-    expect(loadComposerDraft("session-a", null)).toBe("");
-    saveComposerDraft("session-a", "text", null);
-    expect(loadComposerDraft("session-a", storage)).toBe("");
+  it("autosaves the body with the observed revision", async () => {
+    const store = new ComposerDraftStore(memoryStorage());
+    const api = fakeApi();
+    const active = await store.ensure("session:session-a", "session-a", api);
+    if (active === null) throw new Error("draft missing");
+
+    store.setText("session:session-a", active.draft_id, "updated body");
+    await store.flush("session:session-a", active.draft_id);
+
+    expect(store.activeDraft("session:session-a")?.body).toBe("updated body");
+    expect(store.activeDraft("session:session-a")?.revision).toBe(2);
+  });
+
+  it("removes a draft and selects the remaining one", async () => {
+    const store = new ComposerDraftStore(memoryStorage());
+    const api = fakeApi();
+    const first = await store.ensure("session:session-a", "session-a", api);
+    const second = await store.create("session:session-a", "session-a", api);
+    if (first === null) throw new Error("draft missing");
+
+    await store.remove("session:session-a", second.draft_id, "session-a", api);
+
+    expect(store.list("session:session-a")).toHaveLength(1);
+    expect(store.activeDraft("session:session-a")?.draft_id).toBe(first.draft_id);
+  });
+
+  it("keeps the local edit as a copy on a revision conflict", async () => {
+    const store = new ComposerDraftStore(memoryStorage());
+    const remote = draft({ draft_id: "draft-1", session_id: "session-a", body: "remote" });
+    const api = fakeApi([remote]);
+    const active = await store.ensure("session:session-a", "session-a", api);
+    if (active === null) throw new Error("draft missing");
+
+    // Simulate another device saving first.
+    await api.updateDraft("draft-1", {
+      expected_revision: 1,
+      title: "",
+      body: "remote edit",
+      session_id: "session-a",
+      project_id: null,
+      node_id: null,
+      attachments: [],
+      origin_device_id: "other-device",
+    });
+
+    store.setText("session:session-a", "draft-1", "local edit");
+    await store.flush("session:session-a", "draft-1");
+
+    expect(store.list("session:session-a")).toHaveLength(2);
+    const activeAfter = store.activeDraft("session:session-a");
+    expect(activeAfter?.body).toBe("local edit");
+    expect(activeAfter?.draft_id).not.toBe("draft-1");
   });
 });

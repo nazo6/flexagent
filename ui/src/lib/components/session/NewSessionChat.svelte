@@ -11,6 +11,7 @@
   import ComposerCard from "#lib/components/composer/ComposerCard.svelte";
   import ComposerAttachments from "#lib/components/composer/ComposerAttachments.svelte";
   import ComposerAttachImageButton from "#lib/components/composer/ComposerAttachImageButton.svelte";
+  import ComposerDraftPicker from "#lib/components/composer/ComposerDraftPicker.svelte";
   import ComposerMoreButton from "#lib/components/composer/ComposerMoreButton.svelte";
   import ComposerSendButton from "#lib/components/composer/ComposerSendButton.svelte";
   import ComposerTextarea from "#lib/components/composer/ComposerTextarea.svelte";
@@ -50,7 +51,7 @@
     shouldSubmitOnEnter,
     type SessionModePreference,
   } from "#lib/session-prefs.ts";
-  import { composerDrafts, NEW_SESSION_DRAFT_ID } from "#lib/stores/composer-drafts.ts";
+  import { composerDrafts, NEW_SESSION_SCOPE } from "#lib/stores/composer-drafts.ts";
   import { prefs } from "#lib/stores/prefs.svelte.ts";
   import { getNodeAvailability } from "#lib/node-status.ts";
   import { nodeSettingsPath, resolveDefaultNodeId } from "#lib/settings-routes.ts";
@@ -133,23 +134,44 @@
   let pathMode = $state<PathMode>("existing");
   let branch = $state("");
   let baseBranch = $state("");
-  const draft = composerDrafts.get(NEW_SESSION_DRAFT_ID);
-  let promptText = $state(draft.text);
+  const draftScope = NEW_SESSION_SCOPE;
+  const activeDraft = $derived(composerDrafts.activeDraft(draftScope));
+  let promptText = $state("");
+  let editingDraftId = $state<string | null>(null);
   let busy = $state(false);
   let browserOpen = $state(false);
   let fileBrowserOpen = $state(false);
   let useCustomPath = $state(initialUrl.path !== "");
 
-  const composer = createComposerAttachments(draft.attachments);
+  const composer = createComposerAttachments();
   const attachments = $derived(composer.attachments);
+
+  $effect(() => {
+    void composerDrafts
+      .ensure(draftScope, null, sync.connection.client)
+      .catch((error) => problems.report("load drafts", error));
+  });
+
+  // Load the selected draft into the textarea (switching drafts replaces it).
+  $effect(() => {
+    const draft = activeDraft;
+    if (draft === null || draft.draft_id === editingDraftId) return;
+    editingDraftId = draft.draft_id;
+    promptText = draft.body;
+    composer.replace(draft.attachments ?? []);
+  });
 
   // Keep the prompt while the user visits another screen and comes back.
   $effect(() => {
-    composerDrafts.setText(NEW_SESSION_DRAFT_ID, promptText);
+    if (editingDraftId !== null) {
+      composerDrafts.setText(draftScope, editingDraftId, promptText);
+    }
   });
 
   $effect(() => {
-    composerDrafts.setAttachments(NEW_SESSION_DRAFT_ID, attachments);
+    if (editingDraftId !== null) {
+      composerDrafts.setAttachments(draftScope, editingDraftId, attachments);
+    }
   });
 
   // Picker popovers
@@ -758,7 +780,10 @@
       await sync.refreshSessions();
       promptText = "";
       composer.clear();
-      composerDrafts.clear(NEW_SESSION_DRAFT_ID);
+      if (editingDraftId !== null) {
+        await composerDrafts.discard(draftScope, editingDraftId, sync.connection.client);
+      }
+      composerDrafts.clearScope(draftScope);
       // Replace the consumed new-session screen so Back returns to where the
       // user came from instead of the submitted form.
       await goto(`/sessions/${response.session_id}`, { replaceState: true });
@@ -1474,6 +1499,7 @@
           label={m.chat_attach_image()}
           onfiles={(files) => void composer.addImageFiles(files)}
         />
+        <ComposerDraftPicker scope={draftScope} sessionId={null} />
 
         <ComposerMoreButton
           label={m.composer_more_options()}
