@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ApiClient } from "#lib/api/client.ts";
 import { ApiError } from "#lib/api/errors.ts";
-import type { CreateDraftRequest, Draft, UpdateDraftRequest } from "#lib/generated/bindings.ts";
+import type {
+  AttachmentMeta,
+  CreateDraftRequest,
+  Draft,
+  UpdateDraftRequest,
+} from "#lib/generated/bindings.ts";
 import {
   ComposerDraftStore,
   draftScope,
@@ -194,6 +199,32 @@ describe("ComposerDraftStore", () => {
 
     expect(store.list("session:session-a")).toHaveLength(1);
     expect(store.activeDraft("session:session-a")?.draft_id).toBe(first.draft_id);
+  });
+
+  it("keeps the draft object when mirrored attachments are unchanged", async () => {
+    const store = new ComposerDraftStore(memoryStorage());
+    const api = fakeApi();
+    const active = await store.ensure("session:session-a", "session-a", api);
+    if (active === null) throw new Error("draft missing");
+    const scope = "session:session-a";
+
+    // The composers mirror their attachment state from an effect that also
+    // reads the store. Replacing the draft with an equal copy made that effect
+    // invalidate itself until Svelte threw `effect_update_depth_exceeded` when
+    // opening an existing session.
+    const before = store.activeDraft(scope);
+    store.setAttachments(scope, active.draft_id, []);
+    expect(store.activeDraft(scope)).toBe(before);
+
+    const attachment: AttachmentMeta = {
+      file_name: "note.txt",
+      mime_type: "text/plain",
+      size_bytes: 4,
+      local_path: "/tmp/note.txt",
+      data_b64: null,
+    };
+    store.setAttachments(scope, active.draft_id, [attachment]);
+    expect(store.activeDraft(scope)?.attachments).toEqual([attachment]);
   });
 
   it("keeps the local edit as a copy on a revision conflict", async () => {

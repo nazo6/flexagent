@@ -112,6 +112,22 @@ function clearLegacyDraft(sessionId: string, storage?: Storage | null): void {
   }
 }
 
+/** Whether two attachment lists hold the same values (order included). */
+function sameAttachments(left: AttachmentMeta[], right: AttachmentMeta[]): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((item, index) => {
+    const other = right[index];
+    return (
+      item === other ||
+      (item.file_name === other.file_name &&
+        item.mime_type === other.mime_type &&
+        item.size_bytes === other.size_bytes &&
+        item.local_path === other.local_path &&
+        item.data_b64 === other.data_b64)
+    );
+  });
+}
+
 /** Optional context carried by a session-less draft. */
 export interface DraftContext {
   projectId?: string | null;
@@ -245,8 +261,14 @@ export class ComposerDraftStore {
     const drafts = this.list(scope);
     const index = drafts.findIndex((draft) => draft.draft_id === draftId);
     if (index < 0) return;
+    const current = drafts[index];
+    // Composer mirrors its attachment state into the store from an effect. This
+    // method reads (and thus subscribes to) the same map it writes, so an
+    // unconditional write would re-run that effect forever
+    // (`effect_update_depth_exceeded`). Skip writes that change nothing.
+    if (sameAttachments(current.attachments ?? [], attachments)) return;
     const next = drafts.slice();
-    next[index] = { ...next[index], attachments: [...attachments] };
+    next[index] = { ...current, attachments: [...attachments] };
     this.#drafts.set(scope, next);
   }
 
