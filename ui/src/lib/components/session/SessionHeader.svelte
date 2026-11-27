@@ -14,12 +14,14 @@
   } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { sessionNeedsAttention } from "#lib/session-status.ts";
+  import { problems } from "#lib/stores/problems.svelte.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { layoutState } from "#lib/stores/layout.svelte.ts";
   import { uiTraits } from "#lib/ui-traits.svelte.ts";
   import { DOCK_LAUNCHERS, type DockLauncherId } from "#lib/dock/registry.ts";
   import { cn } from "#lib/utils.ts";
   import MenuIcon from "@lucide/svelte/icons/menu";
+  import MoreHorizontalIcon from "@lucide/svelte/icons/more-horizontal";
   import ListIcon from "@lucide/svelte/icons/list";
   import PanelLeftOpenIcon from "@lucide/svelte/icons/panel-left-open";
   import PanelRightOpenIcon from "@lucide/svelte/icons/panel-right-open";
@@ -42,6 +44,11 @@
     turnsOpen: boolean;
     onToggleTurns: () => void;
     onDeleted: () => void;
+    /**
+     * The chat transcript asked the compact action row to step out of the way.
+     * Bindable so the row can bring itself back before its restore timer fires.
+     */
+    actionsCollapsed?: boolean;
   }
 
   let {
@@ -60,7 +67,11 @@
     turnsOpen,
     onToggleTurns,
     onDeleted,
+    actionsCollapsed = $bindable(false),
   }: Props = $props();
+
+  /** Problems stay visible even while the transcript is scrolling. */
+  const actionsHidden = $derived(actionsCollapsed && problems.problems.length === 0);
 
   const otherAttentionCount = $derived(
     sync.sessions.filter((s) => s.session_id !== session?.session_id && sessionNeedsAttention(s))
@@ -177,7 +188,12 @@
   </div>
 {/snippet}
 
-<header class="wco-titlebar bg-card/85 border-border relative shrink-0 border-b backdrop-blur">
+<header
+  class={cn(
+    "wco-titlebar bg-card/85 border-border relative z-20 shrink-0 border-b backdrop-blur",
+    !actionsHidden && "max-md:border-transparent",
+  )}
+>
   <!-- In an installed desktop PWA this row also serves as the window title bar
        (Window Controls Overlay); see the `.wco-*` rules in app.css. -->
   <div class="wco-titlebar-row flex h-12 items-center gap-2 px-3 lg:px-4">
@@ -230,6 +246,20 @@
       {/if}
     </div>
 
+    {#if actionsHidden}
+      <button
+        type="button"
+        class="hover:bg-accent text-muted-foreground hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md border border-border md:hidden"
+        title={m.session_actions_show()}
+        aria-label={m.session_actions_show()}
+        aria-controls="session-compact-actions"
+        aria-expanded={!actionsHidden}
+        onclick={() => (actionsCollapsed = false)}
+      >
+        <MoreHorizontalIcon class="size-4" />
+      </button>
+    {/if}
+
     <div class="hidden min-w-0 items-center gap-2 md:flex">
       {#if uiTraits.roomyHeader && session}
         <AgentUsage
@@ -247,29 +277,42 @@
     </div>
   </div>
 
-  <!-- Mobile: compact context row with the session actions, so the title row
-       keeps its full width for the session name. -->
-  <div class="flex min-w-0 items-center gap-2 px-3 pb-1 md:hidden">
-    <div class="flex min-w-0 flex-1 items-center gap-1">
-      {#if !uiTraits.roomyHeader && session}
-        <AgentUsage
-          nodeId={session.node_id}
-          agentId={session.agent_id}
-          localPath={session.local_path}
-          icon={agentIcon}
-          class="border-transparent"
+  <!-- Mobile: compact context row with the session actions. It slides away
+       while the transcript scrolls and overlays the top of the timeline, so
+       showing it again does not resize the conversation. -->
+  <div
+    id="session-compact-actions"
+    class="absolute inset-x-0 top-12 z-20 h-8 overflow-hidden md:hidden"
+    inert={actionsHidden}
+    aria-hidden={actionsHidden}
+  >
+    <div
+      class={cn(
+        "bg-card flex h-8 min-w-0 items-center gap-2 border-b border-border px-3 pb-1 transition-transform duration-200 ease-out",
+        actionsHidden && "-translate-y-full",
+      )}
+    >
+      <div class="flex min-w-0 flex-1 items-center gap-1">
+        {#if !uiTraits.roomyHeader && session}
+          <AgentUsage
+            nodeId={session.node_id}
+            agentId={session.agent_id}
+            localPath={session.local_path}
+            icon={agentIcon}
+            class="border-transparent"
+          />
+        {/if}
+        <SessionInfo
+          {session}
+          {node}
+          {status}
+          {usage}
+          {projectName}
+          class="min-w-0 flex-1 justify-start"
         />
-      {/if}
-      <SessionInfo
-        {session}
-        {node}
-        {status}
-        {usage}
-        {projectName}
-        class="min-w-0 flex-1 justify-start"
-      />
+      </div>
+      {@render headerActions()}
     </div>
-    {@render headerActions()}
   </div>
 
   {#if status === "running"}

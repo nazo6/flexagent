@@ -148,6 +148,11 @@
   let activeTurnSeq = $state<number | null>(null);
   let loadedFor = $state<string | null>(null);
   let showScrollBottom = $state(false);
+  /** Mobile action row is tucked away while the transcript scrolls down. */
+  let headerCollapsed = $state(false);
+  let lastScrollTop = 0;
+  let headerScrollReady = false;
+  let headerRestoreTimer: ReturnType<typeof setTimeout> | null = null;
   /** Row flashed after a deep-link jump (cleared when the animation ends). */
   let highlightSeq = $state<number | null>(null);
   /** Plain guard: the effect re-runs as history arrives, but a jump happens once. */
@@ -159,6 +164,12 @@
   let scrollFrame: number | null = null;
   /** Distance from the bottom that still counts as "reading the tail". */
   const FOLLOW_THRESHOLD_PX = 80;
+  /** Keep a little scroll headroom before the mobile action row hides. */
+  const HEADER_REVEAL_TOP_PX = 40;
+  /** Ignore sub-pixel / rubber-band jitter when reading the scroll direction. */
+  const HEADER_SCROLL_STEP_PX = 10;
+  /** Bring the action row back once scrolling settles. */
+  const HEADER_RESTORE_MS = 900;
   let lastUserItemKey: string | null = null;
 
   // The workspace owns the dock state; the session only supplies tool context.
@@ -194,6 +205,9 @@
       selectedSubagentId = null;
       turnsOpen = false;
       activeTurnSeq = null;
+      headerCollapsed = false;
+      headerScrollReady = false;
+      clearHeaderRestore();
       sync.loadSessionEvents(id).catch(() => {
         /* Ignore: the WS replay will make it visible once it arrives. */
       });
@@ -262,12 +276,61 @@
     return null;
   }
 
+  function clearHeaderRestore(): void {
+    if (headerRestoreTimer === null) return;
+    clearTimeout(headerRestoreTimer);
+    headerRestoreTimer = null;
+  }
+
+  function scheduleHeaderRestore(): void {
+    clearHeaderRestore();
+    headerRestoreTimer = setTimeout(() => {
+      headerRestoreTimer = null;
+      headerCollapsed = false;
+    }, HEADER_RESTORE_MS);
+  }
+
+  /** Keyboard open means the reader is composing, not skimming the transcript. */
+  function isEditingText(): boolean {
+    const element = document.activeElement;
+    return (
+      element instanceof HTMLTextAreaElement ||
+      element instanceof HTMLInputElement ||
+      (element instanceof HTMLElement && element.isContentEditable)
+    );
+  }
+
   function handleScroll() {
     if (!chatContainer) return;
+    const top = chatContainer.scrollTop;
+    const delta = top - lastScrollTop;
+    lastScrollTop = top;
     const distanceToBottom =
       chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
     showScrollBottom = distanceToBottom > 150;
     followOutput = distanceToBottom < FOLLOW_THRESHOLD_PX;
+
+    // The first scroll after opening a session is usually the jump to the
+    // tail; it should not count as a direction change.
+    if (!headerScrollReady) {
+      headerScrollReady = true;
+      return;
+    }
+    if (isEditingText() || top <= HEADER_REVEAL_TOP_PX) {
+      headerCollapsed = false;
+      clearHeaderRestore();
+      return;
+    }
+    if (delta > HEADER_SCROLL_STEP_PX) {
+      headerCollapsed = true;
+    } else if (delta < -HEADER_SCROLL_STEP_PX) {
+      headerCollapsed = false;
+    }
+    if (headerCollapsed) {
+      scheduleHeaderRestore();
+    } else {
+      clearHeaderRestore();
+    }
   }
 
   let killDialogOpen = $state(false);
@@ -439,6 +502,7 @@
 
   onDestroy(() => {
     if (skeletonTimer !== null) clearTimeout(skeletonTimer);
+    clearHeaderRestore();
   });
 
   /**
@@ -457,6 +521,9 @@
       if (added) {
         await tick();
         container.scrollTop = previousTop + (container.scrollHeight - previousHeight);
+        // Prepending history is not the reader scrolling down.
+        lastScrollTop = container.scrollTop;
+        headerCollapsed = false;
       }
     } catch {
       /* Reported through the sync store's problem banner. */
@@ -604,6 +671,7 @@
     {turnsOpen}
     onToggleTurns={() => (turnsOpen = !turnsOpen)}
     onDeleted={() => void goto("/")}
+    bind:actionsCollapsed={headerCollapsed}
   />
 
   <!-- Archived banner -->
@@ -670,7 +738,7 @@
         <div
           bind:this={chatContainer}
           onscroll={handleScroll}
-          class="app-scroll-centered h-full overflow-y-auto pt-3 pr-8 pb-3 pl-4 md:px-8"
+          class="app-scroll-centered h-full overflow-y-auto pt-11 pr-8 pb-3 pl-4 md:px-8 md:pt-3"
         >
           <div class="mx-auto flex max-w-[760px] flex-col gap-4">
             <ProvisioningLogCard lines={provisioningLines} />
