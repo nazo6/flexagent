@@ -102,7 +102,7 @@
 <header class="wco-titlebar bg-card/85 border-border relative shrink-0 border-b backdrop-blur">
   <!-- In an installed desktop PWA this row also serves as the window title bar
        (Window Controls Overlay); see the `.wco-*` rules in app.css. -->
-  <div class="wco-titlebar-row flex h-14 items-center gap-2 px-3 lg:h-12 lg:px-4">
+  <div class="wco-titlebar-row flex h-12 items-center gap-2 px-3 lg:px-4">
     <!-- Mobile: open the session drawer -->
     <button
       type="button"
@@ -244,7 +244,7 @@
   </div>
 
   <!-- Mobile: compact context row -->
-  <div class="flex min-w-0 items-center gap-1 px-3 pb-1.5 md:hidden">
+  <div class="flex min-w-0 items-center gap-1 px-3 pb-1 md:hidden">
     {#if !uiTraits.roomyHeader && session}
       <AgentUsage
         nodeId={session.node_id}

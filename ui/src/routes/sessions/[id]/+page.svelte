@@ -670,7 +670,7 @@
         <div
           bind:this={chatContainer}
           onscroll={handleScroll}
-          class="app-scroll-centered h-full overflow-y-auto pt-5 pr-8 pb-6 pl-4 md:px-8"
+          class="app-scroll-centered h-full overflow-y-auto pt-3 pr-8 pb-3 pl-4 md:px-8"
         >
           <div class="mx-auto flex max-w-[760px] flex-col gap-4">
             <ProvisioningLogCard lines={provisioningLines} />
@@ -784,7 +784,7 @@
       </div>
 
       <!-- Chat input (Composer) -->
-      <div class="border-border shrink-0 border-t px-4 py-2 md:px-8">
+      <div class="border-border shrink-0 border-t px-3 py-1.5 md:px-8">
         <div class="mx-auto max-w-[760px]">
           {#key sessionId}
             <Composer
