@@ -35,3 +35,4 @@
 | [2026-11-14-opencode-native-driver.md](./2026-11-14-opencode-native-driver.md)                                           | OpenCode v2 ネイティブドライバ (Tier 3)                       | `Implemented`           | `03`, `04`, `07`                         |
 | [2026-11-15-fxg-agent-reorganization.md](./2026-11-15-fxg-agent-reorganization.md)                                       | `fxg-agent` のモジュール構成・トレイト・責務境界の再編        | `Implemented`           | `04`                                     |
 | [2026-11-18-agent-terminal-management.md](./2026-11-18-agent-terminal-management.md)                                     | エージェント端末の管理（所有権・表示・停止）                  | `Partially Implemented` | `03`, `04`, `07`, `backlog.md`           |
+| [2026-11-27-composer-drafts-and-sync.md](./2026-11-27-composer-drafts-and-sync.md)                                       | 複数下書きの保存と端末間同期                                  | `Partially Implemented` | `02`, `03`, `07` §3.2, `backlog.md`      |

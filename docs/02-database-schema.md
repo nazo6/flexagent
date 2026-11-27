@@ -43,6 +43,7 @@ E2E暗号化を行わないため、ハブ側で会話履歴の構造化クエ�
 | `sessions`                           | **権威**。自分のセッションのみ。直接書き込む         | **投影**。全ノード分。イベント適用でのみ更新                       |
 | `session_events`                     | 自分のセッションのイベント。水位より後が Outbox 対象 | 全イベントの冪等追記。`cursor` はハブ配信用カーソル                |
 | `session_events_fts`                 | ローカル直結UIの検索用                               | 全セッション横断検索用                                             |
+| `drafts`                             | 直結した端末のコンポーザー下書き                     | ハブ接続端末のコンポーザー下書き（イベントログには載せない）       |
 | `permission_requests`                | 自分のセッション分の投影                             | 全会話分の投影（未解決の承認）                                     |
 | `push_subscriptions`                 | ノード直結 PWA 購読管理（VAPID。ハブとは独立）       | ハブ接続 PWA 購読管理（VAPID）                                     |
 | `audit_logs`                         | ローカル直結操作（CLI / `localhost:7860`）の記録     | ハブ経由操作の記録（同期対象外。各ストアが自分の観測事実のみ記録） |
@@ -129,6 +130,7 @@ DDL・カラム・インデックスの正は `crates/fxg-db/migrations/` です
 | `sessions`                                                                                    | セッション状態。ノードが権威、ハブはイベントからの投影。承認ポリシー・使用量・アーカイブ / 削除状態もここに投影する。 |
 | `session_events`                                                                              | Append-only のイベントログ。`cursor` はストアへの取り込み順、`node_seq` はセッション内の論理順。                      |
 | `session_events_fts`                                                                          | `session_events` の FTS5 (trigram) 検索インデックス。                                                                 |
+| `drafts`                                                                                      | コンポーザーの下書き。セッションに従属せず、イベントログには載せない。接続先ストアが権威。                            |
 | `permission_requests` / `elicitation_requests`                                                | 未解決の承認 / 質問を引くための投影テーブル。                                                                         |
 | `push_subscriptions`                                                                          | 各ストア（ハブ / ノード）の Web Push (VAPID) 購読。                                                                   |
 | `audit_logs`                                                                                  | 各ストアが自分の観測した操作を記録する監査ログ。同期対象外。                                                          |
@@ -159,6 +161,19 @@ DDL・カラム・インデックスの正は `crates/fxg-db/migrations/` です
 
 単一行テーブルは `revision` による楽観的ロックを行い、競合は
 `REVISION_MISMATCH` として返します。
+
+### 1.3 下書き（イベントログの例外）
+
+`drafts` はユーザーが書く可変データであり、セッションの実行履歴ではないため、
+`session_events` / Outbox には載せません（設計:
+[`docs/proposals/2026-11-27-composer-drafts-and-sync.md`](./proposals/2026-11-27-composer-drafts-and-sync.md)）。
+
+- 接続先ストア（ハブ接続時は `hub.db`、ノード直結時は `node.db`）がそのスコープの権威。
+- 更新は `revision` + `expected_revision` の楽観ロック。競合は `REVISION_MISMATCH`。
+- 削除は `deleted_at` の tombstone（将来の node ⇔ hub 複製のため）。
+- `session_id` に外部キーは張らない。下書きはセッションより長生きし、セッションなし下書きも持つため。
+- 添付は v1 ではメタデータのみ保存し、実体は端末に残す。
+- v1 では node ⇔ hub の下書き複製を行わない。ハブ接続とノード直結で下書きは独立する。
 
 ## 2. 正データと派生カラム
 
