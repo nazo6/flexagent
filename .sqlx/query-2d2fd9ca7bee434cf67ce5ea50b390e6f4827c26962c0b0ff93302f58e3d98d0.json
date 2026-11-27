@@ -1,0 +1,146 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT draft_id AS \"draft_id!\", title, body, session_id, project_id, node_id,\n               attachments_json, revision, origin_device_id, created_at, updated_at\n          FROM drafts\n         WHERE deleted_at IS NULL\n           AND (?1 IS NULL OR session_id = ?1)\n           AND (?2 IS NULL OR (?2 = 1 AND session_id IS NULL))\n           AND (?3 IS NULL OR project_id = ?3)\n         ORDER BY updated_at DESC, draft_id ASC\n         LIMIT ?4\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "draft_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "drafts",
+            "name": "draft_id"
+          }
+        }
+      },
+      {
+        "name": "title",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "drafts",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "name": "body",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "drafts",
+            "name": "body"
+          }
+        }
+      },
+      {
+        "name": "session_id",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "drafts",
+            "name": "session_id"
+          }
+        }
+      },
+      {
+        "name": "project_id",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "drafts",
+            "name": "project_id"
+          }
+        }
+      },
+      {
+        "name": "node_id",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "drafts",
+            "name": "node_id"
+          }
+        }
+      },
+      {
+        "name": "attachments_json",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "drafts",
+            "name": "attachments_json"
+          }
+        }
+      },
+      {
+        "name": "revision",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "drafts",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "name": "origin_device_id",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "drafts",
+            "name": "origin_device_id"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "drafts",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "drafts",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2d2fd9ca7bee434cf67ce5ea50b390e6f4827c26962c0b0ff93302f58e3d98d0"
+}

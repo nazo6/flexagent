@@ -26,6 +26,7 @@ import { mergeCursor } from "#lib/sync/cursor.ts";
 import { SessionTimeline } from "#lib/sync/timeline.svelte.ts";
 import type { PendingPrompt } from "#lib/sync/reducer.ts";
 import { randomUuid } from "#lib/uuid.ts";
+import { composerDrafts } from "./composer-drafts.ts";
 import type { ConnectionStore } from "./connection.svelte";
 
 const CURSOR_KEY = "fxg:sync_cursor";
@@ -175,6 +176,13 @@ export class SyncStore {
   nodesLoading = $state(false);
   nodesError = $state<string | null>(null);
   projects = $state<ProjectSummary[]>([]);
+  /**
+   * Increments whenever a draft changes on the server.
+   *
+   * The composer applies the change to its cached draft; the Drafts view uses
+   * this as a refresh trigger.
+   */
+  draftChangeSeq = $state(0);
   projectsLoading = $state(false);
   projectsError = $state<string | null>(null);
   /** Client WS connection state. */
@@ -1085,6 +1093,12 @@ export class SyncStore {
         break;
       case "projects_updated":
         this.#queueProjectsRefresh();
+        break;
+      case "draft_changed":
+        this.draftChangeSeq += 1;
+        void composerDrafts
+          .applyChange(message.draft_id, message.revision, message.deleted)
+          .catch((error) => problems.report("apply draft change", error));
         break;
       default:
         console.warn("[fxg] unknown client ws message", message);

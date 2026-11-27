@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
   import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.ts";
   import ComposerCard from "#lib/components/composer/ComposerCard.svelte";
   import ComposerAttachments from "#lib/components/composer/ComposerAttachments.svelte";
   import ComposerAttachImageButton from "#lib/components/composer/ComposerAttachImageButton.svelte";
+  import ComposerDraftPicker from "#lib/components/composer/ComposerDraftPicker.svelte";
   import ComposerSendButton from "#lib/components/composer/ComposerSendButton.svelte";
   import ComposerTextarea from "#lib/components/composer/ComposerTextarea.svelte";
   import ConfigOptionPicker from "#lib/components/composer/ConfigOptionPicker.svelte";
@@ -13,8 +14,9 @@
   import { createComposerAttachments } from "#lib/composer-attachments.svelte.ts";
   import { orderedConfigOptions } from "#lib/config-options.ts";
   import { saveSessionConfigOption, shouldSubmitOnEnter } from "#lib/session-prefs.ts";
-  import { composerDrafts } from "#lib/stores/composer-drafts.ts";
+  import { composerDrafts, draftScope } from "#lib/stores/composer-drafts.ts";
   import { prefs } from "#lib/stores/prefs.svelte.ts";
+  import { onDocumentHidden } from "#lib/visibility.ts";
   import { m } from "#lib/paraglide/messages.js";
   import type {
     NodeSummary,
@@ -62,10 +64,15 @@
     resumeRequired?: boolean;
   } = $props();
 
-  // The session page keys this component by `sessionId`, so the initial value
-  // is the right one for the whole lifetime of this instance.
-  const draft = untrack(() => composerDrafts.get(sessionId));
-  let text = $state(draft.text);
+  // Drafts are loaded from the connected endpoint and cached per scope. The
+  // first load creates a draft (migrating the old localStorage text) so the
+  // composer always has an editor.
+  const scope = $derived(draftScope(sessionId));
+  const draftList = $derived(composerDrafts.list(scope));
+  const activeDraft = $derived(composerDrafts.activeDraft(scope));
+  let text = $state("");
+  let editingDraftId = $state<string | null>(null);
+  let loadedRevision = $state(0);
 
   /** Replace the composer text (e.g. restoring a reverted user turn). */
   export function restoreText(value: string): void {
@@ -88,18 +95,65 @@
       : permissionPolicy === "auto_allow_all",
   );
 
-  const composer = createComposerAttachments(draft.attachments);
+  const composer = createComposerAttachments();
   const attachments = $derived(composer.attachments);
 
-  // Mirror edits into the draft store so leaving the screen (or switching to
-  // another session) does not discard the prompt.
   $effect(() => {
-    composerDrafts.setText(sessionId, text);
+    void composerDrafts
+      .ensure(scope, sessionId, sync.connection.client, { projectId })
+      .catch((error) => problems.report("load drafts", error));
+  });
+
+  // Load the selected draft into the textarea. Switching drafts (or a conflict
+  // copy) replaces the editor contents; typing does not. A revision bump for
+  // the same draft is a remote update (the store skips it while edits are
+  // pending).
+  $effect(() => {
+    const draft = activeDraft;
+    if (draft === null) return;
+    if (draft.draft_id !== editingDraftId) {
+      editingDraftId = draft.draft_id;
+      loadedRevision = draft.revision;
+      text = draft.body;
+      composer.replace(draft.attachments ?? []);
+      return;
+    }
+    if (draft.revision !== loadedRevision) {
+      loadedRevision = draft.revision;
+      text = draft.body;
+    }
+  });
+
+  // Mirror edits into the draft store (debounced autosave to the endpoint).
+  $effect(() => {
+    if (editingDraftId !== null) composerDrafts.setText(scope, editingDraftId, text);
   });
 
   $effect(() => {
-    composerDrafts.setAttachments(sessionId, attachments);
+    if (editingDraftId !== null) {
+      composerDrafts.setAttachments(scope, editingDraftId, attachments);
+    }
   });
+
+  const saveStatus = $derived(
+    editingDraftId === null ? null : composerDrafts.saveStatus(editingDraftId),
+  );
+
+  function flushDraft(): void {
+    if (editingDraftId === null) return;
+    composerDrafts.setText(scope, editingDraftId, text);
+    void composerDrafts.flush(scope, editingDraftId);
+  }
+
+  onMount(() => {
+    return onDocumentHidden(flushDraft);
+  });
+
+  onDestroy(flushDraft);
+
+  async function retrySave(): Promise<void> {
+    if (editingDraftId !== null) await composerDrafts.retry(scope, editingDraftId);
+  }
 
   async function toggleAutoApprove() {
     const policy = autoApprove ? "ask" : "auto_allow_all";
@@ -203,6 +257,9 @@
       }
       text = "";
       composer.clear();
+      if (editingDraftId !== null) {
+        void composerDrafts.consume(scope, editingDraftId, sessionId, sync.connection.client);
+      }
       resumeRequired = false;
     } catch (error) {
       // Keep the composer text so the user can retry without retyping.
@@ -381,6 +438,19 @@
       label={m.chat_attach_image()}
       onfiles={(files) => void composer.addImageFiles(files)}
     />
+    <ComposerDraftPicker {scope} {sessionId} />
+    {#if saveStatus === "pending" || saveStatus === "saving"}
+      <span class="text-muted-foreground shrink-0 text-[11px]">{m.drafts_saving()}</span>
+    {:else if saveStatus === "error"}
+      <button
+        type="button"
+        class="text-danger shrink-0 text-[11px] underline-offset-2 hover:underline"
+        title={m.drafts_retry()}
+        onclick={() => void retrySave()}
+      >
+        {m.drafts_save_failed()}
+      </button>
+    {/if}
     {#if !sync.wsConnected}
       <span class="text-danger text-[11px]">
         {sync.wsReconnecting ? m.chat_reconnecting() : m.chat_connection_lost()}

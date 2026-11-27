@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE drafts\n           SET deleted_at = ?, revision = revision + 1\n         WHERE draft_id = ? AND deleted_at IS NULL\n        RETURNING revision\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "revision",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "drafts",
+            "name": "revision"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "32383464e9d73614275ddb459d6c8ec965b0aac743e5aed8da45382ff1bb6a63"
+}

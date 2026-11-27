@@ -30,7 +30,7 @@ use fxg_protocol::settings::{
     HubSettingsSnapshot, ProvisionerDefinition, SecretsResponse, UpdateHubSettingsRequest,
     UpsertSecretRequest,
 };
-use fxg_protocol::{CommandId, NodeId, SecretId, SessionId};
+use fxg_protocol::{CommandId, DraftId, NodeId, SecretId, SessionId};
 use tokio::sync::broadcast;
 
 use super::{
@@ -112,6 +112,15 @@ pub enum ClientEvent {
     },
     /// Project registry or node bindings changed on the server
     ProjectsUpdated,
+    /// A draft was created, updated, or deleted in the connected store
+    DraftChanged {
+        /// Draft ID
+        draft_id: DraftId,
+        /// Revision after the change
+        revision: u64,
+        /// Whether the draft was deleted (tombstone)
+        deleted: bool,
+    },
 }
 
 /// Session operation command over Client WS (excluding `Subscribe` / `Ping`).
@@ -277,6 +286,12 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
 
     /// Subscribes to live events for Client WS.
     fn subscribe_client_events(&self) -> broadcast::Receiver<ClientEvent>;
+
+    /// Broadcasts a process-local client event to connected WebSocket clients.
+    ///
+    /// Used for mutable data that is not carried by the session event log
+    /// (composer drafts).
+    fn publish_client_event(&self, event: ClientEvent);
 
     /// Executes a command from Client WS and returns a `CommandResult`.
     async fn dispatch_command(&self, command: ClientCommand) -> CommandResult;

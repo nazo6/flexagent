@@ -75,6 +75,7 @@ use handlers::agents::{
     agent_auth_methods, agent_login, import_registry_agent, list_agents, probe_agent_config,
     refresh_catalog, remove_custom_agent, upsert_custom_agent,
 };
+use handlers::drafts::{create_draft, delete_draft, get_draft, list_drafts, update_draft};
 use handlers::nodes::{node_audit_logs, node_diagnostics, node_shutdown};
 use handlers::projects::{
     add_project, create_worktree, delete_provisioner, inspect_project, link_project, list_nodes,
@@ -163,6 +164,16 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route("/api/v1/auth/login", post(auth_login::<B>))
         .route("/api/v1/auth/logout", post(auth_logout::<B>))
         .route("/api/v1/projects", get(list_projects::<B>))
+        .route(
+            "/api/v1/drafts",
+            get(list_drafts::<B>).post(create_draft::<B>),
+        )
+        .route(
+            "/api/v1/drafts/{draft_id}",
+            get(get_draft::<B>)
+                .patch(update_draft::<B>)
+                .delete(delete_draft::<B>),
+        )
         .route(
             "/api/v1/projects/{project_id}/worktrees",
             get(list_worktrees::<B>)

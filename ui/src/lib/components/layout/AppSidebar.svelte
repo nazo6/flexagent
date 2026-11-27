@@ -29,6 +29,7 @@
   import ArchiveIcon from "@lucide/svelte/icons/archive";
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
+  import FileTextIcon from "@lucide/svelte/icons/file-text";
   import FolderGit2Icon from "@lucide/svelte/icons/folder-git-2";
   import FolderIcon from "@lucide/svelte/icons/folder";
   import GitBranchIcon from "@lucide/svelte/icons/git-branch";
@@ -339,6 +340,17 @@
     >
       <FolderGit2Icon class="size-4" />
       <span class="w-full truncate text-center">{m.shell_projects()}</span>
+    </a>
+
+    <a
+      href="/drafts"
+      onclick={handleLinkClick}
+      title={m.drafts_title()}
+      aria-current={currentPath.startsWith("/drafts") ? "page" : undefined}
+      class={navItemClass(currentPath.startsWith("/drafts"))}
+    >
+      <FileTextIcon class="size-4" />
+      <span class="w-full truncate text-center">{m.drafts_title()}</span>
     </a>
 
     <a

@@ -11,6 +11,7 @@
   import ComposerCard from "#lib/components/composer/ComposerCard.svelte";
   import ComposerAttachments from "#lib/components/composer/ComposerAttachments.svelte";
   import ComposerAttachImageButton from "#lib/components/composer/ComposerAttachImageButton.svelte";
+  import ComposerDraftPicker from "#lib/components/composer/ComposerDraftPicker.svelte";
   import ComposerMoreButton from "#lib/components/composer/ComposerMoreButton.svelte";
   import ComposerSendButton from "#lib/components/composer/ComposerSendButton.svelte";
   import ComposerTextarea from "#lib/components/composer/ComposerTextarea.svelte";
@@ -50,7 +51,8 @@
     shouldSubmitOnEnter,
     type SessionModePreference,
   } from "#lib/session-prefs.ts";
-  import { composerDrafts, NEW_SESSION_DRAFT_ID } from "#lib/stores/composer-drafts.ts";
+  import { composerDrafts, NEW_SESSION_SCOPE } from "#lib/stores/composer-drafts.ts";
+  import { onDocumentHidden } from "#lib/visibility.ts";
   import { prefs } from "#lib/stores/prefs.svelte.ts";
   import { getNodeAvailability } from "#lib/node-status.ts";
   import { nodeSettingsPath, resolveDefaultNodeId } from "#lib/settings-routes.ts";
@@ -58,7 +60,7 @@
   import { sync } from "#lib/stores/app.svelte.ts";
   import { problems } from "#lib/stores/problems.svelte.ts";
   import { toast } from "svelte-sonner";
-  import { onMount, untrack } from "svelte";
+  import { onDestroy, onMount, untrack } from "svelte";
   import BoxIcon from "@lucide/svelte/icons/box";
   import CheckCircle2Icon from "@lucide/svelte/icons/check-circle-2";
   import FileIcon from "@lucide/svelte/icons/file";
@@ -91,6 +93,7 @@
       forkSession: params.get("fork_session") ?? "",
       forkUpTo: Number.isSafeInteger(forkUpto) && forkUpto >= 0 ? forkUpto : null,
       agent: params.get("agent") ?? "",
+      draft: params.get("draft") ?? "",
     };
   });
 
@@ -133,24 +136,71 @@
   let pathMode = $state<PathMode>("existing");
   let branch = $state("");
   let baseBranch = $state("");
-  const draft = composerDrafts.get(NEW_SESSION_DRAFT_ID);
-  let promptText = $state(draft.text);
+  const draftScope = NEW_SESSION_SCOPE;
+  const activeDraft = $derived(composerDrafts.activeDraft(draftScope));
+  let promptText = $state("");
+  let editingDraftId = $state<string | null>(null);
+  let loadedRevision = $state(0);
+  let appliedInitialDraft = false;
   let busy = $state(false);
   let browserOpen = $state(false);
   let fileBrowserOpen = $state(false);
   let useCustomPath = $state(initialUrl.path !== "");
 
-  const composer = createComposerAttachments(draft.attachments);
+  const composer = createComposerAttachments();
   const attachments = $derived(composer.attachments);
+
+  $effect(() => {
+    void composerDrafts
+      .ensure(draftScope, null, sync.connection.client)
+      .then(() => {
+        // `?draft=<id>` from the Drafts page opens that draft once.
+        if (appliedInitialDraft || initialUrl.draft === "") return;
+        appliedInitialDraft = true;
+        composerDrafts.select(draftScope, initialUrl.draft);
+      })
+      .catch((error) => problems.report("load drafts", error));
+  });
+
+  // Load the selected draft into the textarea (switching drafts replaces it).
+  // A revision bump for the same draft is a remote update; the store does not
+  // apply it while local edits are pending.
+  $effect(() => {
+    const draft = activeDraft;
+    if (draft === null) return;
+    if (draft.draft_id !== editingDraftId) {
+      editingDraftId = draft.draft_id;
+      loadedRevision = draft.revision;
+      promptText = draft.body;
+      composer.replace(draft.attachments ?? []);
+      return;
+    }
+    if (draft.revision !== loadedRevision) {
+      loadedRevision = draft.revision;
+      promptText = draft.body;
+    }
+  });
 
   // Keep the prompt while the user visits another screen and comes back.
   $effect(() => {
-    composerDrafts.setText(NEW_SESSION_DRAFT_ID, promptText);
+    if (editingDraftId !== null) {
+      composerDrafts.setText(draftScope, editingDraftId, promptText);
+    }
   });
 
   $effect(() => {
-    composerDrafts.setAttachments(NEW_SESSION_DRAFT_ID, attachments);
+    if (editingDraftId !== null) {
+      composerDrafts.setAttachments(draftScope, editingDraftId, attachments);
+    }
   });
+
+  function flushDraft(): void {
+    if (editingDraftId === null) return;
+    composerDrafts.setText(draftScope, editingDraftId, promptText);
+    void composerDrafts.flush(draftScope, editingDraftId);
+  }
+
+  onDestroy(flushDraft);
 
   // Picker popovers
   let projectOpen = $state(false);
@@ -317,6 +367,7 @@
   // Ephemeral VM provisioner definitions (only available when connected to the hub)
   onMount(() => {
     void loadProvisioners();
+    return onDocumentHidden(flushDraft);
   });
 
   // The agent catalog is node-scoped: reload it when the target node changes.
@@ -758,7 +809,10 @@
       await sync.refreshSessions();
       promptText = "";
       composer.clear();
-      composerDrafts.clear(NEW_SESSION_DRAFT_ID);
+      if (editingDraftId !== null) {
+        await composerDrafts.discard(draftScope, editingDraftId, sync.connection.client);
+      }
+      composerDrafts.clearScope(draftScope);
       // Replace the consumed new-session screen so Back returns to where the
       // user came from instead of the submitted form.
       await goto(`/sessions/${response.session_id}`, { replaceState: true });
@@ -1474,6 +1528,7 @@
           label={m.chat_attach_image()}
           onfiles={(files) => void composer.addImageFiles(files)}
         />
+        <ComposerDraftPicker scope={draftScope} sessionId={null} />
 
         <ComposerMoreButton
           label={m.composer_more_options()}

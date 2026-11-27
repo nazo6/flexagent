@@ -84,6 +84,11 @@ export function createComposerAttachments(initial: AttachmentMeta[] = []) {
     attachments = [];
   }
 
+  /** Replaces the attachments (restoring a different draft). */
+  function replace(next: AttachmentMeta[]): void {
+    attachments = [...next];
+  }
+
   function onPaste(event: ClipboardEvent): void {
     const files = event.clipboardData?.files;
     if (files && files.length > 0) {
@@ -108,6 +113,7 @@ export function createComposerAttachments(initial: AttachmentMeta[] = []) {
     addLocalFile,
     remove,
     clear,
+    replace,
     onPaste,
     onDrop,
   };

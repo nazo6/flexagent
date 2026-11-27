@@ -381,6 +381,21 @@ driver 側のキャッシュを無視する（UI の明示的な Refresh 用）�
 が全件読み込み済み、エントリなしは「このページに含まれない（続きは不明）」を
 意味する。
 
+#### 下書き
+
+| Method / Path               | 内容                                                                                              |
+| :-------------------------- | :------------------------------------------------------------------------------------------------ |
+| `GET /api/v1/drafts`        | 一覧。`session_id` / `sessionless=true` / `project_id` / `limit`（既定 200）。`updated_at` 降順。 |
+| `POST /api/v1/drafts`       | 作成。`draft_id` はサーバーが UUID v7 で採番する。                                                |
+| `GET /api/v1/drafts/:id`    | 単体取得。                                                                                        |
+| `PATCH /api/v1/drafts/:id`  | 全置換。`expected_revision` が一致しない場合は `409 REVISION_MISMATCH`。                          |
+| `DELETE /api/v1/drafts/:id` | 論理削除（冪等、`204`）。                                                                         |
+
+下書きはセッションのイベントログには載せない（[`docs/02`](./02-database-schema.md) §1.3）。
+認証・`Host` / `Origin` 検証は他のエンドポイントと同じ。本文はクライアントが
+デバウンスして保存し、v1 では Client WS の変更通知を持たない（再読み込み /
+再マウント時に再取得する）。添付はメタデータのみで、実体は端末に残る。
+
 #### 検索 / Push / 監査
 
 | Method / Path                                       | 内容                                                             |
@@ -396,7 +411,13 @@ driver 側のキャッシュを無視する（UI の明示的な Refresh 用）�
 
 - 上り: `Subscribe` / `SendPrompt` / `ControlSession` / `Ping`。
 - 下り: `EventBatch` / `LiveStreamDelta` / `ProvisioningLog` / `CommandResult` /
-  `SystemStatus` / `ProjectsUpdated` / `Error` / `Pong`。
+  `SystemStatus` / `ProjectsUpdated` / `DraftChanged` / `Error` / `Pong`。
+
+`DraftChanged` は下書きの作成・更新・削除を通知する。本文は含めず、
+`revision` が手元より新しい場合にクライアントが `GET /api/v1/drafts/:id` で
+再取得する。編集中（未保存の変更あり）の端末は再取得を保留し、自身の保存が
+競合したときに複製として解決する。
+
 - モバイルでページがバックグラウンドへ移動すると、ブラウザはタイマーを凍結し、
   `WebSocket` を `OPEN` のまま残したまま経路だけを失うことがある。UI は
   `visibilitychange`（visible）/ `online` / `pageshow`（bfcache 復元）で

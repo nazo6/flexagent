@@ -78,3 +78,17 @@ Phase 0（ACP v1 端末のライフサイクル・単体停止・スナップシ
 - [ ] ACP v2 のエージェント所有 Terminal Output を `TerminalOutput` に正規化する（停止可否は v2 の手段が決まってから）
 - [x] `ToolCallContent::Terminal` の `terminal_id` を `ToolCall` に保持し、ツールカードから端末カードへリンクする（§4 と共通）
 - [ ] 停止できない経路（自前実行・OpenCode ネイティブ）で「単体停止は不可」を UI に明示する
+
+## 8. コンポーザー下書き（残項目）
+
+出典: [`docs/proposals/2026-11-27-composer-drafts-and-sync.md`](./proposals/2026-11-27-composer-drafts-and-sync.md)
+
+複数下書きの保存・切替・削除と、ハブ / ノードの REST による端末間共有は実装済み。
+サイドバーの Drafts ビュー、リネーム、保存状態の表示・再試行、離脱時のフラッシュも実装済み。
+
+- [x] サイドバーの Drafts ビューと下書きのリネーム
+- [x] 保存状態（保存中 / 未保存）の表示、再試行、画面離脱時のフラッシュ
+- [x] Client WS の変更通知（他端末の更新をリアルタイム反映する）
+- [ ] 添付の共有（content-addressed blob とアップロード API、GC）
+- [ ] node ⇔ hub の下書き複製（tombstone の伝播を含む）
+- [ ] tombstone の保持期間 / GC と、下書きの件数・本文サイズ上限
