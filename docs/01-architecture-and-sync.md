@@ -562,8 +562,10 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
      トークン付きURL `http://<node.addr のアドレス>/?token=<AUTH_TOKEN>`
      （既定は `http://localhost:7860/?token=<AUTH_TOKEN>`）がブラウザで開かれます。
    - Web UI は URL のトークンで `POST /api/v1/auth/login` を呼び、サーバーは
-     トークンを検証後、`Set-Cookie: fxg_session=<TOKEN>; HttpOnly; SameSite=Strict; Path=/`
-     を発行します。以降のリクエストはCookieまたは
+     トークンを検証後、`Set-Cookie: fxg_session_<role>=<TOKEN>; HttpOnly; SameSite=Strict; Path=/; Max-Age=<30日>`
+     を発行します。Cookie 名はロール別 (`fxg_session_node` / `fxg_session_hub`)
+     です。Cookie はホスト単位でポートを区別しないため、同じホストで hub と
+     node を開いても互いのログインを上書きしません。以降のリクエストはCookieまたは
      `Authorization: Bearer <AUTH_TOKEN>`
      ヘッダでのみ受け付け、未認証アクセスはローカルであっても `401 Unauthorized`
      で遮断します。

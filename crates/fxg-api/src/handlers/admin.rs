@@ -18,10 +18,8 @@ pub(crate) async fn rotate_auth_token<B: ClientApiBackend>(
             // The old token is invalidated immediately. Set the new cookie in
             // the same response so a browser never has to re-login (and cannot
             // be locked out if a follow-up request fails).
-            let cookie = format!(
-                "fxg_session={}; HttpOnly; SameSite=Strict; Path=/",
-                response.token
-            );
+            let cookie =
+                crate::session::set_cookie(state.backend.connection_role(), &response.token);
             let mut response = Json(response).into_response();
             match cookie.parse() {
                 Ok(value) => {

@@ -100,8 +100,10 @@ fxg を日常使いのノード／ハブとして動かしながら、同じマ�
 | ハブ接続     | 本番ハブ                                       | dev ハブのみ（本番ハブに pair しない）       |
 | サービス登録 | する                                           | しない                                       |
 
-ポートが違えばブラウザのオリジンも変わるため、Cookie (`fxg_session`)・
-`localStorage`・PWA の Service Worker は運用側と混ざりません。
+開発環境と運用環境はホスト名（`localhost` と `127.0.0.1`）が違うため、
+Cookie (`fxg_session_<role>`)・`localStorage`・PWA の Service Worker は
+運用側と混ざりません。Cookie はポートを区別しない点に注意
+（同一ホストでは hub と node の Cookie 名がロール別に分かれている）。
 
 ### 5.3 使い方
 

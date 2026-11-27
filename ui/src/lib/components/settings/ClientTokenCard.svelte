@@ -18,7 +18,7 @@
     rotateBusy = true;
     try {
       const result = await sync.connection.client.rotateAuthToken();
-      // The rotate response also sets the new `fxg_session` cookie, so no
+      // The rotate response also sets the new role-scoped session cookie, so no
       // second login round-trip is needed (a network failure here must not
       // leave the browser locked out).
       await sync.connection.applyToken(result.token);

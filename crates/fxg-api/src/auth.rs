@@ -4,8 +4,8 @@
 //!
 //! - **Web access token** (`<data>/{node,hub}/auth_token`): owned by each role
 //!   (`fxg node start` / `fxg hub start`) and used to authenticate Client REST/WS API
-//!   requests (`Authorization: Bearer` / `fxg_session` cookie) (a 64-character random hex
-//!   string is generated on first startup and saved with `0600`).
+//!   requests (`Authorization: Bearer` / the role's `fxg_session_<role>` cookie) (a
+//!   64-character random hex string is generated on first startup and saved with `0600`).
 //! - **Node pairing token** (`<data>/node/node_token`): Node ⇔ Hub pairing authentication. The
 //!   server stores only the [`hash_token`] (SHA-256 hex) in `hub.db.nodes.token_hash`; the
 //!   plaintext is shown only once at issue time.

@@ -60,8 +60,9 @@ function persistTargets(targets: ConnectionTarget[]): void {
  * Connection targets are switched by **origin-level navigation**
  * (`location.assign`). Cross-origin fetches are rejected both by the shared
  * middleware's Host/Origin validation (CSWSH / DNS Rebinding protection) and by
- * CORS, so everything stays same-origin (the `fxg_session` Cookie is also
- * independent per origin).
+ * CORS, so everything stays same-origin. The session Cookie is host-scoped
+ * (ports share it) and named per role (`fxg_session_node` / `fxg_session_hub`)
+ * so a hub and a local node on the same host do not overwrite each other.
  */
 export class ConnectionStore {
   /** Current origin ('' at build time). */
@@ -121,7 +122,7 @@ export class ConnectionStore {
     }
   }
 
-  /** Validate the token and establish the `fxg_session` Cookie. */
+  /** Validate the token and establish the role-scoped session Cookie. */
   async login(token: string): Promise<void> {
     const trimmed = token.trim();
     if (!trimmed) throw new Error(m.lib_token_required());
@@ -135,7 +136,7 @@ export class ConnectionStore {
 
   /**
    * Apply a token that the server already accepted (e.g. the auth token rotate
-   * response, which also sets the `fxg_session` cookie atomically).
+   * response, which also sets the role-scoped session cookie atomically).
    */
   async applyToken(token: string): Promise<void> {
     this.client.setToken(token);
@@ -143,7 +144,7 @@ export class ConnectionStore {
     await this.probe();
   }
 
-  /** Invalidate the `fxg_session` Cookie. */
+  /** Invalidate the role-scoped session Cookie. */
   async logout(): Promise<void> {
     try {
       await this.client.authLogout();

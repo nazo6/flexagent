@@ -109,9 +109,11 @@ async fn rotate_token_sets_the_new_session_cookie() {
     };
     let body: serde_json::Value = response.json().await.expect("json");
     let new_token = body["token"].as_str().expect("token");
-    assert!(cookie.contains(&format!("fxg_session={new_token}")));
+    assert!(cookie.contains(&format!("fxg_session_hub={new_token}")));
     assert!(cookie.contains("HttpOnly"));
     assert!(cookie.contains("SameSite=Strict"));
+    assert!(cookie.contains("Max-Age="));
+    assert!(!cookie.contains("Max-Age=0"));
 
     let old_response = http
         .get(format!(

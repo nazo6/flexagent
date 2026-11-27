@@ -185,19 +185,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn accepts_cookie_authentication() {
+    async fn accepts_only_its_role_session_cookie() {
         let (daemon, _dir) = test_daemon().await;
         let app = router(daemon.state().clone(), daemon.http_addr());
         let token = daemon.state().auth_token();
         let host = host_of(&daemon);
 
+        // A hub cookie on the same host must not authenticate the node: cookies
+        // are host-scoped and port-agnostic, so the cookie name is role-scoped.
+        let request = HttpRequest::builder()
+            .method("GET")
+            .uri("/api/v1/nodes")
+            .header(header::HOST, &host)
+            .header(header::COOKIE, format!("fxg_session_hub={token}"))
+            .body(Body::empty())
+            .expect("request");
+        let response = app.clone().oneshot(request).await.expect("response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        // The node's own cookie authenticates (alongside the hub's and others)
         let request = HttpRequest::builder()
             .method("GET")
             .uri("/api/v1/nodes")
             .header(header::HOST, &host)
             .header(
                 header::COOKIE,
-                format!("theme=dark; fxg_session={token}; other=1"),
+                format!("theme=dark; fxg_session_hub=deadbeef; fxg_session_node={token}; other=1"),
             )
             .body(Body::empty())
             .expect("request");
@@ -246,9 +259,15 @@ mod tests {
             .expect("response");
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
         let cookie = set_cookie(&response);
-        assert!(cookie.contains(&format!("fxg_session={token}")), "{cookie}");
+        assert!(
+            cookie.contains(&format!("fxg_session_node={token}")),
+            "{cookie}"
+        );
         assert!(cookie.contains("HttpOnly"), "{cookie}");
         assert!(cookie.contains("SameSite=Strict"), "{cookie}");
+        // Persisted across browser restarts, but not an expiring cookie.
+        assert!(cookie.contains("Max-Age="), "{cookie}");
+        assert!(!cookie.contains("Max-Age=0"), "{cookie}");
 
         // Mismatched body token → 401 (rejected even with a valid Bearer header)
         let response = app
@@ -271,7 +290,7 @@ mod tests {
             .expect("response");
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
         let cookie = set_cookie(&response);
-        assert!(cookie.contains("fxg_session=;"), "{cookie}");
+        assert!(cookie.contains("fxg_session_node=;"), "{cookie}");
         assert!(cookie.contains("Max-Age=0"), "{cookie}");
 
         daemon.shutdown();

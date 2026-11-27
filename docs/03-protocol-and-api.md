@@ -223,7 +223,10 @@ prune します。`sessions` は最大 1000 件で、超過時は
 ### 3.0 セキュリティ
 
 - `Authorization: Bearer <auth_token>` または
-  `Cookie: fxg_session=<token>; HttpOnly; SameSite=Strict`。
+  `Cookie: fxg_session_<role>=<token>; HttpOnly; SameSite=Strict; Path=/; Max-Age=<30日>`。
+  Cookie 名はロール別 (`fxg_session_node` / `fxg_session_hub`) で、サーバー側に
+  セッションの有効期限はない（トークンを再生成するまで有効）。ブラウザ側の
+  セッション Cookie ではなく `Max-Age` 付きで永続化する。
 - 認証不要: `GET /api/v1/meta`、`GET /healthz`、`GET /readyz`。
 - `Host` ヘッダ検証（DNS Rebinding 対策）と、WebSocket の `Origin` 検証
   （CSWSH 対策）。

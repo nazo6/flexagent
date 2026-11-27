@@ -189,7 +189,7 @@ impl HubState {
 
     /// Regenerates the Web access token and saves it to disk.
     ///
-    /// The old token (Bearer / `fxg_session` cookie) is invalidated immediately.
+    /// The old token (Bearer / the role's session cookie) is invalidated immediately.
     pub fn rotate_auth_token(&self) -> std::io::Result<String> {
         let token = auth::generate_token();
         auth::save_token(&self.inner.options.paths.auth_token_path(), &token)?;

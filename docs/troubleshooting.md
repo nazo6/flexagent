@@ -43,7 +43,8 @@ UI のエラーバナー「Details」からは、このページの対応する�
 ## UNAUTHORIZED
 
 - **原因**: トークンが無い・失効した・別の接続先のトークンを使っている。
-- **確認**: 接続先のロールの `<data>/<role>/auth_token` と、URL の `?token=` / Cookie `fxg_session`。
+- **確認**: 接続先のロールの `<data>/<role>/auth_token` と、URL の `?token=` /
+  Cookie `fxg_session_node` / `fxg_session_hub`。
 - **復旧**: 接続メニューからトークンを入れ直す。接続先でトークンを再生成した場合は
   すべてのクライアントで再ログインが必要。
 

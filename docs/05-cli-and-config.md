@@ -165,7 +165,8 @@ Linux では XDG にログ用のクラスがないため、`<logs>` は `<state>
 | **ノードペアリングトークン** | `<data>/node/node_token`     | **ノードを hub に登録する**（hub ⇔ node 間）                        | hub で `fxg hub pairing-token issue <node-id>` → ノードの Web UI（設定 > ハブ接続）または `fxg node pair --hub <URL> --token <TOKEN>` |
 | その他の秘密                 | `<data>/<role>/secrets/<id>` | エージェントの API キー、Git 認証など                               | Secret API（値は書き込み専用）                                                                                                        |
 
-- Web アクセストークンはブラウザの Cookie (`fxg_session`) にも使われます。
+- Web アクセストークンはブラウザの Cookie (`fxg_session_node` / `fxg_session_hub`)
+  にも使われます。
   ノードとハブでファイルが分かれるため、片方のトークンでもう片方には
   ログインできません。
 - ノードペアリングトークンは hub の `nodes.token_hash` にハッシュだけが保存され、

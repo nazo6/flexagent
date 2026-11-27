@@ -9,8 +9,9 @@
 //!    `127.0.0.1` / `[::1]` and the configured allowed hosts gets `403 Forbidden`
 //! 2. **Origin header validation** (CSWSH mitigation): on a WebSocket handshake, anything other
 //!    than the same origin gets `403 Forbidden` (non-browser clients without `Origin` are allowed)
-//! 3. **Authentication**: `Authorization: Bearer <auth_token>` or
-//!    `Cookie: fxg_session=<auth_token>`. Unauthenticated requests get `401 Unauthorized`.
+//! 3. **Authentication**: `Authorization: Bearer <auth_token>` or the role's session
+//!    cookie (`Cookie: fxg_session_<role>=<auth_token>`, see [`crate::session`]).
+//!    Unauthenticated requests get `401 Unauthorized`.
 //!    The only exception is the connection metadata (`GET /api/v1/meta`), where only Host /
 //!    Origin validation applies (an unauthenticated Web UI needs it to determine the connection
 //!    kind).
@@ -141,7 +142,7 @@ fn verify_origin<B: ClientApiBackend>(
     }
 }
 
-/// Authentication (Bearer header or `fxg_session` cookie). Returns 401 on rejection.
+/// Authentication (Bearer header or the role's session cookie). Returns 401 on rejection.
 fn verify_auth<B: ClientApiBackend>(
     state: &ClientApiState<B>,
     headers: &HeaderMap,
@@ -155,8 +156,9 @@ fn verify_auth<B: ClientApiBackend>(
         return None;
     }
 
+    let cookie_name = crate::session::cookie_name(state.backend.connection_role());
     if let Some(cookie_header) = header_str(headers, header::COOKIE)
-        && let Some(provided) = extract_cookie(cookie_header, "fxg_session")
+        && let Some(provided) = extract_cookie(cookie_header, cookie_name)
         && token_matches(&expected, &provided)
     {
         return None;

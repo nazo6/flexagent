@@ -169,7 +169,7 @@ Web ターミナルは `ghostty-web`（WASM 版 `libghostty-vt` + Canvas 2D）�
 HTTP アドレスで直接開かれることが多いため、使えない機能を明示しつつ、
 それ以外の基本機能は HTTP でも動作させます。
 
-- **HTTP でも動作する**: 認証（Bearer / `fxg_session` Cookie）、セッション一覧・
+- **HTTP でも動作する**: 認証（Bearer / ロール別 `fxg_session_<role>` Cookie）、セッション一覧・
   チャット、Web PTY、ファイル差分、設定、接続先切り替え。
 - **HTTP では制限される**（ブラウザの仕様であり、サーバー側の制限ではない）:
   - Service Worker と PWA インストール（オフライン App Shell を含む）

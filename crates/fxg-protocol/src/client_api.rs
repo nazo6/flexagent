@@ -962,7 +962,7 @@ pub struct PushSubscribeResponse {
 ///
 /// It is called as an authenticated request (`Authorization: Bearer <auth_token>`)
 /// and on success returns
-/// `Set-Cookie: fxg_session=<token>; HttpOnly; SameSite=Strict`.
+/// `Set-Cookie: fxg_session_<role>=<token>; HttpOnly; SameSite=Strict; Path=/; Max-Age=...`.
 /// Afterwards the cookie can be used for authentication (docs/03 §3.0).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]

@@ -36,6 +36,7 @@ mod pty;
 pub mod push;
 mod request_context;
 mod security;
+mod session;
 pub mod shutdown;
 mod static_ui;
 mod ws;
@@ -160,7 +161,7 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route("/api/v1/system/shutdown", post(shutdown::<B>))
         .route("/api/v1/diagnostics", get(diagnostics::<B>))
         .route("/api/v1/auth/login", post(auth_login::<B>))
-        .route("/api/v1/auth/logout", post(auth_logout))
+        .route("/api/v1/auth/logout", post(auth_logout::<B>))
         .route("/api/v1/projects", get(list_projects::<B>))
         .route(
             "/api/v1/projects/{project_id}/worktrees",

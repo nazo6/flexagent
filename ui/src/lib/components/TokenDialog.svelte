@@ -12,6 +12,8 @@
   let token = $state("");
   let busy = $state(false);
   let error = $state<string | null>(null);
+  /** Role-scoped cookie that stores the Web access token. */
+  const cookieName = $derived(connection.role === "hub" ? "fxg_session_hub" : "fxg_session_node");
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -48,7 +50,7 @@
         {:else}
           {m.token_dialog_description_local_node()}
         {/if}
-        {m.token_cookie_note_before()} <code>fxg_session</code>
+        {m.token_cookie_note_before()} <code>{cookieName}</code>
         {m.token_cookie_note_after()}
       </Dialog.Description>
     </Dialog.Header>

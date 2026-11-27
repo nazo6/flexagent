@@ -8,6 +8,7 @@ use fxg_protocol::client_api::{AuthLoginRequest, MetaResponse, SystemInfoRespons
 use fxg_protocol::common::ErrorCode;
 
 use crate::auth::token_matches;
+use crate::session;
 use crate::{ApiError, ClientApiBackend, ClientApiState};
 
 /// `GET /api/v1/meta`: connection metadata that needs no authentication.
@@ -71,11 +72,8 @@ pub(crate) async fn system_info<B: ClientApiBackend>(
     .into_response()
 }
 
-/// Name of the auth cookie (`docs/03` §3.0).
-const SESSION_COOKIE: &str = "fxg_session";
-
-/// `POST /api/v1/auth/login`: validates the Web UI's token input and issues an `fxg_session`
-/// cookie (HttpOnly / SameSite=Strict).
+/// `POST /api/v1/auth/login`: validates the Web UI's token input and issues the role's
+/// session cookie (`HttpOnly` / `SameSite=Strict`, persisted with `Max-Age`).
 ///
 /// The endpoint itself must also pass the shared security middleware's authentication
 /// (`Authorization: Bearer`), so the token in the body is only re-validated.
@@ -87,12 +85,14 @@ pub(crate) async fn auth_login<B: ClientApiBackend>(
     if !token_matches(&state.backend.auth_token(), token) {
         return ApiError::from_code(ErrorCode::Unauthorized, "invalid auth token").into_response();
     }
-    let cookie = format!("{SESSION_COOKIE}={token}; HttpOnly; SameSite=Strict; Path=/");
+    let cookie = session::set_cookie(state.backend.connection_role(), token);
     (StatusCode::NO_CONTENT, [(header::SET_COOKIE, cookie)]).into_response()
 }
 
-/// `POST /api/v1/auth/logout`: invalidates the `fxg_session` cookie.
-pub(crate) async fn auth_logout() -> Response {
-    let cookie = format!("{SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0");
+/// `POST /api/v1/auth/logout`: expires the role's session cookie.
+pub(crate) async fn auth_logout<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+) -> Response {
+    let cookie = session::clear_cookie(state.backend.connection_role());
     (StatusCode::NO_CONTENT, [(header::SET_COOKIE, cookie)]).into_response()
 }

@@ -6,7 +6,7 @@
 //!   hex form) is generated and stored in `<data>/node/auth_token` with
 //!   permission `0600`.
 //! - Subsequent requests authenticate with `Authorization: Bearer <token>` or
-//!   `Cookie: fxg_session=<token>`.
+//!   `Cookie: fxg_session_node=<token>`.
 
 use std::path::Path;
 

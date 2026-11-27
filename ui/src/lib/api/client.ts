@@ -109,7 +109,7 @@ interface RequestOptions {
  * Client REST API client shared by `fxg hub` / `fxg node`.
  *
  * Authentication prefers the Bearer header, while same-origin requests also
- * send the `fxg_session` Cookie automatically (`credentials: 'same-origin'`).
+ * send the role-scoped session Cookie automatically (`credentials: 'same-origin'`).
  * Connection targets switch by origin-level navigation, so cross-origin
  * requests never occur.
  */
@@ -187,7 +187,7 @@ export class ApiClient {
     return this.#request("GET", "/api/v1/system/info");
   }
 
-  /** `POST /api/v1/auth/login` (issues the `fxg_session` Cookie on success). */
+  /** `POST /api/v1/auth/login` (issues the role-scoped session Cookie on success). */
   async authLogin(token: string): Promise<void> {
     const previous = this.#token;
     this.#token = token;
@@ -201,7 +201,7 @@ export class ApiClient {
     }
   }
 
-  /** `POST /api/v1/auth/logout` (invalidates the `fxg_session` Cookie). */
+  /** `POST /api/v1/auth/logout` (invalidates the role-scoped session Cookie). */
   authLogout(): Promise<void> {
     return this.#request("POST", "/api/v1/auth/logout", { body: {} });
   }
