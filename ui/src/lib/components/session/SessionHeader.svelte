@@ -99,6 +99,84 @@
   });
 </script>
 
+{#snippet headerActions()}
+  <div class="flex shrink-0 items-center gap-1">
+    {#if session}
+      <button
+        type="button"
+        class={cn(
+          "flex size-7 shrink-0 items-center justify-center rounded-md border transition-colors",
+          turnsOpen
+            ? "border-signal/40 bg-signal-soft text-signal"
+            : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+        )}
+        title={m.chat_turns_title()}
+        aria-label={m.chat_turns_title()}
+        aria-pressed={turnsOpen}
+        onclick={onToggleTurns}
+      >
+        <ListIcon class="size-4" />
+      </button>
+    {/if}
+    <!-- On desktop the sidebar footer owns the badge; when the sidebar is
+         collapsed this header is the only remaining place for it. -->
+    <ProblemBadge class={layoutState.sidebarCollapsed ? "size-7 px-0" : "size-7 px-0 lg:hidden"} />
+    {#if session}
+      <div
+        class="border-border flex items-center rounded-md border p-0.5 lg:hidden"
+        role="group"
+        aria-label={m.session_tools_title()}
+      >
+        {#each DOCK_LAUNCHERS as tool (tool.id)}
+          {@const Icon = tool.icon}
+          <button
+            type="button"
+            class={cn(
+              "flex size-6 items-center justify-center rounded-sm transition-colors",
+              activeTool === tool.id
+                ? "bg-signal-soft text-signal"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground",
+            )}
+            title={tool.label()}
+            aria-label={tool.label()}
+            aria-pressed={activeTool === tool.id}
+            onclick={() => onToggleTool(tool.id)}
+          >
+            <Icon class="size-3.5" />
+          </button>
+        {/each}
+      </div>
+    {/if}
+
+    {#if layoutState.rightRailCollapsed}
+      <button
+        type="button"
+        class="hover:bg-accent text-muted-foreground hover:text-foreground hidden size-7 items-center justify-center rounded-md border lg:flex"
+        onclick={() => layoutState.setRightRailCollapsed(false)}
+        title={m.session_tools_show()}
+        aria-label={m.session_tools_show()}
+      >
+        <PanelRightOpenIcon class="size-4" />
+      </button>
+    {/if}
+
+    {#if session}
+      <SessionActionsMenu
+        {session}
+        scope="session"
+        {canNewSessionHere}
+        {onNewSessionHere}
+        {canResume}
+        {onResume}
+        {onForceStop}
+        {onDeleted}
+        buttonClass="size-7 rounded-md border border-border"
+        iconClass="size-4"
+      />
+    {/if}
+  </div>
+{/snippet}
+
 <header class="wco-titlebar bg-card/85 border-border relative shrink-0 border-b backdrop-blur">
   <!-- In an installed desktop PWA this row also serves as the window title bar
        (Window Controls Overlay); see the `.wco-*` rules in app.css. -->
@@ -164,104 +242,34 @@
       <SessionInfo {session} {node} {status} {usage} {projectName} />
     </div>
 
-    <div class="flex shrink-0 items-center gap-1">
-      {#if session}
-        <button
-          type="button"
-          class={cn(
-            "flex size-7 shrink-0 items-center justify-center rounded-md border transition-colors",
-            turnsOpen
-              ? "border-signal/40 bg-signal-soft text-signal"
-              : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
-          )}
-          title={m.chat_turns_title()}
-          aria-label={m.chat_turns_title()}
-          aria-pressed={turnsOpen}
-          onclick={onToggleTurns}
-        >
-          <ListIcon class="size-4" />
-        </button>
-      {/if}
-      <!-- On desktop the sidebar footer owns the badge; when the sidebar is
-           collapsed this header is the only remaining place for it. -->
-      <ProblemBadge
-        class={layoutState.sidebarCollapsed ? "size-7 px-0" : "size-7 px-0 lg:hidden"}
-      />
-      {#if session}
-        <div
-          class="border-border flex items-center rounded-md border p-0.5 lg:hidden"
-          role="group"
-          aria-label={m.session_tools_title()}
-        >
-          {#each DOCK_LAUNCHERS as tool (tool.id)}
-            {@const Icon = tool.icon}
-            <button
-              type="button"
-              class={cn(
-                "flex size-6 items-center justify-center rounded-sm transition-colors",
-                activeTool === tool.id
-                  ? "bg-signal-soft text-signal"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
-              )}
-              title={tool.label()}
-              aria-label={tool.label()}
-              aria-pressed={activeTool === tool.id}
-              onclick={() => onToggleTool(tool.id)}
-            >
-              <Icon class="size-3.5" />
-            </button>
-          {/each}
-        </div>
-      {/if}
-
-      {#if layoutState.rightRailCollapsed}
-        <button
-          type="button"
-          class="hover:bg-accent text-muted-foreground hover:text-foreground hidden size-7 items-center justify-center rounded-md border lg:flex"
-          onclick={() => layoutState.setRightRailCollapsed(false)}
-          title={m.session_tools_show()}
-          aria-label={m.session_tools_show()}
-        >
-          <PanelRightOpenIcon class="size-4" />
-        </button>
-      {/if}
-
-      {#if session}
-        <SessionActionsMenu
-          {session}
-          scope="session"
-          {canNewSessionHere}
-          {onNewSessionHere}
-          {canResume}
-          {onResume}
-          {onForceStop}
-          {onDeleted}
-          buttonClass="size-7 rounded-md border border-border"
-          iconClass="size-4"
-        />
-      {/if}
+    <div class="hidden shrink-0 items-center gap-1 md:flex">
+      {@render headerActions()}
     </div>
   </div>
 
-  <!-- Mobile: compact context row -->
-  <div class="flex min-w-0 items-center gap-1 px-3 pb-1 md:hidden">
-    {#if !uiTraits.roomyHeader && session}
-      <AgentUsage
-        nodeId={session.node_id}
-        agentId={session.agent_id}
-        localPath={session.local_path}
-        icon={agentIcon}
-        class="border-transparent"
+  <!-- Mobile: compact context row with the session actions, so the title row
+       keeps its full width for the session name. -->
+  <div class="flex min-w-0 items-center gap-2 px-3 pb-1 md:hidden">
+    <div class="flex min-w-0 flex-1 items-center gap-1">
+      {#if !uiTraits.roomyHeader && session}
+        <AgentUsage
+          nodeId={session.node_id}
+          agentId={session.agent_id}
+          localPath={session.local_path}
+          icon={agentIcon}
+          class="border-transparent"
+        />
+      {/if}
+      <SessionInfo
+        {session}
+        {node}
+        {status}
+        {usage}
+        {projectName}
+        class="min-w-0 flex-1 justify-start"
       />
-    {/if}
-    <SessionInfo
-      {session}
-      {node}
-      {status}
-      {usage}
-      {projectName}
-      class="min-w-0 flex-1 justify-start"
-    />
+    </div>
+    {@render headerActions()}
   </div>
 
   {#if status === "running"}
