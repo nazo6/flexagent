@@ -303,7 +303,6 @@
       <div class="flex flex-wrap gap-2">
         <Button
           size="sm"
-          class="touch-target"
           disabled={busyAction !== null || missingRequired.length > 0}
           onclick={() => void respond("accept")}
         >
@@ -313,7 +312,6 @@
         <Button
           size="sm"
           variant="outline"
-          class="touch-target"
           disabled={busyAction !== null}
           onclick={() => void respond("decline")}
         >
@@ -323,7 +321,6 @@
         <Button
           size="sm"
           variant="ghost"
-          class="touch-target"
           disabled={busyAction !== null}
           onclick={() => void respond("cancel")}
         >

@@ -34,7 +34,7 @@
       <h2 class="min-w-0 flex-1 truncate text-[13px] font-semibold">{definition.label()}</h2>
       <button
         type="button"
-        class="text-muted-foreground hover:bg-accent hover:text-foreground touch-target flex size-7 items-center justify-center rounded-md transition-colors"
+        class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 items-center justify-center rounded-md transition-colors"
         title={m.session_close_panel()}
         aria-label={m.session_close_panel()}
         onclick={onclose}

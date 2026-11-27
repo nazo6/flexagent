@@ -127,7 +127,7 @@
   >
     <button
       type="button"
-      class="text-muted-foreground hover:bg-accent hover:text-foreground touch-target absolute right-2 z-10 flex items-center justify-center rounded-md"
+      class="text-muted-foreground hover:bg-accent hover:text-foreground absolute right-2 z-10 flex size-8 items-center justify-center rounded-md"
       style="top: calc(var(--safe-top) + 0.5rem);"
       title={m.common_close()}
       aria-label={m.common_close()}

@@ -30,7 +30,7 @@
     type="button"
     {disabled}
     class={cn(
-      "hover:bg-accent focus-visible:bg-accent touch-row flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors outline-none disabled:pointer-events-none disabled:opacity-50 max-lg:text-sm",
+      "hover:bg-accent focus-visible:bg-accent flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors outline-none disabled:pointer-events-none disabled:opacity-50",
       className,
     )}
     onclick={() => onselect?.()}
@@ -44,7 +44,7 @@
     <button
       type="button"
       class={cn(
-        "hover:bg-accent touch-target-sm flex size-7 shrink-0 items-center justify-center rounded-md transition-colors",
+        "hover:bg-accent flex size-7 shrink-0 items-center justify-center rounded-md transition-colors",
         favorite.active ? "text-signal" : "text-muted-foreground hover:text-foreground",
       )}
       title={favorite.label}

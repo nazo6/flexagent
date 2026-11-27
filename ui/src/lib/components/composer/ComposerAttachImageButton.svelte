@@ -33,7 +33,7 @@
 <Button
   variant="ghost"
   size="icon-sm"
-  class="touch-target-lg rounded-full"
+  class="rounded-full"
   title={label}
   aria-label={label}
   onclick={() => input?.click()}

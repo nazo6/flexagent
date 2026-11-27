@@ -35,7 +35,7 @@
 >
   <button
     type="button"
-    class="hover:bg-accent touch-target relative flex size-8 items-center justify-center rounded-md border text-muted-foreground"
+    class="hover:bg-accent relative flex size-8 items-center justify-center rounded-md border text-muted-foreground"
     onclick={() => layoutState.setMobileDrawer(true)}
     aria-label={m.shell_open_menu()}
   >
@@ -58,11 +58,11 @@
   </div>
 
   <div class="flex items-center gap-1">
-    <ProblemBadge class="size-8 px-0 touch-target" />
+    <ProblemBadge class="size-8 px-0" />
     {#if page.url.pathname === "/"}
       <a
         href="/search"
-        class="hover:bg-accent touch-target flex size-8 items-center justify-center rounded-md border text-muted-foreground"
+        class="hover:bg-accent flex size-8 items-center justify-center rounded-md border text-muted-foreground"
         title={m.shell_full_text_search()}
         aria-label={m.shell_full_text_search()}
       >
@@ -71,7 +71,7 @@
     {:else}
       <a
         href="/"
-        class="hover:bg-accent touch-target flex size-8 items-center justify-center rounded-md border text-muted-foreground"
+        class="hover:bg-accent flex size-8 items-center justify-center rounded-md border text-muted-foreground"
         title={m.shell_new_session()}
         aria-label={m.shell_new_session()}
       >

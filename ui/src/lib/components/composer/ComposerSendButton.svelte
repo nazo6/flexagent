@@ -21,14 +21,7 @@
   } = $props();
 </script>
 
-<Button
-  size="icon-sm"
-  class="touch-target-lg rounded-full"
-  {disabled}
-  {title}
-  aria-label={label}
-  {onclick}
->
+<Button size="icon-sm" class="rounded-full" {disabled} {title} aria-label={label} {onclick}>
   {#if busy}
     <LoaderCircleIcon class="size-4 animate-spin" />
   {:else}

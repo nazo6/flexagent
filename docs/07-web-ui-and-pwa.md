@@ -36,7 +36,7 @@ PC ブラウザ、ローカル直結 (`node.addr`、既定 `localhost:7860`)、�
 - **表示規則**: 機械的文字列（branch / path / ID / model / 時刻）のみ mono フォント。ステータスは色だけでなくラベル・アイコンを併記する。ターミナルと Shiki コードテーマは可読性優先で固定テーマを維持する。
 - **選択・状態の表現**: 選択行は `--selection` の面・1px の signal ヘアライン・文字ウェイトで示す（色だけに頼らない）。`--signal-soft` はアイコンチップや `mark` 用の淡い tint であり、選択面には使わない（明色パレットでは `--sidebar-bg` とほぼ同明度になり判別できない）。要対応はインラインのステータスアイコンとピル、カードや折りたたみは 1px の全面ボーダーで示す。左端のアクセントバーは使わない。選択中の項目は `aria-current="page"` を持つ。
 - **Motion**: 状態変化は 120ms（hover / press）/ 160ms（開閉・状態クロスフェード）/ 240ms（強調）を上限とし、`transform` と `opacity` を優先する。高さアニメは折りたたみパネルだけに限定し、履歴の初期描画・セッション切替・ページング・スクロールは動かさない。新着メッセージの入場とサイドバーの並べ替えは、ライブな変化に限って動かす。実行中スイープは `running` の間だけ、承認リングはカードがライブで現れたときの一度だけ、ロゴ描画は起動後の初回ホーム表示で一度だけ再生する（ルート遷移では繰り返さない。ロゴを明示的に操作したときだけリプレイできる）。`prefers-reduced-motion` を尊重し、Browser > Appearance の `Motion: System / Full / Reduced`（`localStorage["fxg:motion"]`）で端末ごとに上書きできる。Reduced は装飾的なループと移動を止めるが、実行中を示すスピナーは残す。ターミナル / Monaco は対象外。
-- **モバイル密度**: `pointer: coarse` では本文 15px・入力 16px・最小ヒット領域 32–44px（`.touch-target*`）・リスト行 44px（`.touch-row`）に上げる。デスクトップのコンパクト密度をそのまま持ち込まず、指で押せることを優先する。
+- **モバイル密度**: 本文・コントロール・リスト行の大きさはデスクトップと同じ密度を保つ。`pointer: coarse` で変えるのは入力欄の 16px（iOS のフォーカスズーム回避）だけにし、UI 全体を拡大しない。
 
 ### 2.1 レスポンシブ分岐の置き場所
 
@@ -148,7 +148,7 @@ Web ターミナルは `ghostty-web`（WASM 版 `libghostty-vt` + Canvas 2D）�
 - **モバイル入力とスクロール**: `viewport` に `interactive-widget=resizes-content` を指定し、`innerHeight` と `visualViewport` の差から `--app-height` / `--keyboard-inset` を更新する。シェルとポータルは下インセットを `max(safe-area, keyboard)` で確保するため、composer がキーボードに隠れない。スクロール領域は `overscroll-behavior-y: contain` で scroll chaining と PWA の pull-to-refresh（アプリ再起動）を止め、タップ可能要素は `touch-action: manipulation` と透明な tap highlight で 300ms 待ち・二重タップズーム・グレーのフラッシュを避ける。
 - **戻る操作とオーバーレイ**: モバイルで開く drawer / dock / TurnOutline / SubagentDetail / Problem center / ピッカーシート / ダイアログは、開いている間だけ overlay stack に登録する。`beforeNavigate` の `popstate` で最上位を閉じて遷移をキャンセルするため、戻るは「最上位のシートを閉じる」、次の戻るが「前の画面へ」になる。オーバーレイのために番兵の履歴エントリは積まない。
 - **ドロワーのスワイプ**: モバイルのナビゲーション drawer は左端 24px からの横スワイプで指に追従して開き、開いている間は左スワイプで閉じる。パネル位置と backdrop の不透明度は同じ進捗で動き、35% / 65% の閾値と velocity で開閉をスナップする。OS の戻るジェスチャー（Android のエッジスワイプ / iOS の画面端スワイプ）が優先される環境ではブラウザがタッチを渡さないため、ヘッダーのメニューボタンも併用する。
-- **タッチ形状**: `pointer: coarse` では `.touch-target-lg`（44px）/ `.touch-target`（40px）/ `.touch-target-sm`（36px）/ `.touch-target-xs`（32px）で最小ヒット領域を確保し、`.touch-row` でリスト行を 44px 以上にする。入力欄は 16px にして iOS のフォーカスズームを避ける。`lg` 未満かつ `pointer: coarse` のときだけピッカーを vaul のボトムシートにし、マウス操作の狭いデスクトップウィンドウでは通常の Popover を使う。workspace dock は `lg` 未満で全画面シートにする。
+- **タッチ形状**: コントロールの見た目とヒット領域はデスクトップと同じサイズを使い、`pointer: coarse` で拡大しない。入力欄だけは 16px にして iOS のフォーカスズームを避ける。`lg` 未満かつ `pointer: coarse` のときだけピッカーを vaul のボトムシートにし、マウス操作の狭いデスクトップウィンドウでは通常の Popover を使う。workspace dock は `lg` 未満で全画面シートにする。
 - **幅と入力デバイスの分離**: シェルの compact / desktop は画面幅（`lg`）で決め、ボトムシートのようなタッチ専用 UI は「幅 + coarse pointer」で決める。横幅が狭いだけのデスクトップ（マウス / トラックパッド）は、通常の Popover とコンパクトなコントロールを使う。
 - **タッチ向け先読み**: `data-sveltekit-preload-data="tap"` により、hover のないタッチ端末でもタップ開始時に遷移先のデータ / コードを取得する。
 - **履歴の置換**: セッション作成後の遷移は `replaceState` で行い、戻る操作が消費済みの新規作成画面ではなく元の画面へ戻るようにする。外部セッションの取り込みは一覧へ戻れるよう通常の push のままにする。

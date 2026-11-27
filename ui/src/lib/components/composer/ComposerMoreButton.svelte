@@ -30,7 +30,7 @@
 <Popover.Root bind:open>
   <Popover.Trigger
     class={cn(
-      "text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring/40 touch-target motion-press relative inline-flex size-7 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2",
+      "text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring/40 motion-press relative inline-flex size-7 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2",
       active && "text-signal",
     )}
     title={label}

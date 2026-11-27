@@ -162,7 +162,7 @@
       </span>
       <button
         type="button"
-        class="text-muted-foreground hover:bg-accent hover:text-foreground touch-target-sm flex size-6 items-center justify-center rounded-md"
+        class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-6 items-center justify-center rounded-md"
         title={m.chat_turns_close()}
         aria-label={m.chat_turns_close()}
         onclick={onclose}
@@ -183,7 +183,7 @@
       {#if query !== ""}
         <button
           type="button"
-          class="text-muted-foreground hover:bg-accent hover:text-foreground touch-target-sm flex size-5 shrink-0 items-center justify-center rounded-md"
+          class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-5 shrink-0 items-center justify-center rounded-md"
           title={m.chat_turns_search_clear()}
           aria-label={m.chat_turns_search_clear()}
           onclick={() => (query = "")}
@@ -211,7 +211,7 @@
                 <button
                   type="button"
                   data-search-hit={hit.node_seq}
-                  class="hover:bg-accent touch-row flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors"
+                  class="hover:bg-accent flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors"
                   onclick={() => {
                     onjumpseq(hit.node_seq);
                     onclose();
@@ -247,7 +247,7 @@
             <div class="flex justify-center py-1">
               <button
                 type="button"
-                class="text-muted-foreground hover:bg-accent hover:text-foreground touch-target-sm rounded-md px-2 py-1 text-[11px] disabled:opacity-50"
+                class="text-muted-foreground hover:bg-accent hover:text-foreground rounded-md px-2 py-1 text-[11px] disabled:opacity-50"
                 disabled={searching}
                 onclick={() => (searchLimit += SEARCH_PAGE_SIZE)}
               >
@@ -266,7 +266,7 @@
                 data-turn-row={turn.seq}
                 aria-current={turn.seq === activeSeq ? "true" : undefined}
                 class={cn(
-                  "touch-row flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
+                  "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
                   turn.seq === activeSeq ? "bg-signal-soft" : "hover:bg-accent",
                 )}
                 onclick={() => onjump(turn)}

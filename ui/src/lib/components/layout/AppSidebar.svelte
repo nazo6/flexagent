@@ -102,7 +102,7 @@
   /** The navigation strip stays compact, so every destination keeps a short label. */
   function navItemClass(active: boolean): string {
     return cn(
-      "touch-row flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-md px-0 py-1 text-[11px] leading-tight font-medium transition-colors max-lg:text-[12px]",
+      "flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-md px-0 py-1 text-[11px] leading-tight font-medium transition-colors",
       active
         ? "bg-selection text-foreground ring-1 ring-signal/40 ring-inset"
         : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
@@ -617,7 +617,7 @@
             onclick={handleLinkClick}
             aria-current={isActive ? "page" : undefined}
             class={cn(
-              "session-row touch-row group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors max-lg:text-sm",
+              "session-row group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors",
               isActive
                 ? "bg-selection text-foreground font-semibold ring-1 ring-signal/40 ring-inset"
                 : isWaiting
@@ -702,18 +702,13 @@
                 class="session-row-actions flex shrink-0 items-center gap-1 overflow-hidden transition-opacity"
               >
                 <!-- Archive / delete menu -->
-                <SessionActionsMenu
-                  {session}
-                  align="end"
-                  iconClass="size-3.5"
-                  buttonClass="touch-target-sm"
-                />
+                <SessionActionsMenu {session} align="end" iconClass="size-3.5" />
 
                 <!-- Pin button -->
                 <button
                   type="button"
                   class={cn(
-                    "hover:text-foreground touch-target-sm flex items-center justify-center rounded-md p-0.5 transition-colors",
+                    "hover:text-foreground flex items-center justify-center rounded-md p-0.5 transition-colors",
                     isPinned && "text-signal",
                   )}
                   title={isPinned ? m.shell_unpin() : m.shell_pin()}

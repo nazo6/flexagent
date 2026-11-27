@@ -106,7 +106,7 @@
     <!-- Mobile: open the session drawer -->
     <button
       type="button"
-      class="hover:bg-accent touch-target text-muted-foreground hover:text-foreground relative flex size-7 shrink-0 items-center justify-center rounded-md border lg:hidden"
+      class="hover:bg-accent text-muted-foreground hover:text-foreground relative flex size-7 shrink-0 items-center justify-center rounded-md border lg:hidden"
       onclick={() => layoutState.setMobileDrawer(true)}
       title={m.shell_open_menu()}
       aria-label={m.shell_open_menu()}
@@ -125,7 +125,7 @@
     {#if layoutState.sidebarCollapsed}
       <button
         type="button"
-        class="hover:bg-accent touch-target text-muted-foreground hover:text-foreground relative hidden size-7 shrink-0 items-center justify-center rounded-md border lg:flex"
+        class="hover:bg-accent text-muted-foreground hover:text-foreground relative hidden size-7 shrink-0 items-center justify-center rounded-md border lg:flex"
         onclick={() => layoutState.toggleSidebar()}
         title={m.shell_show_sidebar()}
         aria-label={m.shell_show_sidebar()}
@@ -169,7 +169,7 @@
         <button
           type="button"
           class={cn(
-            "touch-target-xs flex size-7 shrink-0 items-center justify-center rounded-md border transition-colors",
+            "flex size-7 shrink-0 items-center justify-center rounded-md border transition-colors",
             turnsOpen
               ? "border-signal/40 bg-signal-soft text-signal"
               : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -185,9 +185,7 @@
       <!-- On desktop the sidebar footer owns the badge; when the sidebar is
            collapsed this header is the only remaining place for it. -->
       <ProblemBadge
-        class={layoutState.sidebarCollapsed
-          ? "touch-target-xs size-7 px-0"
-          : "touch-target-xs size-7 px-0 lg:hidden"}
+        class={layoutState.sidebarCollapsed ? "size-7 px-0" : "size-7 px-0 lg:hidden"}
       />
       {#if session}
         <div
@@ -200,7 +198,7 @@
             <button
               type="button"
               class={cn(
-                "touch-target-xs flex size-6 items-center justify-center rounded-sm transition-colors",
+                "flex size-6 items-center justify-center rounded-sm transition-colors",
                 activeTool === tool.id
                   ? "bg-signal-soft text-signal"
                   : "text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -238,7 +236,7 @@
           {onResume}
           {onForceStop}
           {onDeleted}
-          buttonClass="touch-target size-7 rounded-md border border-border"
+          buttonClass="size-7 rounded-md border border-border"
           iconClass="size-4"
         />
       {/if}
