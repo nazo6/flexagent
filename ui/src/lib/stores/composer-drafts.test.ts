@@ -201,17 +201,15 @@ describe("ComposerDraftStore", () => {
     expect(store.activeDraft("session:session-a")?.draft_id).toBe(first.draft_id);
   });
 
-  it("keeps the draft object when mirrored attachments are unchanged", async () => {
+  it("keeps the draft object when attachments are unchanged", async () => {
     const store = new ComposerDraftStore(memoryStorage());
     const api = fakeApi();
     const active = await store.ensure("session:session-a", "session-a", api);
     if (active === null) throw new Error("draft missing");
     const scope = "session:session-a";
 
-    // The composers mirror their attachment state from an effect that also
-    // reads the store. Replacing the draft with an equal copy made that effect
-    // invalidate itself until Svelte threw `effect_update_depth_exceeded` when
-    // opening an existing session.
+    // Replacing the draft with an equal copy would invalidate readers that
+    // compare by reference, even though nothing changed.
     const before = store.activeDraft(scope);
     store.setAttachments(scope, active.draft_id, []);
     expect(store.activeDraft(scope)).toBe(before);

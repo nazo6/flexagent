@@ -74,9 +74,15 @@
   let editingDraftId = $state<string | null>(null);
   let loadedRevision = $state(0);
 
+  /** Replace the composer text and mirror it into the active draft. */
+  function setText(value: string): void {
+    text = value;
+    if (editingDraftId !== null) composerDrafts.setText(scope, editingDraftId, value);
+  }
+
   /** Replace the composer text (e.g. restoring a reverted user turn). */
   export function restoreText(value: string): void {
-    text = value;
+    setText(value);
   }
   let sending = $state(false);
   let controlBusy = $state(false);
@@ -95,7 +101,11 @@
       : permissionPolicy === "auto_allow_all",
   );
 
-  const composer = createComposerAttachments();
+  const composer = createComposerAttachments({
+    onchange: (next) => {
+      if (editingDraftId !== null) composerDrafts.setAttachments(scope, editingDraftId, next);
+    },
+  });
   const attachments = $derived(composer.attachments);
 
   $effect(() => {
@@ -115,23 +125,13 @@
       editingDraftId = draft.draft_id;
       loadedRevision = draft.revision;
       text = draft.body;
-      composer.replace(draft.attachments ?? []);
+      // Restoring a draft is not a user edit; do not mirror it back.
+      composer.replace(draft.attachments ?? [], false);
       return;
     }
     if (draft.revision !== loadedRevision) {
       loadedRevision = draft.revision;
       text = draft.body;
-    }
-  });
-
-  // Mirror edits into the draft store (debounced autosave to the endpoint).
-  $effect(() => {
-    if (editingDraftId !== null) composerDrafts.setText(scope, editingDraftId, text);
-  });
-
-  $effect(() => {
-    if (editingDraftId !== null) {
-      composerDrafts.setAttachments(scope, editingDraftId, attachments);
     }
   });
 
@@ -182,7 +182,9 @@
    */
   const showResumeAction = $derived(isStopped && text.trim() === "" && attachments.length === 0);
 
-  // Close the resume suggestion once the session becomes active
+  // Close the resume suggestion once the session becomes active.
+  // fxg-effect-ok: clears a transient send failure; a derived value would show
+  // it again the next time the session stops without failing.
   $effect(() => {
     if (
       status === "idle" ||
@@ -220,7 +222,7 @@
   const hasMoreActions = $derived(node !== null || (canCompact && !isStopped));
 
   function applyCommand(name: string) {
-    text = `/${name} `;
+    setText(`/${name} `);
   }
 
   const placeholderText = $derived.by(() => {
@@ -256,7 +258,8 @@
         return;
       }
       text = "";
-      composer.clear();
+      // The draft is consumed below, so there is nothing to mirror.
+      composer.clear(false);
       if (editingDraftId !== null) {
         void composerDrafts.consume(scope, editingDraftId, sessionId, sync.connection.client);
       }
@@ -544,6 +547,9 @@
 
   <ComposerTextarea
     bind:value={text}
+    onvaluechange={(value) => {
+      if (editingDraftId !== null) composerDrafts.setText(scope, editingDraftId, value);
+    }}
     onkeydown={onKeydown}
     onpaste={composer.onPaste}
     ondrop={composer.onDrop}

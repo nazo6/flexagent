@@ -12,6 +12,7 @@
     onkeydown = undefined,
     onpaste = undefined,
     ondrop = undefined,
+    onvaluechange = undefined,
     ariaLabel = "",
   }: {
     /** Prompt text (two-way bound). */
@@ -29,6 +30,8 @@
     onkeydown?: (event: KeyboardEvent) => void;
     onpaste?: (event: ClipboardEvent) => void;
     ondrop?: (event: DragEvent) => void;
+    /** Called with the new value after the user edits the textarea. */
+    onvaluechange?: (value: string) => void;
   } = $props();
 
   let textarea = $state<HTMLTextAreaElement | null>(null);
@@ -46,6 +49,11 @@
     resize();
   });
 
+  function handleInput(event: Event): void {
+    resize();
+    onvaluechange?.((event.currentTarget as HTMLTextAreaElement).value);
+  }
+
   function onDragOver(event: DragEvent): void {
     event.preventDefault();
   }
@@ -58,7 +66,7 @@
   aria-label={ariaLabel || placeholder}
   {disabled}
   {rows}
-  oninput={resize}
+  oninput={handleInput}
   {onkeydown}
   {onpaste}
   ondragover={onDragOver}

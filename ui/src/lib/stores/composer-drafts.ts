@@ -262,10 +262,8 @@ export class ComposerDraftStore {
     const index = drafts.findIndex((draft) => draft.draft_id === draftId);
     if (index < 0) return;
     const current = drafts[index];
-    // Composer mirrors its attachment state into the store from an effect. This
-    // method reads (and thus subscribes to) the same map it writes, so an
-    // unconditional write would re-run that effect forever
-    // (`effect_update_depth_exceeded`). Skip writes that change nothing.
+    // Skip writes that change nothing so equal lists never invalidate readers
+    // that compare the draft object by reference (for example a restored draft).
     if (sameAttachments(current.attachments ?? [], attachments)) return;
     const next = drafts.slice();
     next[index] = { ...current, attachments: [...attachments] };

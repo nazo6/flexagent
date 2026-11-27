@@ -35,16 +35,29 @@ function guessMime(fileName: string): string {
   }
 }
 
+export interface ComposerAttachmentOptions {
+  /** Restores a previously kept draft. */
+  initial?: AttachmentMeta[];
+  /**
+   * Called after each user-driven mutation so the owner can mirror the list
+   * (for example into the composer draft store). Restoring a draft passes
+   * `notify = false` and does not call it.
+   */
+  onchange?: (attachments: AttachmentMeta[]) => void;
+}
+
 /**
  * Attachment state shared by the new-session and session composers.
  *
  * Images are transported inline (`data_b64`); local files are referenced by
- * their absolute path on the node. `initial` restores a previously kept draft.
+ * their absolute path on the node.
  */
-export function createComposerAttachments(initial: AttachmentMeta[] = []) {
-  let attachments = $state<AttachmentMeta[]>([...initial]);
+export function createComposerAttachments(options: ComposerAttachmentOptions = {}) {
+  let attachments = $state<AttachmentMeta[]>([...(options.initial ?? [])]);
+  const notify = (): void => options.onchange?.(attachments);
 
   async function addImageFiles(files: FileList | File[]): Promise<void> {
+    let changed = false;
     for (const file of Array.from(files)) {
       if (!file.type.startsWith("image/")) {
         toast.error(m.chat_attachment_image_only());
@@ -62,7 +75,9 @@ export function createComposerAttachments(initial: AttachmentMeta[] = []) {
         local_path: null,
         data_b64: encodeBytesToBase64(bytes),
       });
+      changed = true;
     }
+    if (changed) notify();
   }
 
   function addLocalFile(path: string): void {
@@ -74,19 +89,24 @@ export function createComposerAttachments(initial: AttachmentMeta[] = []) {
       local_path: path,
       data_b64: null,
     });
+    notify();
   }
 
   function remove(index: number): void {
     attachments = attachments.filter((_, current) => current !== index);
+    notify();
   }
 
-  function clear(): void {
+  /** Clears the list. Pass `false` when the draft is being discarded anyway. */
+  function clear(notifyChange = true): void {
     attachments = [];
+    if (notifyChange) notify();
   }
 
   /** Replaces the attachments (restoring a different draft). */
-  function replace(next: AttachmentMeta[]): void {
+  function replace(next: AttachmentMeta[], notifyChange = true): void {
     attachments = [...next];
+    if (notifyChange) notify();
   }
 
   function onPaste(event: ClipboardEvent): void {

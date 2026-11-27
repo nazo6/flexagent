@@ -147,8 +147,18 @@
   let fileBrowserOpen = $state(false);
   let useCustomPath = $state(initialUrl.path !== "");
 
-  const composer = createComposerAttachments();
+  const composer = createComposerAttachments({
+    onchange: (next) => {
+      if (editingDraftId !== null) composerDrafts.setAttachments(draftScope, editingDraftId, next);
+    },
+  });
   const attachments = $derived(composer.attachments);
+
+  /** Replace the prompt and mirror it into the active draft. */
+  function setPrompt(value: string): void {
+    promptText = value;
+    if (editingDraftId !== null) composerDrafts.setText(draftScope, editingDraftId, value);
+  }
 
   $effect(() => {
     void composerDrafts
@@ -172,25 +182,13 @@
       editingDraftId = draft.draft_id;
       loadedRevision = draft.revision;
       promptText = draft.body;
-      composer.replace(draft.attachments ?? []);
+      // Restoring a draft is not a user edit; do not mirror it back.
+      composer.replace(draft.attachments ?? [], false);
       return;
     }
     if (draft.revision !== loadedRevision) {
       loadedRevision = draft.revision;
       promptText = draft.body;
-    }
-  });
-
-  // Keep the prompt while the user visits another screen and comes back.
-  $effect(() => {
-    if (editingDraftId !== null) {
-      composerDrafts.setText(draftScope, editingDraftId, promptText);
-    }
-  });
-
-  $effect(() => {
-    if (editingDraftId !== null) {
-      composerDrafts.setAttachments(draftScope, editingDraftId, attachments);
     }
   });
 
@@ -808,7 +806,8 @@
       );
       await sync.refreshSessions();
       promptText = "";
-      composer.clear();
+      // The draft is discarded below, so there is nothing to mirror.
+      composer.clear(false);
       if (editingDraftId !== null) {
         await composerDrafts.discard(draftScope, editingDraftId, sync.connection.client);
       }
@@ -1348,6 +1347,7 @@
 
       <ComposerTextarea
         bind:value={promptText}
+        onvaluechange={setPrompt}
         onkeydown={onKeydown}
         onpaste={composer.onPaste}
         ondrop={composer.onDrop}
