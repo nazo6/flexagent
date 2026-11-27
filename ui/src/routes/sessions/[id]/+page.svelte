@@ -152,7 +152,6 @@
   let headerCollapsed = $state(false);
   let lastScrollTop = 0;
   let headerScrollReady = false;
-  let headerRestoreTimer: ReturnType<typeof setTimeout> | null = null;
   /** Row flashed after a deep-link jump (cleared when the animation ends). */
   let highlightSeq = $state<number | null>(null);
   /** Plain guard: the effect re-runs as history arrives, but a jump happens once. */
@@ -168,8 +167,6 @@
   const HEADER_REVEAL_TOP_PX = 40;
   /** Ignore sub-pixel / rubber-band jitter when reading the scroll direction. */
   const HEADER_SCROLL_STEP_PX = 10;
-  /** Bring the action row back once scrolling settles. */
-  const HEADER_RESTORE_MS = 900;
   let lastUserItemKey: string | null = null;
 
   // The workspace owns the dock state; the session only supplies tool context.
@@ -207,7 +204,6 @@
       activeTurnSeq = null;
       headerCollapsed = false;
       headerScrollReady = false;
-      clearHeaderRestore();
       sync.loadSessionEvents(id).catch(() => {
         /* Ignore: the WS replay will make it visible once it arrives. */
       });
@@ -276,30 +272,6 @@
     return null;
   }
 
-  function clearHeaderRestore(): void {
-    if (headerRestoreTimer === null) return;
-    clearTimeout(headerRestoreTimer);
-    headerRestoreTimer = null;
-  }
-
-  function scheduleHeaderRestore(): void {
-    clearHeaderRestore();
-    headerRestoreTimer = setTimeout(() => {
-      headerRestoreTimer = null;
-      headerCollapsed = false;
-    }, HEADER_RESTORE_MS);
-  }
-
-  /** Keyboard open means the reader is composing, not skimming the transcript. */
-  function isEditingText(): boolean {
-    const element = document.activeElement;
-    return (
-      element instanceof HTMLTextAreaElement ||
-      element instanceof HTMLInputElement ||
-      (element instanceof HTMLElement && element.isContentEditable)
-    );
-  }
-
   function handleScroll() {
     if (!chatContainer) return;
     const top = chatContainer.scrollTop;
@@ -316,20 +288,16 @@
       headerScrollReady = true;
       return;
     }
-    if (isEditingText() || top <= HEADER_REVEAL_TOP_PX) {
+    if (top <= HEADER_REVEAL_TOP_PX) {
       headerCollapsed = false;
-      clearHeaderRestore();
       return;
     }
-    if (delta > HEADER_SCROLL_STEP_PX) {
+    // Reading upward (older history) tucks the action row away and leaves it
+    // there; coming back down or reaching the top brings it back.
+    if (delta < -HEADER_SCROLL_STEP_PX) {
       headerCollapsed = true;
-    } else if (delta < -HEADER_SCROLL_STEP_PX) {
+    } else if (delta > HEADER_SCROLL_STEP_PX) {
       headerCollapsed = false;
-    }
-    if (headerCollapsed) {
-      scheduleHeaderRestore();
-    } else {
-      clearHeaderRestore();
     }
   }
 
@@ -502,7 +470,6 @@
 
   onDestroy(() => {
     if (skeletonTimer !== null) clearTimeout(skeletonTimer);
-    clearHeaderRestore();
   });
 
   /**
@@ -521,9 +488,8 @@
       if (added) {
         await tick();
         container.scrollTop = previousTop + (container.scrollHeight - previousHeight);
-        // Prepending history is not the reader scrolling down.
+        // Prepending history is not a direction change.
         lastScrollTop = container.scrollTop;
-        headerCollapsed = false;
       }
     } catch {
       /* Reported through the sync store's problem banner. */
