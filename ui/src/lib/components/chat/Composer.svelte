@@ -477,8 +477,8 @@
     onkeydown={onKeydown}
     onpaste={composer.onPaste}
     ondrop={composer.onDrop}
-    rows={2}
-    minHeight={44}
+    rows={1}
+    minHeight={38}
     maxHeight={160}
     placeholder={placeholderText}
     ariaLabel={m.chat_input_label()}
