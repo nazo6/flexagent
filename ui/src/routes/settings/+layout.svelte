@@ -145,6 +145,24 @@
     return { kind: "not_found", nodeId: routeNodeId };
   });
 
+  /**
+   * The tab strip scrolls sideways on narrow screens, so the tab selected there
+   * (or opened by a link) can end up outside the visible width.
+   */
+  let tabsScroller = $state<HTMLDivElement | null>(null);
+  $effect(() => {
+    const scroller = tabsScroller;
+    const selected = `${activeScope}:${activeTab}`;
+    if (scroller === null) return;
+    const tab = scroller.querySelector<HTMLElement>(`[data-tab="${selected}"]`);
+    if (tab === null) return;
+    // Move only the strip, never the page.
+    const strip = scroller.getBoundingClientRect();
+    const bounds = tab.getBoundingClientRect();
+    if (bounds.left < strip.left) scroller.scrollLeft -= strip.left - bounds.left + 8;
+    else if (bounds.right > strip.right) scroller.scrollLeft += bounds.right - strip.right + 8;
+  });
+
   const selectedOnlineNodeId = $derived(
     onlineNodes.some((node) => node.node_id === routeNodeId) ? routeNodeId : "",
   );
@@ -408,26 +426,35 @@
           data-horizontal=""
           class="group/tabs flex flex-col gap-2"
         >
+          <!-- Five tabs do not fit a phone width, so the strip scrolls sideways
+               instead of wrapping: a second row would break the fixed tab
+               height and detach the active tab underline from the border. -->
           <div
-            data-slot="tabs-list"
-            data-variant="line"
-            class={cn(
-              tabsListVariants({ variant: "line" }),
-              "w-full flex-wrap border-b sm:flex-nowrap",
-            )}
+            bind:this={tabsScroller}
+            class="overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
-            {#each tabsByScope[activeScope] as tab (tab.id)}
-              {@const isCurrentTab = activeTab === tab.id}
-              <a
-                href={tabHref(tab.id)}
-                data-slot="tabs-trigger"
-                data-active={isCurrentTab ? "" : undefined}
-                aria-current={isCurrentTab ? "page" : undefined}
-                class={tabsTriggerClass}
-              >
-                {tab.label}
-              </a>
-            {/each}
+            <div
+              data-slot="tabs-list"
+              data-variant="line"
+              class={cn(
+                tabsListVariants({ variant: "line" }),
+                "w-max min-w-full flex-nowrap border-b",
+              )}
+            >
+              {#each tabsByScope[activeScope] as tab (tab.id)}
+                {@const isCurrentTab = activeTab === tab.id}
+                <a
+                  href={tabHref(tab.id)}
+                  data-slot="tabs-trigger"
+                  data-tab={`${activeScope}:${tab.id}`}
+                  data-active={isCurrentTab ? "" : undefined}
+                  aria-current={isCurrentTab ? "page" : undefined}
+                  class={tabsTriggerClass}
+                >
+                  {tab.label}
+                </a>
+              {/each}
+            </div>
           </div>
 
           <div class="mt-2 flex flex-col gap-3">
