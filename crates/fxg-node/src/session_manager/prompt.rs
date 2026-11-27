@@ -240,6 +240,11 @@ impl SessionManager {
             return Err(NodeError::CommandDuplicate(command_id.to_string()));
         }
 
+        // Reject control commands for sessions this node does not own. `Cancel`
+        // is idempotent for a known-but-stopped session, but an unknown ID must
+        // still fail instead of reporting a successful no-op.
+        self.ensure_session_exists(session_id).await?;
+
         // The approval policy is session metadata owned by the node rather than a
         // driver operation, so it can be changed while the session is stopped
         // (e.g. before resuming) and applies from the next turn onward.
