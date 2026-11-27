@@ -163,6 +163,19 @@ describe("ComposerDraftStore", () => {
     expect(store.activeDraft("session:session-a")?.revision).toBe(2);
   });
 
+  it("renames a draft and reports the save status", async () => {
+    const store = new ComposerDraftStore(memoryStorage());
+    const api = fakeApi();
+    const active = await store.ensure("session:session-a", "session-a", api);
+    if (active === null) throw new Error("draft missing");
+
+    store.rename("session:session-a", active.draft_id, "Plan B");
+    await store.flush("session:session-a", active.draft_id);
+
+    expect(store.activeDraft("session:session-a")?.title).toBe("Plan B");
+    expect(store.saveStatus(active.draft_id)).toBe("saved");
+  });
+
   it("removes a draft and selects the remaining one", async () => {
     const store = new ComposerDraftStore(memoryStorage());
     const api = fakeApi();

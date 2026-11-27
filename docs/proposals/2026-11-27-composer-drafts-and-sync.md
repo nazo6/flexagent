@@ -444,6 +444,8 @@ Phase 1〜2 のうち、次を実装した。
 - `fxg-protocol` の型（`DraftId` / `Draft` / リクエスト / クエリ）
 - `fxg-api` の `/api/v1/drafts`（ハブ / ノード共通）
 - UI の複数下書き（切替・新規・削除・デバウンス保存・競合時の複製）
+- サイドバーの Drafts ビュー（セッションなし下書きの一覧・オープン・リネーム・削除）
+- 保存中 / 未保存の表示と再試行、画面離脱時のフラッシュ
 - 旧 `localStorage` 下書きの初回移行
 
 未実装（[`docs/backlog.md`](../backlog.md) §8）:
@@ -451,5 +453,4 @@ Phase 1〜2 のうち、次を実装した。
 - Client WS の `DraftChanged`（他端末の更新は再読み込み / 再マウント時に反映）
 - 添付の共有（v1 はメタデータのみ）
 - node ⇔ hub の下書き複製
-- サイドバーの Drafts ビュー / リネーム
 - tombstone の GC

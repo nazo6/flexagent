@@ -118,6 +118,9 @@ export interface DraftContext {
   nodeId?: string | null;
 }
 
+/** Draft autosave status for the composer indicator. */
+export type DraftSaveStatus = "saving" | "saved" | "error";
+
 /**
  * Server-backed draft cache and autosave controller.
  *
@@ -127,6 +130,7 @@ export interface DraftContext {
 export class ComposerDraftStore {
   #drafts = new SvelteMap<string, Draft[]>();
   #active = new SvelteMap<string, string>();
+  #status = new SvelteMap<string, DraftSaveStatus>();
   #apis = new Map<string, ApiClient>();
   #loaded = new Set<string>();
   #timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -141,6 +145,11 @@ export class ComposerDraftStore {
   /** Current drafts for one scope (reactive when read inside `$derived`). */
   list(scope: string): Draft[] {
     return this.#drafts.get(scope) ?? [];
+  }
+
+  /** Autosave status of one draft (`null` before the first save attempt). */
+  saveStatus(draftId: string): DraftSaveStatus | null {
+    return this.#status.get(draftId) ?? null;
   }
 
   /** The selected draft, or `null` while the first load is in flight. */
@@ -215,6 +224,17 @@ export class ComposerDraftStore {
     this.#schedule(scope, draftId);
   }
 
+  /** Updates the display title locally and schedules a debounced save. */
+  rename(scope: string, draftId: string, title: string): void {
+    const drafts = this.list(scope);
+    const index = drafts.findIndex((draft) => draft.draft_id === draftId);
+    if (index < 0 || drafts[index].title === title) return;
+    const next = drafts.slice();
+    next[index] = { ...next[index], title };
+    this.#drafts.set(scope, next);
+    this.#schedule(scope, draftId);
+  }
+
   /** Updates the attachments locally (v1 does not persist attachment payloads). */
   setAttachments(scope: string, draftId: string, attachments: AttachmentMeta[]): void {
     const drafts = this.list(scope);
@@ -233,6 +253,7 @@ export class ComposerDraftStore {
     api: ApiClient,
   ): Promise<void> {
     this.#cancelSave(draftId);
+    this.#status.delete(draftId);
     await this.#deleteRemote(api, draftId);
     const remaining = this.list(scope).filter((draft) => draft.draft_id !== draftId);
     this.#drafts.set(scope, remaining);
@@ -247,6 +268,7 @@ export class ComposerDraftStore {
   /** Deletes one draft without selecting or creating a replacement. */
   async discard(scope: string, draftId: string, api: ApiClient): Promise<void> {
     this.#cancelSave(draftId);
+    this.#status.delete(draftId);
     await this.#deleteRemote(api, draftId);
     this.#drafts.set(
       scope,
@@ -266,7 +288,10 @@ export class ComposerDraftStore {
 
   /** Forgets a scope (the new-session screen after starting a session). */
   clearScope(scope: string): void {
-    for (const draft of this.list(scope)) this.#cancelSave(draft.draft_id);
+    for (const draft of this.list(scope)) {
+      this.#cancelSave(draft.draft_id);
+      this.#status.delete(draft.draft_id);
+    }
     this.#drafts.delete(scope);
     this.#active.delete(scope);
     this.#apis.delete(scope);
@@ -280,6 +305,12 @@ export class ComposerDraftStore {
       clearTimeout(timer);
       this.#timers.delete(draftId);
     }
+    await this.#save(scope, draftId);
+  }
+
+  /** Retries a failed autosave immediately. */
+  async retry(scope: string, draftId: string): Promise<void> {
+    this.#cancelSave(draftId);
     await this.#save(scope, draftId);
   }
 
@@ -340,6 +371,7 @@ export class ComposerDraftStore {
     const draft = this.list(scope).find((item) => item.draft_id === draftId);
     if (draft === undefined) return;
 
+    this.#status.set(draftId, "saving");
     try {
       const updated = await api.updateDraft(draftId, {
         expected_revision: draft.revision,
@@ -353,11 +385,15 @@ export class ComposerDraftStore {
         origin_device_id: this.#deviceId,
       });
       this.#replace(scope, updated);
+      this.#status.set(draftId, "saved");
     } catch (error) {
       if (error instanceof ApiError && error.code === "REVISION_MISMATCH") {
-        await this.#resolveConflict(scope, draftId, api);
+        const resolved = await this.#resolveConflict(scope, draftId, api);
+        this.#status.set(draftId, resolved ? "saved" : "error");
+      } else {
+        // Keep the local text; the user can retry or the next edit retries.
+        this.#status.set(draftId, "error");
       }
-      // Other failures keep the local text; the next edit retries.
     }
   }
 
@@ -365,16 +401,16 @@ export class ComposerDraftStore {
    * Keeps both sides of a concurrent edit: adopt the server copy and save the
    * local body as a separate draft, so no typed text is lost.
    */
-  async #resolveConflict(scope: string, draftId: string, api: ApiClient): Promise<void> {
+  async #resolveConflict(scope: string, draftId: string, api: ApiClient): Promise<boolean> {
     const local = this.list(scope).find((draft) => draft.draft_id === draftId);
-    if (local === undefined) return;
+    if (local === undefined) return false;
 
     let server: Draft | undefined;
     try {
       const drafts = await this.#fetch(api, local.session_id);
       server = drafts.find((draft) => draft.draft_id === draftId);
     } catch {
-      return;
+      return false;
     }
     if (server === undefined) {
       // Deleted on another device: drop the local copy.
@@ -382,21 +418,27 @@ export class ComposerDraftStore {
         scope,
         this.list(scope).filter((draft) => draft.draft_id !== draftId),
       );
-      return;
+      return true;
     }
     if (server.body === local.body && server.title === local.title) {
       this.#replace(scope, server);
-      return;
+      return true;
     }
 
-    const copy = await this.#createRemote(api, local.session_id, local.body, {
-      projectId: local.project_id,
-      nodeId: local.node_id,
-    });
+    let copy: Draft;
+    try {
+      copy = await this.#createRemote(api, local.session_id, local.body, {
+        projectId: local.project_id,
+        nodeId: local.node_id,
+      });
+    } catch {
+      return false;
+    }
     this.#replace(scope, server);
     this.#drafts.set(scope, [...this.list(scope), copy]);
     this.select(scope, copy.draft_id);
     toast.info(m.drafts_conflict_copy());
+    return true;
   }
 
   #replace(scope: string, draft: Draft): void {

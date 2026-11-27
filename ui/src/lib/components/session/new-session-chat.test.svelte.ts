@@ -1,5 +1,5 @@
 import { flushSync, mount, unmount } from "svelte";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { page } from "$app/state";
 import type {
   AgentCapabilitiesPreview,
@@ -9,6 +9,17 @@ import type {
 } from "#lib/generated/bindings.ts";
 import NewSessionChat from "./NewSessionChat.svelte";
 import { sync } from "#lib/stores/app.svelte.ts";
+import { composerDrafts } from "#lib/stores/composer-drafts.ts";
+
+// The component loads drafts from the connected endpoint on mount; keep these
+// tests offline and focused on the new-session form.
+beforeEach(() => {
+  vi.spyOn(composerDrafts, "ensure").mockResolvedValue(null);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function agent(id: string, name: string): AgentSummary {
   return {

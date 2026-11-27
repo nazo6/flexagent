@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy, onMount } from "svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
   import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.ts";
   import ComposerCard from "#lib/components/composer/ComposerCard.svelte";
@@ -15,6 +16,7 @@
   import { saveSessionConfigOption, shouldSubmitOnEnter } from "#lib/session-prefs.ts";
   import { composerDrafts, draftScope } from "#lib/stores/composer-drafts.ts";
   import { prefs } from "#lib/stores/prefs.svelte.ts";
+  import { onDocumentHidden } from "#lib/visibility.ts";
   import { m } from "#lib/paraglide/messages.js";
   import type {
     NodeSummary,
@@ -121,6 +123,26 @@
       composerDrafts.setAttachments(scope, editingDraftId, attachments);
     }
   });
+
+  const saveStatus = $derived(
+    editingDraftId === null ? null : composerDrafts.saveStatus(editingDraftId),
+  );
+
+  function flushDraft(): void {
+    if (editingDraftId === null) return;
+    composerDrafts.setText(scope, editingDraftId, text);
+    void composerDrafts.flush(scope, editingDraftId);
+  }
+
+  onMount(() => {
+    return onDocumentHidden(flushDraft);
+  });
+
+  onDestroy(flushDraft);
+
+  async function retrySave(): Promise<void> {
+    if (editingDraftId !== null) await composerDrafts.retry(scope, editingDraftId);
+  }
 
   async function toggleAutoApprove() {
     const policy = autoApprove ? "ask" : "auto_allow_all";
@@ -406,6 +428,18 @@
       onfiles={(files) => void composer.addImageFiles(files)}
     />
     <ComposerDraftPicker {scope} {sessionId} />
+    {#if saveStatus === "saving"}
+      <span class="text-muted-foreground shrink-0 text-[11px]">{m.drafts_saving()}</span>
+    {:else if saveStatus === "error"}
+      <button
+        type="button"
+        class="text-danger shrink-0 text-[11px] underline-offset-2 hover:underline"
+        title={m.drafts_retry()}
+        onclick={() => void retrySave()}
+      >
+        {m.drafts_save_failed()}
+      </button>
+    {/if}
     {#if !sync.wsConnected}
       <span class="text-danger text-[11px]">
         {sync.wsReconnecting ? m.chat_reconnecting() : m.chat_connection_lost()}

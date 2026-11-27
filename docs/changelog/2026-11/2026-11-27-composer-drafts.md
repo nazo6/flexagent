@@ -36,12 +36,14 @@
     ハブ / ノード共通のルータに追加した。
   - `expected_revision` の不一致は `409 REVISION_MISMATCH` を返す。
 - **UI**:
-  - コンポーザーに Drafts メニューを追加し、切替・新規・削除を可能にした。
-  - 本文は 800ms のデバウンスで自動保存する。送信成功時はその下書きを削除して
-    新しい空の下書きを用意する。
+  - コンポーザーに Drafts メニューを追加し、切替・新規・リネーム・削除を可能にした。
+  - サイドバーの Drafts ビューでセッションなし下書きを一覧し、開く・リネーム・削除できる。
+  - 本文は 800ms のデバウンスで自動保存する。保存中 / 未保存を表示し、失敗時は再試行できる。
+  - 送信成功時はその下書きを削除して新しい空の下書きを用意する。
   - 旧 `localStorage` の下書きは初回ロード時にサーバーの下書きへ移行する。
   - 競合時はサーバー側の内容を採用し、手元の本文を複製として残す。
   - 選択中の下書き ID は端末ローカルに保持する。
+  - 画面離脱時とタブ非表示時に保留中の保存をフラッシュする。
 
 ## 不変条件
 
@@ -58,7 +60,7 @@
 - `cargo test -p fxg-node rest_drafts_crud_and_revision_conflict`
 - `cargo clippy -p fxg-protocol -p fxg-db -p fxg-api -p fxg-node -p fxg-hub --all-targets`
 - `pnpm --dir ui run check`
-- `pnpm --dir ui run test`（308 件）
+- `pnpm --dir ui run test`（309 件）
 - `pnpm --dir ui run build`
 - `mise run fmt:check`
 
