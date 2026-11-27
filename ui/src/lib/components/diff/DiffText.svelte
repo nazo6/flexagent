@@ -25,6 +25,7 @@
     "bg-muted/30 overflow-auto rounded-md border p-2 font-mono text-[13px] leading-relaxed",
     className,
   )}
-  style={`max-height:${maxHeight}`}>{#each lines as line}<span class={lineClass(line)}
-      >{line}{"\n"}</span
-    >{/each}</pre>
+  style={`max-height:${maxHeight}`}>{#each lines as line, index (index)}<span
+      class={lineClass(line)}
+      >{line}
+    </span>{/each}</pre>

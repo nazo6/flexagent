@@ -39,7 +39,8 @@
     children,
   }: Props = $props();
 
-  const overlayId = `picker-${++pickerInstance}`;
+  pickerInstance += 1;
+  const overlayId = `picker-${pickerInstance}`;
 
   function setOpen(next: boolean): void {
     open = next;

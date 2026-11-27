@@ -68,7 +68,6 @@
   // first load creates a draft (migrating the old localStorage text) so the
   // composer always has an editor.
   const scope = $derived(draftScope(sessionId));
-  const draftList = $derived(composerDrafts.list(scope));
   const activeDraft = $derived(composerDrafts.activeDraft(scope));
   let text = $state("");
   let editingDraftId = $state<string | null>(null);
@@ -182,9 +181,9 @@
    */
   const showResumeAction = $derived(isStopped && text.trim() === "" && attachments.length === 0);
 
-  // Close the resume suggestion once the session becomes active.
-  // fxg-effect-ok: clears a transient send failure; a derived value would show
-  // it again the next time the session stops without failing.
+  // Close the resume suggestion once the session becomes active. This clears a
+  // transient send failure; a derived value would show it again the next time
+  // the session stops without failing.
   $effect(() => {
     if (
       status === "idle" ||

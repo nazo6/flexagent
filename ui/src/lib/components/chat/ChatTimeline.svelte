@@ -84,7 +84,7 @@
   } = $props();
 
   /** Terminals whose stop request is in flight (per card). */
-  let stoppingTerminals = $state(new SvelteSet<string>());
+  const stoppingTerminals = new SvelteSet<string>();
 
   async function stopTerminal(terminalId: string): Promise<void> {
     if (stoppingTerminals.has(terminalId)) return;

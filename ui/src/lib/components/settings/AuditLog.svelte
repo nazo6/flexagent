@@ -39,7 +39,7 @@
   }
 
   $effect(() => {
-    const target = nodeId;
+    void nodeId;
     untrack(() => {
       logs = [];
       void load();

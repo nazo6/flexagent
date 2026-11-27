@@ -112,7 +112,7 @@ export function createKeyedResource<K extends string, T>(
   load: (key: K) => Promise<T>,
   options: KeyedResourceOptions<K> = {},
 ): KeyedResource<K, T> {
-  let entries = $state<Record<string, ResourceEntry<T>>>({});
+  const entries = $state<Record<string, ResourceEntry<T>>>({});
   const generations = new Map<K, number>();
 
   function entry(key: K): ResourceEntry<T> {

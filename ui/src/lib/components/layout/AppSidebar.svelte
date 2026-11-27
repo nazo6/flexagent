@@ -762,8 +762,7 @@
         <span class="text-background/70 flex items-center gap-1.5">
           <span class={cn("size-1.5 shrink-0 rounded-full", nodeAvail.dotColorClass)}></span>
           <span class="truncate">
-            {sessionStatusLabel(session.status)}
-            {" · "}
+            {sessionStatusLabel(session.status)} ·
             {m.shell_node_status({
               node: node?.name ?? session.node_id,
               status: nodeAvail.statusText,

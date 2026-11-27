@@ -8,7 +8,7 @@ PC ブラウザ、ローカル直結 (`node.addr`、既定 `localhost:7860`)、�
 
 - **フレームワーク & ルーティング**: SvelteKit (`Svelte 5` Runes + `@sveltejs/adapter-static` による SPA モード) + Vite + TypeScript
 - **パッケージマネージャ & タスクランナー**: `pnpm` + `mise`（`mise.toml` による `specta` 型生成 → UI ビルド → Cargo ビルドの一貫管理）
-- **Lint / Format / Test**: `oxlint` / `oxfmt` / `svelte-check` / `Vitest` (+ `happy-dom`)
+- **Lint / Format / Test**: `ESLint` / `oxfmt` / `svelte-check` / `Vitest` (+ `happy-dom`)
 - **スタイリング & コンポーネント**: Tailwind CSS v4 (`@tailwindcss/vite`) + `shadcn-svelte` (`bits-ui` + モバイルシート用 `vaul-svelte`) + `@lucide/svelte`
 - **型安全性**: Rust の `fxg-protocol` から `specta` で自動生成された型定義 (`ui/src/lib/generated/bindings.ts`) をインポートする。
 - **状態管理 & 同期**:
@@ -21,6 +21,7 @@ PC ブラウザ、ローカル直結 (`node.addr`、既定 `localhost:7860`)、�
   - `$effect` は DOM・タイマー・ネットワーク・`localStorage` など外部系への副作用に限定する。
   - prop をローカル state に写す、既定値を選ぶ、URL パラメータを反映するといった「値から値を作る」処理は `$derived` と明示的な上書き状態で表す。effect で「適用済みフラグ」を立てる初期化も行わない。
   - effect が読んだ state を同じ effect で書かない。避けられない場合は `untrack` で読み取り依存を切る。ストアのアクション（`setActiveSession` など）は内部で `untrack` し、呼び出し元の effect に意図しない依存を作らない。
+  - ESLint の `svelte/prefer-writable-derived` が「`$state` + 単一代入の `$effect`」を検出する。prop のリセットやストアへのミラーのようにルールで表せない形は、上の原則とレビューで防ぐ（lint は [`docs/development.md`](development.md) を参照）。
 
 ---
 

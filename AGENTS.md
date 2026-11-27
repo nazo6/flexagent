@@ -78,7 +78,7 @@
     Tailwind CSS v4 + `shadcn-svelte`
   - ターミナル: `ITerminalAdapter` 抽象化 + `ghostty-web` / Diff:
     `monaco-editor` (PC) & `shiki` (Mobile)
-  - ツールチェイン: `pnpm`, `oxlint`, `oxfmt`, `svelte-check`, `Vitest`
+  - ツールチェイン: `pnpm`, `ESLint`, `oxfmt`, `svelte-check`, `Vitest`
 
 ## 3. 設計ドキュメント参照先
 
@@ -159,7 +159,7 @@
     1 つの論理的な変更とし、無関係な変更を混ぜない。
   - **コミットメッセージと PR タイトルは英語**で書く (本文も英語)。
     docs や AGENTS.md 自体の記述は日本語のままでよい。
-- **編集後チェック**: 必要に応じて TS (`svelte-check`, `oxlint`) や Rust
+- **編集後チェック**: 必要に応じて TS (`svelte-check`, `ESLint`) や Rust
   (`cargo check`, `cargo clippy`) のチェック、lint
   を行う。ファイルを編集した際はかならず format (`mise run fmt`) を行う
   (Rust = rustfmt / TOML = tombi / それ以外 (Markdown・JSON・YAML・HTML・TS・Svelte)

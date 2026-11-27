@@ -157,7 +157,7 @@
           </div>
           <a href={hitHref(hit)} class="block transition-opacity hover:opacity-80">
             <p class="text-[13px] break-words whitespace-pre-wrap">
-              {#each snippetSegments(hit.snippet) as segment}
+              {#each snippetSegments(hit.snippet) as segment, index (index)}
                 {#if segment.match}
                   <mark class="bg-signal-soft text-ink rounded-sm px-0.5">{segment.text}</mark>
                 {:else}{segment.text}{/if}

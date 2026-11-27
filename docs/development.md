@@ -15,7 +15,7 @@
 | `mise run dev:cli` (`fxg-dev`)         | デバッグバイナリを隔離された dev home に対して実行（例: `fxg-dev session list`、§5.3）                  |
 | `mise run install:prod`                | UI をビルドしてリリースバイナリを `cargo install --locked`（運用用、§5.6）                              |
 | `mise run fmt` / `fmt:check`           | Rust (`rustfmt`), TOML (`tombi`), Markdown/JSON/YAML/TS/Svelte (`oxfmt`) の一括整形・検査               |
-| `mise run lint`                        | `lint:rust` (`clippy`), `lint:errors` (型安全・エラー握りつぶし検査), `lint:toml`, `lint:ui` (`oxlint`) |
+| `mise run lint`                        | `lint:rust` (`clippy`), `lint:errors` (型安全・エラー握りつぶし検査), `lint:toml`, `lint:ui` (`ESLint`) |
 | `mise run types`                       | `fxg-protocol` から `specta` で `ui/src/lib/generated/bindings.ts` を再生成                             |
 | `mise run sqlx:prepare` / `sqlx:check` | `crates/fxg-db/migrations/` を適用し `.sqlx` オフラインキャッシュを更新・検証                           |
 | `mise run check:ui`                    | `svelte-check` による UI 型・テンプレート検査                                                           |
@@ -56,7 +56,7 @@ CI は領域ごとに 3 つのワークフローへ分割している。目的�
 
 - `.github/workflows/ci-fmt.yml`: 整形チェック (rustfmt / tombi / oxfmt)。`docs/` の Markdown も整形対象なので常時実行する。
 - `.github/workflows/ci-rust.yml`: `crates/**`、TOML マニフェスト、`.sqlx/**`、生成 TS 型などの変更時に clippy / 3 OS テスト / specta 型同期を実行する。
-- `.github/workflows/ci-ui.yml`: `ui/**` の変更時に oxlint / svelte-check / Vitest / ビルドを実行する。
+- `.github/workflows/ci-ui.yml`: `ui/**` の変更時に ESLint / svelte-check / Vitest / ビルドを実行する。
 
 不変条件:
 

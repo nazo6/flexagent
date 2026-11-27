@@ -65,7 +65,7 @@ description = "Lint TOML with tombi (including JSON Schema validation)"
 run = "tombi lint"
 
 [tasks."lint:ui"]
-description = "Lint TypeScript / Svelte with oxlint"
+description = "Lint UI scripts and Svelte components with ESLint"
 run = "pnpm --dir ui run lint"
 
 [tasks.lint]
