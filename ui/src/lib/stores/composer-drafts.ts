@@ -119,7 +119,7 @@ export interface DraftContext {
 }
 
 /** Draft autosave status for the composer indicator. */
-export type DraftSaveStatus = "saving" | "saved" | "error";
+export type DraftSaveStatus = "pending" | "saving" | "saved" | "error";
 
 /**
  * Server-backed draft cache and autosave controller.
@@ -132,6 +132,7 @@ export class ComposerDraftStore {
   #active = new SvelteMap<string, string>();
   #status = new SvelteMap<string, DraftSaveStatus>();
   #apis = new Map<string, ApiClient>();
+  #scopeSession = new Map<string, string | null>();
   #loaded = new Set<string>();
   #timers = new Map<string, ReturnType<typeof setTimeout>>();
   #deviceId: string;
@@ -170,6 +171,7 @@ export class ComposerDraftStore {
     context: DraftContext = {},
   ): Promise<Draft | null> {
     this.#apis.set(scope, api);
+    this.#scopeSession.set(scope, sessionId);
     if (this.#loaded.has(scope)) return this.activeDraft(scope);
     this.#loaded.add(scope);
 
@@ -200,6 +202,7 @@ export class ComposerDraftStore {
     context: DraftContext = {},
   ): Promise<Draft> {
     this.#apis.set(scope, api);
+    this.#scopeSession.set(scope, sessionId);
     const draft = await this.#createRemote(api, sessionId, "", context);
     this.#drafts.set(scope, [...this.list(scope), draft]);
     this.select(scope, draft.draft_id);
@@ -221,6 +224,7 @@ export class ComposerDraftStore {
     const next = drafts.slice();
     next[index] = { ...next[index], body };
     this.#drafts.set(scope, next);
+    this.#status.set(draftId, "pending");
     this.#schedule(scope, draftId);
   }
 
@@ -232,6 +236,7 @@ export class ComposerDraftStore {
     const next = drafts.slice();
     next[index] = { ...next[index], title };
     this.#drafts.set(scope, next);
+    this.#status.set(draftId, "pending");
     this.#schedule(scope, draftId);
   }
 
@@ -295,6 +300,7 @@ export class ComposerDraftStore {
     this.#drafts.delete(scope);
     this.#active.delete(scope);
     this.#apis.delete(scope);
+    this.#scopeSession.delete(scope);
     this.#loaded.delete(scope);
   }
 
@@ -312,6 +318,69 @@ export class ComposerDraftStore {
   async retry(scope: string, draftId: string): Promise<void> {
     this.#cancelSave(draftId);
     await this.#save(scope, draftId);
+  }
+
+  /**
+   * Applies a `DraftChanged` notification from the server.
+   *
+   * Pending / failed local edits are never overwritten; their own save resolves
+   * the conflict. Unknown drafts are added when their scope is already loaded
+   * (another device created them).
+   */
+  async applyChange(draftId: string, revision: number, deleted: boolean): Promise<void> {
+    let known = false;
+
+    for (const [scope, drafts] of Array.from(this.#drafts.entries())) {
+      const index = drafts.findIndex((draft) => draft.draft_id === draftId);
+      if (index < 0) continue;
+      known = true;
+      const local = drafts[index];
+
+      if (deleted) {
+        if (this.#isDirty(draftId)) continue;
+        this.#cancelSave(draftId);
+        this.#status.delete(draftId);
+        const remaining = drafts.filter((draft) => draft.draft_id !== draftId);
+        this.#drafts.set(scope, remaining);
+        if (this.#active.get(scope) === draftId) {
+          const next = remaining[0];
+          if (next !== undefined) {
+            this.select(scope, next.draft_id);
+          } else {
+            const api = this.#apis.get(scope);
+            if (api !== undefined) {
+              await this.create(scope, this.#scopeSession.get(scope) ?? null, api);
+            }
+          }
+        }
+        continue;
+      }
+
+      if (revision <= local.revision || this.#isDirty(draftId)) continue;
+      const api = this.#apis.get(scope);
+      if (api === undefined) continue;
+      try {
+        const updated = await api.draft(draftId);
+        this.#replace(scope, updated);
+      } catch {
+        // The draft may have been deleted between the notification and the fetch.
+      }
+    }
+
+    if (known || deleted) return;
+
+    // A draft created on another device: add it when its scope is loaded.
+    const api = this.#apis.values().next().value;
+    if (api === undefined) return;
+    try {
+      const draft = await api.draft(draftId);
+      const scope = draft.session_id === null ? NEW_SESSION_SCOPE : `session:${draft.session_id}`;
+      if (!this.#drafts.has(scope)) return;
+      if (this.list(scope).some((item) => item.draft_id === draftId)) return;
+      this.#drafts.set(scope, [...this.list(scope), draft]);
+    } catch {
+      // Ignore: the scope may have been cleared while the request was in flight.
+    }
   }
 
   async #fetch(api: ApiClient, sessionId: string | null): Promise<Draft[]> {
@@ -446,6 +515,12 @@ export class ComposerDraftStore {
       item.draft_id === draft.draft_id ? draft : item,
     );
     this.#drafts.set(scope, drafts);
+  }
+
+  /** Whether the local copy has edits the server has not accepted yet. */
+  #isDirty(draftId: string): boolean {
+    const status = this.#status.get(draftId);
+    return status === "pending" || status === "saving" || status === "error";
   }
 
   async #deleteRemote(api: ApiClient, draftId: string): Promise<void> {

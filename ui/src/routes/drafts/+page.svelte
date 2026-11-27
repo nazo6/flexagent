@@ -120,8 +120,10 @@
   });
 
   // Reconnect (or the initial WS handshake) may complete after the page mounts.
+  // `draftChangeSeq` is read so live draft changes also trigger a refresh.
   $effect(() => {
-    if (sync.wsConnected) void refresh();
+    const seq = sync.draftChangeSeq;
+    if (seq >= 0 && sync.wsConnected) void refresh();
   });
 </script>
 

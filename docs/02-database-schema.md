@@ -171,6 +171,7 @@ DDL・カラム・インデックスの正は `crates/fxg-db/migrations/` です
 - 接続先ストア（ハブ接続時は `hub.db`、ノード直結時は `node.db`）がそのスコープの権威。
 - 更新は `revision` + `expected_revision` の楽観ロック。競合は `REVISION_MISMATCH`。
 - 削除は `deleted_at` の tombstone（将来の node ⇔ hub 複製のため）。
+- 変更は Client WS の `DraftChanged { draft_id, revision, deleted }` で接続中のクライアントへ通知する。本文は通知に載せず、`GET /api/v1/drafts/:id` で再取得する。
 - `session_id` に外部キーは張らない。下書きはセッションより長生きし、セッションなし下書きも持つため。
 - 添付は v1 ではメタデータのみ保存し、実体は端末に残す。
 - v1 では node ⇔ hub の下書き複製を行わない。ハブ接続とノード直結で下書きは独立する。

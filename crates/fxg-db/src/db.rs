@@ -794,7 +794,7 @@ impl Db {
     }
 
     /// Soft-deletes a draft (idempotent).
-    pub async fn delete_draft(&self, draft_id: &str) -> Result<bool, DbError> {
+    pub async fn delete_draft(&self, draft_id: &str) -> Result<Option<u64>, DbError> {
         drafts::delete_draft(&self.pool, draft_id).await
     }
 }

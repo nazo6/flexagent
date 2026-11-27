@@ -140,6 +140,7 @@
   const activeDraft = $derived(composerDrafts.activeDraft(draftScope));
   let promptText = $state("");
   let editingDraftId = $state<string | null>(null);
+  let loadedRevision = $state(0);
   let appliedInitialDraft = false;
   let busy = $state(false);
   let browserOpen = $state(false);
@@ -162,12 +163,22 @@
   });
 
   // Load the selected draft into the textarea (switching drafts replaces it).
+  // A revision bump for the same draft is a remote update; the store does not
+  // apply it while local edits are pending.
   $effect(() => {
     const draft = activeDraft;
-    if (draft === null || draft.draft_id === editingDraftId) return;
-    editingDraftId = draft.draft_id;
-    promptText = draft.body;
-    composer.replace(draft.attachments ?? []);
+    if (draft === null) return;
+    if (draft.draft_id !== editingDraftId) {
+      editingDraftId = draft.draft_id;
+      loadedRevision = draft.revision;
+      promptText = draft.body;
+      composer.replace(draft.attachments ?? []);
+      return;
+    }
+    if (draft.revision !== loadedRevision) {
+      loadedRevision = draft.revision;
+      promptText = draft.body;
+    }
   });
 
   // Keep the prompt while the user visits another screen and comes back.

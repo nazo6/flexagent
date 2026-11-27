@@ -1391,6 +1391,11 @@ mod tests {
         let listed = body_json(response).await;
         assert_eq!(listed["drafts"].as_array().expect("drafts").len(), 1);
 
+        let mut events =
+            <crate::daemon::DaemonState as fxg_api::ClientApiBackend>::subscribe_client_events(
+                daemon.state(),
+            );
+
         let update = serde_json::json!({
             "expected_revision": 1,
             "body": "second",
@@ -1410,6 +1415,23 @@ mod tests {
         let updated = body_json(response).await;
         assert_eq!(updated["body"], "second");
         assert_eq!(updated["revision"], 2);
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
+            .await
+            .expect("event timeout")
+            .expect("event channel");
+        match event {
+            fxg_api::ClientEvent::DraftChanged {
+                draft_id: changed_id,
+                revision,
+                deleted,
+            } => {
+                assert_eq!(changed_id.as_str(), draft_id);
+                assert_eq!(revision, 2);
+                assert!(!deleted);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
 
         // A stale revision is a structured 409, not a 500.
         let response = app
@@ -1436,6 +1458,23 @@ mod tests {
             .await
             .expect("response");
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
+            .await
+            .expect("event timeout")
+            .expect("event channel");
+        match event {
+            fxg_api::ClientEvent::DraftChanged {
+                draft_id: changed_id,
+                revision,
+                deleted,
+            } => {
+                assert_eq!(changed_id.as_str(), draft_id);
+                assert_eq!(revision, 3);
+                assert!(deleted);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
 
         let response = app
             .oneshot(get(&host, "/api/v1/drafts", Some(&token)))

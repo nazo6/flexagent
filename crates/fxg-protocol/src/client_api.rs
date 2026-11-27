@@ -1203,6 +1203,18 @@ pub enum ServerWsMessage {
     Pong,
     /// Project list or node bindings changed (triggers a `GET /api/v1/projects` refresh).
     ProjectsUpdated,
+    /// A draft was created, updated, or deleted in the connected store.
+    ///
+    /// Clients refresh the draft when `revision` is newer than their copy. The
+    /// body itself is not carried, so long prompts do not travel over the WS.
+    DraftChanged {
+        /// Draft ID
+        draft_id: DraftId,
+        /// Revision after the change
+        revision: u64,
+        /// Whether the draft was deleted (tombstone)
+        deleted: bool,
+    },
 }
 
 /// Client -> Endpoint (`/api/v1/pty/ws`) message.

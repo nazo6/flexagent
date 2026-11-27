@@ -31,10 +31,12 @@
 - **プロトコル**:
   - `DraftId` / `Draft` / `DraftListResponse` / `DraftListQuery` /
     `CreateDraftRequest` / `UpdateDraftRequest` を追加した。
+  - `ServerWsMessage::DraftChanged { draft_id, revision, deleted }` を追加した。
 - **API**:
   - `GET/POST /api/v1/drafts` と `GET/PATCH/DELETE /api/v1/drafts/:id` を
     ハブ / ノード共通のルータに追加した。
   - `expected_revision` の不一致は `409 REVISION_MISMATCH` を返す。
+  - 作成・更新・削除を Client WS の `DraftChanged` で接続中のクライアントへ通知する。
 - **UI**:
   - コンポーザーに Drafts メニューを追加し、切替・新規・リネーム・削除を可能にした。
   - サイドバーの Drafts ビューでセッションなし下書きを一覧し、開く・リネーム・削除できる。
@@ -42,6 +44,7 @@
   - 送信成功時はその下書きを削除して新しい空の下書きを用意する。
   - 旧 `localStorage` の下書きは初回ロード時にサーバーの下書きへ移行する。
   - 競合時はサーバー側の内容を採用し、手元の本文を複製として残す。
+  - 他端末の `DraftChanged` を反映する。編集中（未保存の変更あり）の端末は上書きしない。
   - 選択中の下書き ID は端末ローカルに保持する。
   - 画面離脱時とタブ非表示時に保留中の保存をフラッシュする。
 
@@ -60,7 +63,7 @@
 - `cargo test -p fxg-node rest_drafts_crud_and_revision_conflict`
 - `cargo clippy -p fxg-protocol -p fxg-db -p fxg-api -p fxg-node -p fxg-hub --all-targets`
 - `pnpm --dir ui run check`
-- `pnpm --dir ui run test`（309 件）
+- `pnpm --dir ui run test`（285 件）
 - `pnpm --dir ui run build`
 - `mise run fmt:check`
 

@@ -101,8 +101,14 @@ async fn draft_delete_is_a_tombstone_and_idempotent() {
     let db = db().await;
     let created = db.create_draft(&create("body", None)).await.unwrap();
 
-    assert!(db.delete_draft(created.draft_id.as_str()).await.unwrap());
-    assert!(!db.delete_draft(created.draft_id.as_str()).await.unwrap());
+    let revision = db.delete_draft(created.draft_id.as_str()).await.unwrap();
+    assert_eq!(revision, Some(2));
+    assert!(
+        db.delete_draft(created.draft_id.as_str())
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert!(
         db.get_draft(created.draft_id.as_str())
             .await

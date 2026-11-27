@@ -12,7 +12,7 @@ use fxg_db::DbError;
 use fxg_protocol::client_api::{CreateDraftRequest, DraftListQuery, UpdateDraftRequest};
 use fxg_protocol::common::ErrorCode;
 
-use crate::{ApiError, ClientApiBackend, ClientApiState};
+use crate::{ApiError, ClientApiBackend, ClientApiState, ClientEvent};
 
 /// Maps draft DB errors to the structured API error (revision conflicts are 409).
 fn draft_error(err: DbError) -> ApiError {
@@ -42,7 +42,16 @@ pub(crate) async fn create_draft<B: ClientApiBackend>(
     Json(request): Json<CreateDraftRequest>,
 ) -> Response {
     match state.backend.db().create_draft(&request).await {
-        Ok(draft) => (StatusCode::CREATED, Json(draft)).into_response(),
+        Ok(draft) => {
+            state
+                .backend
+                .publish_client_event(ClientEvent::DraftChanged {
+                    draft_id: draft.draft_id.clone(),
+                    revision: draft.revision,
+                    deleted: false,
+                });
+            (StatusCode::CREATED, Json(draft)).into_response()
+        }
         Err(err) => draft_error(err).into_response(),
     }
 }
@@ -66,7 +75,16 @@ pub(crate) async fn update_draft<B: ClientApiBackend>(
     Json(request): Json<UpdateDraftRequest>,
 ) -> Response {
     match state.backend.db().update_draft(&draft_id, &request).await {
-        Ok(Some(draft)) => Json(draft).into_response(),
+        Ok(Some(draft)) => {
+            state
+                .backend
+                .publish_client_event(ClientEvent::DraftChanged {
+                    draft_id: draft.draft_id.clone(),
+                    revision: draft.revision,
+                    deleted: false,
+                });
+            Json(draft).into_response()
+        }
         Ok(None) => ApiError::not_found("draft not found").into_response(),
         Err(err) => draft_error(err).into_response(),
     }
@@ -78,7 +96,18 @@ pub(crate) async fn delete_draft<B: ClientApiBackend>(
     UrlPath(draft_id): UrlPath<String>,
 ) -> Response {
     match state.backend.db().delete_draft(&draft_id).await {
-        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Ok(revision) => {
+            if let Some(revision) = revision {
+                state
+                    .backend
+                    .publish_client_event(ClientEvent::DraftChanged {
+                        draft_id: fxg_protocol::DraftId::from(draft_id),
+                        revision,
+                        deleted: true,
+                    });
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(err) => draft_error(err).into_response(),
     }
 }

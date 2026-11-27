@@ -85,6 +85,13 @@ impl ClientApiBackend for HubState {
         self.inner.client_events.subscribe()
     }
 
+    fn publish_client_event(&self, event: ClientEvent) {
+        fxg_protocol::discard_with!(
+            self.inner.client_events.send(event),
+            "broadcast a client event"
+        );
+    }
+
     async fn dispatch_command(&self, command: ClientCommand) -> CommandResult {
         let command_id = command.command_id().to_owned();
         let (node_id, message) = match &command {

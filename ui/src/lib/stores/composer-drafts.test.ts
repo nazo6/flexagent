@@ -56,6 +56,13 @@ function fakeApi(initial: Draft[] = []): ApiClient {
         return true;
       });
     },
+    async draft(draftId: string) {
+      const found = drafts.find((item) => item.draft_id === draftId);
+      if (found === undefined) {
+        throw new ApiError(404, { code: "NOT_FOUND", message: "missing" }, "missing");
+      }
+      return found;
+    },
     async createDraft(request: CreateDraftRequest) {
       const created = draft({
         ...request,
@@ -215,5 +222,62 @@ describe("ComposerDraftStore", () => {
     const activeAfter = store.activeDraft("session:session-a");
     expect(activeAfter?.body).toBe("local edit");
     expect(activeAfter?.draft_id).not.toBe("draft-1");
+  });
+
+  it("applies a remote update when the local copy is clean", async () => {
+    const store = new ComposerDraftStore(memoryStorage());
+    const remote = draft({ draft_id: "draft-1", session_id: "session-a", body: "remote" });
+    const api = fakeApi([remote]);
+    await store.ensure("session:session-a", "session-a", api);
+
+    await api.updateDraft("draft-1", {
+      expected_revision: 1,
+      title: "",
+      body: "remote edit",
+      session_id: "session-a",
+      project_id: null,
+      node_id: null,
+      attachments: [],
+      origin_device_id: "other-device",
+    });
+    await store.applyChange("draft-1", 2, false);
+
+    expect(store.activeDraft("session:session-a")?.body).toBe("remote edit");
+    expect(store.activeDraft("session:session-a")?.revision).toBe(2);
+  });
+
+  it("does not overwrite pending local edits with a remote update", async () => {
+    const store = new ComposerDraftStore(memoryStorage());
+    const remote = draft({ draft_id: "draft-1", session_id: "session-a", body: "remote" });
+    const api = fakeApi([remote]);
+    await store.ensure("session:session-a", "session-a", api);
+
+    store.setText("session:session-a", "draft-1", "local edit");
+    await api.updateDraft("draft-1", {
+      expected_revision: 1,
+      title: "",
+      body: "remote edit",
+      session_id: "session-a",
+      project_id: null,
+      node_id: null,
+      attachments: [],
+      origin_device_id: "other-device",
+    });
+    await store.applyChange("draft-1", 2, false);
+
+    expect(store.activeDraft("session:session-a")?.body).toBe("local edit");
+  });
+
+  it("replaces a draft deleted on another device", async () => {
+    const store = new ComposerDraftStore(memoryStorage());
+    const remote = draft({ draft_id: "draft-1", session_id: "session-a", body: "remote" });
+    const api = fakeApi([remote]);
+    await store.ensure("session:session-a", "session-a", api);
+
+    await api.deleteDraft("draft-1");
+    await store.applyChange("draft-1", 2, true);
+
+    expect(store.list("session:session-a")).toHaveLength(1);
+    expect(store.list("session:session-a")[0]?.draft_id).not.toBe("draft-1");
   });
 });

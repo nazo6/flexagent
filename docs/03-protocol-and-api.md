@@ -411,7 +411,13 @@ driver 側のキャッシュを無視する（UI の明示的な Refresh 用）�
 
 - 上り: `Subscribe` / `SendPrompt` / `ControlSession` / `Ping`。
 - 下り: `EventBatch` / `LiveStreamDelta` / `ProvisioningLog` / `CommandResult` /
-  `SystemStatus` / `ProjectsUpdated` / `Error` / `Pong`。
+  `SystemStatus` / `ProjectsUpdated` / `DraftChanged` / `Error` / `Pong`。
+
+`DraftChanged` は下書きの作成・更新・削除を通知する。本文は含めず、
+`revision` が手元より新しい場合にクライアントが `GET /api/v1/drafts/:id` で
+再取得する。編集中（未保存の変更あり）の端末は再取得を保留し、自身の保存が
+競合したときに複製として解決する。
+
 - モバイルでページがバックグラウンドへ移動すると、ブラウザはタイマーを凍結し、
   `WebSocket` を `OPEN` のまま残したまま経路だけを失うことがある。UI は
   `visibilitychange`（visible）/ `online` / `pageshow`（bfcache 復元）で

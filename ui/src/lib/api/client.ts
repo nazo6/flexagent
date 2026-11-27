@@ -553,6 +553,11 @@ export class ApiClient {
     return this.#request("POST", "/api/v1/drafts", { body: request });
   }
 
+  /** `GET /api/v1/drafts/:id` */
+  draft(draftId: string): Promise<Draft> {
+    return this.#request("GET", `/api/v1/drafts/${encodeURIComponent(draftId)}`);
+  }
+
   /** `PATCH /api/v1/drafts/:id` (optimistic lock via `expected_revision`) */
   updateDraft(draftId: string, request: UpdateDraftRequest): Promise<Draft> {
     return this.#request("PATCH", `/api/v1/drafts/${encodeURIComponent(draftId)}`, {

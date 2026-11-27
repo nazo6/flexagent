@@ -205,18 +205,19 @@ pub async fn update_draft(
 
 /// Soft-deletes a draft (idempotent).
 ///
-/// Returns `true` when an active row was tombstoned.
-pub async fn delete_draft(pool: &SqlitePool, draft_id: &str) -> Result<bool, DbError> {
-    let result = sqlx::query!(
+/// Returns the new revision when an active row was tombstoned.
+pub async fn delete_draft(pool: &SqlitePool, draft_id: &str) -> Result<Option<u64>, DbError> {
+    let revision = sqlx::query_scalar!(
         r#"
         UPDATE drafts
            SET deleted_at = ?, revision = revision + 1
          WHERE draft_id = ? AND deleted_at IS NULL
+        RETURNING revision
         "#,
         now_ms(),
         draft_id,
     )
-    .execute(pool)
+    .fetch_optional(pool)
     .await?;
-    Ok(result.rows_affected() > 0)
+    revision.map(revision_u64).transpose()
 }

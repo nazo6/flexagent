@@ -2111,7 +2111,20 @@ error: ErrorInfo } |
 /**  Response to `Ping` */
 { op: "pong" } |
 /**  Project list or node bindings changed (triggers a `GET /api/v1/projects` refresh). */
-{ op: "projects_updated" };
+{ op: "projects_updated" } |
+/**
+ *  A draft was created, updated, or deleted in the connected store.
+ *
+ *  Clients refresh the draft when `revision` is newer than their copy. The
+ *  body itself is not carried, so long prompts do not travel over the WS.
+ */
+{ op: "draft_changed";
+/**  Draft ID */
+draft_id: DraftId;
+/**  Revision after the change */
+revision: number;
+/**  Whether the draft was deleted (tombstone) */
+deleted: boolean };
 
 /**
  *  `POST /api/v1/sessions/:id/archive` request.
